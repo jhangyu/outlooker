@@ -1,1 +1,45 @@
-{}
+{
+  "title": "進階 SQL",
+  "saved": "已儲存的查詢",
+  "savedEmpty": "尚未儲存任何查詢。",
+  "new": "新查詢",
+  "schema": "結構描述",
+  "run": "執行",
+  "cancel": "取消",
+  "save": {
+    "action": "儲存",
+    "title": "儲存查詢",
+    "name": "名稱",
+    "duplicate": "已有同名的查詢。",
+    "done": "已儲存「{{name}}」。"
+  },
+  "delete": {
+    "action": "刪除",
+    "title": "要刪除「{{name}}」嗎？",
+    "body": "只會刪除這個已儲存的查詢，郵件不受影響。",
+    "confirm": "刪除"
+  },
+  "readOnly": "唯讀",
+  "editor": "SQL 編輯器",
+  "status": {
+    "ok": "{{rows}} 列 · {{ms}} 毫秒",
+    "running": "執行中…",
+    "idle": "唯讀連線。按 Ctrl+Enter 或 ⌘+Enter 執行。"
+  },
+  "mode": { "mailList": "郵件清單", "table": "結果表格", "command": "指令" },
+  "result": {
+    "rows": "{{n}} 列",
+    "missing": "{{n}} 個 id 找不到郵件",
+    "truncated": "僅顯示前 {{n}} 列",
+    "command": "陳述式已完成：{{tag}}",
+    "null": "NULL"
+  },
+  "detail": { "title": "列詳細資料", "row": "第 {{n}} 列", "pick": "選擇一列以查看所有欄位。" },
+  "error": { "position": "位於第 {{position}} 個字元" },
+  "empty": {
+    "noRunTitle": "執行查詢",
+    "noRunBody": "針對結構描述中的檢視撰寫 SELECT 並按執行。含 id 欄位的結果會以郵件開啟。",
+    "noMailTitle": "還沒有可查詢的郵件",
+    "noMailBody": "請先匯入 PST 檔。"
+  }
+}

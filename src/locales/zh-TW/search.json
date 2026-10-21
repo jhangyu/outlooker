@@ -1,1 +1,67 @@
-{}
+{
+  "title": "搜尋",
+  "box": { "placeholder": "搜尋寄件者、收件者、主旨或內文", "label": "搜尋郵件" },
+  "dsl": {
+    "toggle": "條件",
+    "summary": "已套用 {{n}} 個條件",
+    "between": "群組之間",
+    "and": "AND",
+    "or": "OR",
+    "addGroup": "新增群組",
+    "addCond": "新增條件",
+    "clear": "全部清除",
+    "group": "群組 {{n}}",
+    "match": "符合",
+    "remove": "移除",
+    "fieldLabel": "欄位",
+    "value": "值",
+    "fromDay": "起",
+    "toDay": "迄（含當日）",
+    "pickFolder": "選擇資料夾",
+    "pickPst": "選擇 PST 檔",
+    "includeSubfolders": "包含子資料夾",
+    "yes": "是",
+    "no": "否",
+    "op": { "contains": "包含", "between": "介於", "is": "是", "in": "屬於" },
+    "field": {
+      "sender": "寄件者", "recipient": "收件者", "subject": "主旨", "body": "內文",
+      "dateRange": "寄件日期", "folder": "資料夾", "hasAttachment": "有附件", "sourcePst": "來源 PST"
+    },
+    "kinds": { "to": "收件", "cc": "副本", "bcc": "密件副本" }
+  },
+  "shortQueryHint": "少於 3 個字元的詞不會使用索引，搜尋較慢",
+  "resultCap": "僅顯示前 100,000 筆結果，請縮小搜尋範圍",
+  "count": "{{n}} 封郵件",
+  "countCapped": "{{n}}+ 封郵件",
+  "problem": {
+    "tooManyTerms": "搜尋詞最多 10 個。",
+    "tooManyConditions": "搜尋條件超過 50 個，請移除部分詞或條件。"
+  },
+  "newMail": "已匯入新郵件。",
+  "refresh": "重新整理",
+  "results": "結果",
+  "refine": "篩選",
+  "allMail": "所有郵件",
+  "sources": "PST 檔",
+  "folders": "資料夾",
+  "quick": "快速篩選",
+  "hasAttachment": "有附件",
+  "last90Days": "最近 90 天",
+  "empty": { "title": "還沒有可搜尋的郵件", "body": "匯入 PST 檔後即可開始搜尋。" },
+  "idle": { "title": "搜尋您的郵件", "body": "輸入字詞、姓名或地址，或新增條件。" },
+  "zero": { "title": "沒有符合的郵件", "body": "試著減少字詞或移除條件。", "clear": "清除搜尋與條件" },
+  "list": { "undated": "無日期", "label": "搜尋結果" },
+  "preview": {
+    "pickTitle": "請選擇一封郵件",
+    "pickBody": "郵件內容會顯示在這裡。",
+    "noSubject": "（無主旨）",
+    "to": "收件者",
+    "cc": "副本",
+    "bcc": "密件副本",
+    "foundIn": "出現於",
+    "attachments": "附件",
+    "downloadLater": "目前尚無法下載附件",
+    "download": "下載 {{name}}",
+    "date": "寄件時間"
+  }
+}

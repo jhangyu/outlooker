@@ -1,1 +1,67 @@
-{}
+{
+  "title": "Search",
+  "box": { "placeholder": "Search sender, recipients, subject or body", "label": "Search mail" },
+  "dsl": {
+    "toggle": "Conditions",
+    "summary": "{{n}} conditions active",
+    "between": "Between groups",
+    "and": "AND",
+    "or": "OR",
+    "addGroup": "Add group",
+    "addCond": "Add condition",
+    "clear": "Clear all",
+    "group": "Group {{n}}",
+    "match": "Match",
+    "remove": "Remove",
+    "fieldLabel": "Field",
+    "value": "Value",
+    "fromDay": "From",
+    "toDay": "To (inclusive)",
+    "pickFolder": "Choose a folder",
+    "pickPst": "Choose PST files",
+    "includeSubfolders": "Include subfolders",
+    "yes": "Yes",
+    "no": "No",
+    "op": { "contains": "contains", "between": "between", "is": "is", "in": "in" },
+    "field": {
+      "sender": "Sender", "recipient": "Recipient", "subject": "Subject", "body": "Body",
+      "dateRange": "Sent date", "folder": "Folder", "hasAttachment": "Has attachment", "sourcePst": "Source PST"
+    },
+    "kinds": { "to": "To", "cc": "Cc", "bcc": "Bcc" }
+  },
+  "shortQueryHint": "Terms shorter than 3 characters are not indexed and search slowly",
+  "resultCap": "Showing the first 100,000 results — refine the search",
+  "count": "{{n}} messages",
+  "countCapped": "{{n}}+ messages",
+  "problem": {
+    "tooManyTerms": "Use at most 10 search words.",
+    "tooManyConditions": "The search has more than 50 conditions. Remove some words or conditions."
+  },
+  "newMail": "New mail was imported.",
+  "refresh": "Refresh",
+  "results": "Results",
+  "refine": "Refine",
+  "allMail": "All mail",
+  "sources": "PST files",
+  "folders": "Folders",
+  "quick": "Quick filters",
+  "hasAttachment": "Has attachment",
+  "last90Days": "Last 90 days",
+  "empty": { "title": "No mail to search yet", "body": "Import a PST file to start searching." },
+  "idle": { "title": "Search your mail", "body": "Type a word, a name or an address, or add conditions." },
+  "zero": { "title": "No messages match", "body": "Try fewer words or remove a condition.", "clear": "Clear search and conditions" },
+  "list": { "undated": "No date", "label": "Search results" },
+  "preview": {
+    "pickTitle": "Select a message",
+    "pickBody": "Its content shows here.",
+    "noSubject": "(no subject)",
+    "to": "To",
+    "cc": "Cc",
+    "bcc": "Bcc",
+    "foundIn": "Found in",
+    "attachments": "Attachments",
+    "downloadLater": "Downloading attachments is not available yet",
+    "download": "Download {{name}}",
+    "date": "Sent"
+  }
+}

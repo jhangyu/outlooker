@@ -1,1 +1,45 @@
-{}
+{
+  "title": "Advanced SQL",
+  "saved": "Saved queries",
+  "savedEmpty": "No saved queries yet.",
+  "new": "New query",
+  "schema": "Schema",
+  "run": "Run",
+  "cancel": "Cancel",
+  "save": {
+    "action": "Save",
+    "title": "Save query",
+    "name": "Name",
+    "duplicate": "A saved query with this name already exists.",
+    "done": "Saved “{{name}}”."
+  },
+  "delete": {
+    "action": "Delete",
+    "title": "Delete “{{name}}”?",
+    "body": "Only the saved query is deleted. Your mail is not changed.",
+    "confirm": "Delete"
+  },
+  "readOnly": "Read-only",
+  "editor": "SQL editor",
+  "status": {
+    "ok": "{{rows}} rows · {{ms}} ms",
+    "running": "Running…",
+    "idle": "Read-only connection. Press Ctrl+Enter or ⌘+Enter to run."
+  },
+  "mode": { "mailList": "Mail list", "table": "Result table", "command": "Command" },
+  "result": {
+    "rows": "{{n}} rows",
+    "missing": "{{n}} ids matched no message",
+    "truncated": "Showing the first {{n}} rows",
+    "command": "Statement completed: {{tag}}",
+    "null": "NULL"
+  },
+  "detail": { "title": "Row detail", "row": "Row {{n}}", "pick": "Select a row to see all its columns." },
+  "error": { "position": "at character {{position}}" },
+  "empty": {
+    "noRunTitle": "Run a query",
+    "noRunBody": "Write a SELECT over the views in Schema and press Run. Results with an id column open as mail.",
+    "noMailTitle": "No mail to query yet",
+    "noMailBody": "Import a PST file first."
+  }
+}
