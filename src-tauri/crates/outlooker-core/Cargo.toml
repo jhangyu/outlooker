@@ -1,0 +1,36 @@
+[package]
+name = "outlooker-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pff = { path = "../pff" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+thiserror = "=2.0.21"
+log = "=0.4.34"
+ts-rs = "=12.0.1"
+tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros", "process", "sync", "time", "fs", "net", "io-util"] }
+tokio-postgres = "=0.7.18"
+deadpool-postgres = "=0.14.2"
+refinery = { version = "=0.10.0", features = ["tokio-postgres"] }
+ammonia = "=4.2.4"
+html2text = "=0.17.4"
+encoding_rs = "=0.8.42"
+chardetng = "=1.0.0"
+image = "=0.25.10"
+webp = "=0.3.1"
+rayon = "=1.12.0"
+blake3 = "=1.8.7"
+getrandom = "=0.4.3"
+sysinfo = "=0.39.6"
+base64 = "=0.23.1"
+tempfile = { version = "=3.27.0", optional = true }
+
+[dev-dependencies]
+jsonschema = { version = "=0.59.0", default-features = false }
+tempfile = "=3.27.0"
+
+[features]
+test-support = ["dep:tempfile"]
+outlook-fixtures = ["test-support"]

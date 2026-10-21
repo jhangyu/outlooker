@@ -1,0 +1,35 @@
+[workspace]
+members = [".", "crates/pff", "crates/outlooker-core", "crates/outlooker-loadgen"]
+resolver = "3"
+
+[package]
+name = "outlooker"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+
+[lib]
+name = "outlooker_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.5", features = [] }
+tauri-plugin-dialog = "=2.8.3"
+tauri-plugin-log = "=2.10.1"
+tauri-plugin-single-instance = "=2.5.4"
+tauri-plugin-wdio-webdriver = { version = "=1.5.0", optional = true }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+log = "=0.4.34"
+tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
+outlooker-core = { path = "crates/outlooker-core" }
+
+[features]
+e2e = ["dep:tauri-plugin-wdio-webdriver"]
+
+# Dependencies optimized in dev/test builds: loadgen and unit tests 30.7 s -> 3.7 s, keeps gates under the foreground timeout.
+[profile.dev.package."*"]
+opt-level = 3

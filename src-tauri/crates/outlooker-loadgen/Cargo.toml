@@ -1,0 +1,9 @@
+[package]
+name = "outlooker-loadgen"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+outlooker-core = { path = "../outlooker-core", features = ["test-support"] }
+tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros"] }
