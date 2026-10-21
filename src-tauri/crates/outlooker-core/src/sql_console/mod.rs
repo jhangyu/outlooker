@@ -127,8 +127,11 @@ impl SqlConsole {
             r.token = Some(client.cancel_token());
         }
         let outcome = self.run(&client, &req.sql, max_rows, &cancelled).await;
-        let _ = client.batch_execute("ROLLBACK").await;
-        let _ = client.batch_execute("DISCARD ALL").await;
+        // A connection that fails to reset must not return to the pool with leftover session state:
+        // detach it (dropping the wrapper closes the connection) so the pool opens a fresh one.
+        if client.batch_execute("ROLLBACK").await.is_err() || client.batch_execute("DISCARD ALL").await.is_err() {
+            drop(deadpool_postgres::Object::take(client));
+        }
         let mut result = outcome?;
         if cancelled.load(Ordering::SeqCst) {
             // cancel arrived while no statement was executing on the server

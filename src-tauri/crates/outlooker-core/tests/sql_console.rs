@@ -208,3 +208,23 @@ async fn saved_queries_crud() {
     assert_eq!(sc.saved_update(a.id, input("zeta", "SELECT 1")).await, Err(AppError::not_found("savedQuery", a.id)));
     assert_eq!(sc.saved_list().await.unwrap().len(), 2);
 }
+
+#[tokio::test]
+async fn killed_backend_is_replaced_by_a_fresh_connection() {
+    let tc = TestCluster::start().await;
+    let sc = SqlConsole::new(tc.db.clone());
+    let runner = sc.clone();
+    let mut task = tokio::spawn(async move { runner.execute(req("k1", "SELECT pg_sleep(10)", None)).await });
+    tokio::select! {
+        _ = sc.wait_statement_started() => {}
+        r = &mut task => panic!("execute ended before its statement started: {r:?}"),
+    }
+    // the reset (ROLLBACK / DISCARD ALL) of a terminated backend fails: that connection must be discarded
+    tc.admin()
+        .await
+        .batch_execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'outlooker_ro' AND pid <> pg_backend_pid()")
+        .await
+        .unwrap();
+    assert!(task.await.unwrap().is_err());
+    assert!(matches!(sc.execute(req("k2", "SELECT 1 AS x", None)).await, Ok(SqlResult::Table { .. })));
+}
