@@ -1,1 +1,27 @@
-{}
+{
+  "title": "設定",
+  "section": { "storage": "資料儲存位置", "language": "語言", "content": "郵件內容與圖片", "db": "資料庫狀態", "index": "索引維護" },
+  "storage": { "folder": "資料夾", "change": "變更…", "help": "變更位置時會先停止資料庫、搬移資料，再重新啟動。搬移期間無法搜尋。" },
+  "language": { "help": "立即套用，不需重新啟動。" },
+  "webp": { "label": "內嵌圖片 WebP 品質", "apply": "套用", "invalid": "請輸入 1 到 100 的整數。", "help": "只影響之後的匯入。", "saved": "已儲存 WebP 品質。", "smaller": "檔案較小", "sharper": "畫質較佳" },
+  "db": {
+    "status": "狀態", "engine": "引擎", "engineValue": "PostgreSQL {{version}}", "messages": "郵件", "psts": "PST 檔案",
+    "images": "內嵌圖片", "attachments": "附件", "size": "資料庫大小", "lastVacuum": "上次 VACUUM", "lastAnalyze": "上次 ANALYZE",
+    "never": "從未", "emptyTitle": "尚未匯入任何郵件", "emptyBody": "第一次匯入後就會顯示統計數字。",
+    "unavailable": "資料庫未執行時無法取得狀態。"
+  },
+  "index": {
+    "name": "索引", "table": "資料表", "size": "大小", "state": "狀態", "healthy": "良好", "rebuild": "建議重建",
+    "analyze": "更新統計資料 (ANALYZE)", "vacuum": "清理空間 (VACUUM)", "reindex": "重建所有索引",
+    "help": "重建期間搜尋會變慢，但仍可使用。"
+  },
+  "maintenance": { "running": "正在執行 {{task}}…", "started": "已開始 {{task}}。", "task": { "analyze": "ANALYZE", "vacuum": "VACUUM", "reindex": "REINDEX" } },
+  "move": {
+    "title": "搬移資料夾",
+    "body": "要把所有郵件資料搬到 {{target}} 嗎？搬移期間資料庫會停止。",
+    "confirm": "搬移",
+    "progress": "{{copied}} / {{total}}",
+    "done": "資料夾已搬移。",
+    "phase": { "stoppingDb": "正在停止資料庫…", "copying": "正在複製資料…", "verifying": "正在驗證複本…", "startingDb": "正在啟動資料庫…", "done": "完成", "failed": "搬移失敗，資料仍在原本的資料夾。" }
+  }
+}

@@ -1,1 +1,28 @@
-{}
+{
+  "title": "歡迎使用 Outlooker",
+  "note": "所有資料只存在這台電腦上，不需要帳號，也不會上傳。",
+  "step": { "language": "選擇語言", "location": "資料儲存位置", "database": "準備資料庫", "import": "匯入第一個 PST" },
+  "language": { "heading": "先選擇介面語言", "body": "之後可以隨時在「設定」中變更。", "zhHint": "繁體中文（台灣）", "enHint": "英文" },
+  "location": {
+    "heading": "要把郵件資料存在哪裡？",
+    "body": "匯入後的郵件、索引與圖片大約是原始 PST 的 60–80%。建議選擇剩餘空間足夠的磁碟。",
+    "default": "預設位置",
+    "defaultHint": "使用者資料夾，適合大多數人",
+    "other": "其他位置…",
+    "otherHint": "例如外接或容量較大的磁碟"
+  },
+  "database": { "heading": "正在準備本機資料庫", "body": "只需要進行一次，大約 20 秒。", "create": "建立資料庫叢集", "start": "啟動資料庫服務", "ready": "資料庫已就緒。" },
+  "import": { "heading": "匯入你的第一個 PST", "body": "匯入在背景進行，進行中也可以搜尋已匯入的郵件。", "pick": "選擇 PST 檔案…", "later": "稍後再匯入" },
+  "nav": { "back": "上一步", "next": "下一步" },
+  "feature": {
+    "title": "Outlooker 能做什麼",
+    "search": "秒級搜尋百萬封郵件",
+    "searchBody": "依寄件者、收件者或內文片段搜尋，中文與英文都能部分比對。",
+    "dedupe": "重複郵件只存一次",
+    "dedupeBody": "同一封郵件出現在多個 PST 中只存一次，並記錄每個來源。",
+    "render": "郵件原貌呈現",
+    "renderBody": "HTML 經過清理，內嵌圖片以 WebP 保存。",
+    "local": "完全在本機",
+    "localBody": "資料庫隨程式啟動與關閉，不需要帳號，也不連線網路。"
+  }
+}

@@ -1,0 +1,122 @@
+import { FluentProvider, Toaster, webLightTheme } from "@fluentui/react-components";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, type RenderResult } from "@testing-library/react";
+import type { i18n } from "i18next";
+import type { ReactElement } from "react";
+import { I18nextProvider } from "react-i18next";
+import { vi, type Mock } from "vitest";
+import { api } from "../api/commands";
+import type { AppStatus } from "../api/bindings/AppStatus";
+import type { DbStatus } from "../api/bindings/DbStatus";
+import type { PstSource } from "../api/bindings/PstSource";
+import { AppStatusProvider, type ScreenId } from "./AppStatusContext";
+import { createI18n } from "./i18n";
+
+export function makeStatus(p: Partial<AppStatus> = {}): AppStatus {
+  return { phase: "ready", dataDir: "/data", language: "en", counts: { messages: 0, psts: 0 }, error: null, ...p };
+}
+
+export function makeDbStatus(p: Partial<DbStatus> = {}): DbStatus {
+  return {
+    phase: "ready",
+    postgresVersion: "18.6",
+    dataDir: "/data",
+    databaseSizeBytes: 50_331_648,
+    counts: { messages: 0, psts: 0 },
+    imageCount: 0,
+    attachmentCount: 0,
+    indexes: [],
+    lastVacuumAt: null,
+    lastAnalyzeAt: null,
+    maintenance: null,
+    ...p,
+  };
+}
+
+export function makePst(p: Partial<PstSource> = {}): PstSource {
+  return {
+    id: 1,
+    path: "/mail/archive.pst",
+    displayName: "archive",
+    fileSizeBytes: 1_048_576,
+    status: "completed",
+    progress: null,
+    messageCount: 120,
+    newMessageCount: 100,
+    errorCount: 0,
+    queuedAt: "2026-10-01T08:00:00Z",
+    finishedAt: "2026-10-01T08:10:00Z",
+    ...p,
+  };
+}
+
+type Handler = (payload: unknown) => void;
+const handlers = new Map<string, Set<Handler>>();
+
+/** Replacement module for src/api/events in tests: vi.mock("<rel>/api/events", async () => (await import("<rel>/app/testing")).eventsMock). */
+export const eventsMock = {
+  onEvent: vi.fn(async (name: string, handler: Handler) => {
+    const set = handlers.get(name) ?? new Set<Handler>();
+    set.add(handler);
+    handlers.set(name, set);
+    return () => set.delete(handler);
+  }),
+  emit(name: string, payload: unknown) {
+    handlers.get(name)?.forEach((h) => h(payload));
+  },
+  reset() {
+    handlers.clear();
+    eventsMock.onEvent.mockClear();
+  },
+};
+
+/** Call after vi.mock("<rel>/api/commands"): every command resolves with an empty or default value. */
+export function mockApiDefaults(): void {
+  const m = vi.mocked(api);
+  m.appStatus.mockResolvedValue(makeStatus());
+  m.appInitialize.mockResolvedValue(null);
+  m.appRetry.mockResolvedValue(null);
+  m.searchMail.mockResolvedValue({ rows: [], nextCursor: null, shortQuery: false, elapsedMs: 1 });
+  m.searchCount.mockResolvedValue({ count: 0, capped: false });
+  m.filterOptions.mockResolvedValue({ psts: [], folders: [] });
+  m.mailGet.mockRejectedValue({ kind: "notFound", entity: "mail", id: "0" });
+  m.savedQueryList.mockResolvedValue([]);
+  m.savedQueryCreate.mockResolvedValue({ id: 1, name: "q", sql: "SELECT 1", updatedAt: "2026-10-01T00:00:00Z" });
+  m.savedQueryUpdate.mockResolvedValue({ id: 1, name: "q", sql: "SELECT 1", updatedAt: "2026-10-01T00:00:00Z" });
+  m.savedQueryDelete.mockResolvedValue(null);
+  m.sqlExecute.mockResolvedValue({ mode: "command", tag: "SELECT 0", elapsedMs: 1 });
+  m.sqlCancel.mockResolvedValue(null);
+  m.pstList.mockResolvedValue([]);
+  m.importEnqueue.mockResolvedValue([]);
+  m.importCancel.mockResolvedValue(null);
+  m.importResume.mockResolvedValue(null);
+  m.pstRemove.mockResolvedValue(null);
+  m.importErrors.mockResolvedValue({ rows: [], nextCursor: null });
+  m.settingsGet.mockResolvedValue({ language: "en", webpQuality: 80, dataDir: "/data" });
+  m.settingsUpdate.mockResolvedValue({ language: "en", webpQuality: 80, dataDir: "/data" });
+  m.dataDirMove.mockResolvedValue(null);
+  m.maintenanceRun.mockResolvedValue(null);
+  m.dbStatus.mockResolvedValue(makeDbStatus());
+}
+
+export function renderWithProviders(
+  ui: ReactElement,
+  opts: { lng?: "en" | "zh-TW" | "cimode"; status?: Partial<AppStatus>; screen?: ScreenId } = {},
+): RenderResult & { queryClient: QueryClient; go: Mock; i18n: i18n } {
+  const instance = createI18n(opts.lng ?? "en");
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const go = vi.fn();
+  const result = render(
+    <FluentProvider theme={webLightTheme}>
+      <I18nextProvider i18n={instance}>
+        <QueryClientProvider client={queryClient}>
+          <AppStatusProvider initial={makeStatus(opts.status)} initialScreen={opts.screen} onGo={go}>
+            {ui}
+            <Toaster toasterId="app" />
+          </AppStatusProvider>
+        </QueryClientProvider>
+      </I18nextProvider>
+    </FluentProvider>,
+  );
+  return { ...result, queryClient, go, i18n: instance };
+}

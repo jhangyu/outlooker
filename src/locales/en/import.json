@@ -1,1 +1,31 @@
-{}
+{
+  "title": "Import",
+  "add": "Add PST files…",
+  "stats": { "messages": "Messages", "psts": "PST files", "size": "Database size", "unknown": "—" },
+  "imported": { "title": "Imported PST files", "name": "File", "size": "Size", "messages": "Messages", "new": "New", "date": "Imported", "status": "Status", "remove": "Remove {{name}}" },
+  "queue": {
+    "title": "Import queue",
+    "progress": "{{done}} / {{total}} · {{percent}}%",
+    "rate": "{{rate}}/s",
+    "eta": "About {{minutes}} min left",
+    "errors": "{{n}} errors",
+    "cancel": "Cancel",
+    "resume": "Resume",
+    "retry": "Retry from checkpoint",
+    "remove": "Remove",
+    "empty": "The queue is empty",
+    "emptyBody": "Added PST files show their progress here."
+  },
+  "status": { "queued": "Queued", "running": "Importing", "cancelling": "Cancelling", "cancelled": "Cancelled", "failed": "Failed", "completed": "Completed", "removing": "Removing" },
+  "phase": { "scanning": "Scanning folders", "importing": "Importing mail", "finalizing": "Building search indexes" },
+  "log": { "title": "Error log", "pick": "Select a PST file to see its log.", "none": "No errors or warnings for this PST file.", "more": "Load more", "item": "Item {{id}}" },
+  "stage": { "open": "Open", "scan": "Scan", "parse": "Parse", "html": "Content", "image": "Image", "store": "Store" },
+  "empty": { "title": "No PST imported yet", "body": "Choose “Add PST files” to import Outlook PST files. Large files work: the import runs in the background." },
+  "remove": {
+    "title": "Remove “{{name}}”?",
+    "body": "This PST file brought {{n}} messages. Messages that exist only in this PST file are deleted. Messages also found in other PST files are kept. The PST file itself is not changed.",
+    "confirm": "Remove",
+    "done": "Removing {{name}}"
+  },
+  "enqueue": { "rejected": "{{path}}: {{reason}}" }
+}

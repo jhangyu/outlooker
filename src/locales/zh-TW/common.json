@@ -1,1 +1,41 @@
-{}
+{
+  "app": { "name": "Outlooker", "loading": "正在啟動 Outlooker…" },
+  "nav": { "main": "主要導覽", "search": "搜尋", "advancedSql": "進階 SQL", "import": "匯入", "settings": "設定" },
+  "language": { "label": "語言", "zh-TW": "繁體中文", "en": "English" },
+  "titlebar": { "importing": "匯入中 {{percent}}%", "scanning": "正在掃描 PST…" },
+  "phase": {
+    "needsSetup": "需要設定",
+    "initializingCluster": "正在建立資料庫…",
+    "startingDb": "正在啟動資料庫…",
+    "ready": "執行中",
+    "stoppingDb": "正在停止資料庫…",
+    "failed": "失敗",
+    "hint": "資料庫就緒後即可再次搜尋。"
+  },
+  "failed": {
+    "title": "Outlooker 無法啟動資料庫",
+    "body": "郵件資料沒有被修改。請再試一次；若持續失敗，請展開詳細資料。",
+    "details": "詳細資料",
+    "retry": "重試"
+  },
+  "error": {
+    "dbNotReady": "資料庫尚未就緒。",
+    "notFound": "此項目已不存在。",
+    "invalidInput": "{{field}} 的值無效。",
+    "queryTimeout": "查詢超過 {{seconds}} 秒，已停止。",
+    "cancelled": "作業已取消。",
+    "readOnlyViolation": "這是唯讀連線，無法修改資料。",
+    "busy": {
+      "importRunning": "匯入正在進行，請在完成後再試。",
+      "maintenanceRunning": "資料庫維護正在進行，請在完成後再試。",
+      "dataDirMoving": "資料夾正在搬移中。",
+      "pstRemoving": "正在移除 PST 檔案。"
+    },
+    "fileAccess": "無法存取 {{path}}。",
+    "insufficientSpace": "{{path}} 的磁碟可用空間不足。",
+    "notAPst": "{{path}} 不是 Outlook PST 檔案。",
+    "alreadyImported": "這個 PST 檔案已經匯入。",
+    "internal": "發生錯誤，詳細內容在應用程式紀錄中。"
+  },
+  "action": { "cancel": "取消", "close": "關閉", "goImport": "前往匯入" }
+}

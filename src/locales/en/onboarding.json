@@ -1,1 +1,28 @@
-{}
+{
+  "title": "Welcome to Outlooker",
+  "note": "All data stays on this computer. No account, no upload.",
+  "step": { "language": "Choose language", "location": "Data location", "database": "Prepare database", "import": "Import first PST" },
+  "language": { "heading": "Pick your interface language", "body": "You can change this later in Settings.", "zhHint": "Traditional Chinese (Taiwan)", "enHint": "English" },
+  "location": {
+    "heading": "Where should mail data be stored?",
+    "body": "Imported mail, indexes and images take about 60–80% of the original PST size. Pick a disk with enough free space.",
+    "default": "Default location",
+    "defaultHint": "Your user folder — right for most people",
+    "other": "Another location…",
+    "otherHint": "For example an external or larger drive"
+  },
+  "database": { "heading": "Preparing the local database", "body": "This happens once and takes about 20 seconds.", "create": "Create database cluster", "start": "Start database service", "ready": "The database is ready." },
+  "import": { "heading": "Import your first PST", "body": "Import runs in the background. You can search what is already imported while it runs.", "pick": "Choose PST files…", "later": "Import later" },
+  "nav": { "back": "Back", "next": "Next" },
+  "feature": {
+    "title": "What Outlooker does",
+    "search": "Search a million messages in seconds",
+    "searchBody": "Find mail by sender, recipient or a fragment of the body, in Chinese and English.",
+    "dedupe": "Duplicates are stored once",
+    "dedupeBody": "A message found in several PST files is stored once, with every place it came from.",
+    "render": "Mail looks like the original",
+    "renderBody": "HTML is cleaned, and inline images are kept as WebP.",
+    "local": "Fully local",
+    "localBody": "The database starts and stops with the app. No account and no network."
+  }
+}

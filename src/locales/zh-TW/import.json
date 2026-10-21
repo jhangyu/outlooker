@@ -1,1 +1,31 @@
-{}
+{
+  "title": "匯入管理",
+  "add": "加入 PST 檔案…",
+  "stats": { "messages": "郵件", "psts": "PST 檔案", "size": "資料庫大小", "unknown": "—" },
+  "imported": { "title": "已匯入的 PST", "name": "檔案", "size": "大小", "messages": "郵件", "new": "新增", "date": "匯入時間", "status": "狀態", "remove": "移除 {{name}}" },
+  "queue": {
+    "title": "匯入佇列",
+    "progress": "{{done}} / {{total}} · {{percent}}%",
+    "rate": "{{rate}}/秒",
+    "eta": "剩餘約 {{minutes}} 分鐘",
+    "errors": "{{n}} 個錯誤",
+    "cancel": "取消",
+    "resume": "繼續",
+    "retry": "從檢查點重試",
+    "remove": "移除",
+    "empty": "佇列是空的",
+    "emptyBody": "加入的 PST 會在這裡顯示進度。"
+  },
+  "status": { "queued": "等待中", "running": "匯入中", "cancelling": "取消中", "cancelled": "已取消", "failed": "失敗", "completed": "完成", "removing": "移除中" },
+  "phase": { "scanning": "掃描資料夾", "importing": "匯入郵件", "finalizing": "建立搜尋索引" },
+  "log": { "title": "錯誤紀錄", "pick": "選取 PST 檔案以檢視錯誤紀錄。", "none": "這個 PST 檔案沒有錯誤或警告。", "more": "載入更多", "item": "項目 {{id}}" },
+  "stage": { "open": "開啟", "scan": "掃描", "parse": "解析", "html": "內容", "image": "圖片", "store": "儲存" },
+  "empty": { "title": "尚未匯入任何 PST", "body": "按「加入 PST 檔案」匯入 Outlook PST 檔案。大型檔案也可以，匯入在背景進行。" },
+  "remove": {
+    "title": "移除「{{name}}」？",
+    "body": "這個 PST 檔案帶入了 {{n}} 封郵件。只存在於這個 PST 的郵件會被刪除；也存在於其他 PST 的郵件會保留。PST 檔案本身不會被修改。",
+    "confirm": "移除",
+    "done": "正在移除 {{name}}"
+  },
+  "enqueue": { "rejected": "{{path}}：{{reason}}" }
+}

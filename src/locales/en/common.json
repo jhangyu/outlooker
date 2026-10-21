@@ -1,1 +1,41 @@
-{}
+{
+  "app": { "name": "Outlooker", "loading": "Starting Outlooker…" },
+  "nav": { "main": "Main navigation", "search": "Search", "advancedSql": "SQL", "import": "Import", "settings": "Settings" },
+  "language": { "label": "Language", "zh-TW": "繁體中文", "en": "English" },
+  "titlebar": { "importing": "Importing {{percent}}%", "scanning": "Scanning PST…" },
+  "phase": {
+    "needsSetup": "Setup required",
+    "initializingCluster": "Creating the database…",
+    "startingDb": "Starting the database…",
+    "ready": "Running",
+    "stoppingDb": "Stopping the database…",
+    "failed": "Failed",
+    "hint": "Search is available again when the database is ready."
+  },
+  "failed": {
+    "title": "Outlooker could not start its database",
+    "body": "Your mail data was not changed. Try again. If it keeps failing, open the details.",
+    "details": "Details",
+    "retry": "Retry"
+  },
+  "error": {
+    "dbNotReady": "The database is not ready yet.",
+    "notFound": "The item no longer exists.",
+    "invalidInput": "The value of {{field}} is not valid.",
+    "queryTimeout": "The query ran longer than {{seconds}} seconds and was stopped.",
+    "cancelled": "The operation was cancelled.",
+    "readOnlyViolation": "This connection is read-only. Data cannot be changed here.",
+    "busy": {
+      "importRunning": "An import is running. Try again when it finishes.",
+      "maintenanceRunning": "Database maintenance is running. Try again when it finishes.",
+      "dataDirMoving": "The data folder is being moved.",
+      "pstRemoving": "A PST file is being removed."
+    },
+    "fileAccess": "Cannot access {{path}}.",
+    "insufficientSpace": "Not enough free disk space at {{path}}.",
+    "notAPst": "{{path}} is not an Outlook PST file.",
+    "alreadyImported": "This PST file is already imported.",
+    "internal": "Something went wrong. The app log has the details."
+  },
+  "action": { "cancel": "Cancel", "close": "Close", "goImport": "Go to Import" }
+}

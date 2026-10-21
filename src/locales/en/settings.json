@@ -1,1 +1,27 @@
-{}
+{
+  "title": "Settings",
+  "section": { "storage": "Data storage", "language": "Language", "content": "Mail content and images", "db": "Database status", "index": "Index maintenance" },
+  "storage": { "folder": "Folder", "change": "Change…", "help": "Changing the location stops the database, moves the data and restarts it. Search is unavailable while moving." },
+  "language": { "help": "Applies immediately. No restart needed." },
+  "webp": { "label": "Inline image WebP quality", "apply": "Apply", "invalid": "Enter a whole number from 1 to 100.", "help": "Affects future imports only.", "saved": "WebP quality saved.", "smaller": "Smaller files", "sharper": "Sharper images" },
+  "db": {
+    "status": "Status", "engine": "Engine", "engineValue": "PostgreSQL {{version}}", "messages": "Messages", "psts": "PST files",
+    "images": "Inline images", "attachments": "Attachments", "size": "Database size", "lastVacuum": "Last VACUUM", "lastAnalyze": "Last ANALYZE",
+    "never": "Never", "emptyTitle": "No mail imported yet", "emptyBody": "Counts fill in after the first import.",
+    "unavailable": "Database status is unavailable while the database is not running."
+  },
+  "index": {
+    "name": "Index", "table": "Table", "size": "Size", "state": "State", "healthy": "Healthy", "rebuild": "Rebuild advised",
+    "analyze": "Update statistics (ANALYZE)", "vacuum": "Reclaim space (VACUUM)", "reindex": "Rebuild all indexes",
+    "help": "Search is slower during a rebuild but stays available."
+  },
+  "maintenance": { "running": "Running {{task}}…", "started": "{{task}} started.", "task": { "analyze": "ANALYZE", "vacuum": "VACUUM", "reindex": "REINDEX" } },
+  "move": {
+    "title": "Move the data folder",
+    "body": "Move all mail data to {{target}}? The database stops during the move.",
+    "confirm": "Move",
+    "progress": "{{copied}} of {{total}}",
+    "done": "The data folder was moved.",
+    "phase": { "stoppingDb": "Stopping the database…", "copying": "Copying data…", "verifying": "Verifying the copy…", "startingDb": "Starting the database…", "done": "Done", "failed": "The move failed. The data stays in the old folder." }
+  }
+}
