@@ -247,6 +247,8 @@ sqlx (0.9.0) is rejected. Its compile-time query checking needs a live database 
 | | @testing-library/dom | 10.4.2 | npm | Peer of the above. |
 | | jsdom | 30.1.3 | npm | DOM environment for Vitest. |
 | E2E (real app) | webdriverio / @wdio/cli / @wdio/mocha-framework | 9.32.0 | npm | `@wdio/tauri-service` 1.5.0 declares the peer `webdriverio ^9.0.0`. Do not use webdriverio 10.1.0. |
+| | @wdio/local-runner | 9.32.0 | npm | **Required.** It is the default runner (`runner: 'local'`) and it is a separate package: `@wdio/cli` 9.32.0 does not depend on it (`npm view @wdio/cli@9.32.0 dependencies`). Its internal deps `@wdio/types` / `@wdio/runner` are 9.32.0, the same line as the CLI. |
+| | @wdio/spec-reporter | 9.32.0 | npm | Per-test pass/fail lines. The gates check test names, and without a reporter the CLI prints only the spec-file summary. Version aligned with `@wdio/cli` 9.32.0 (it depends on `@wdio/reporter` 9.32.0). `@wdio/tauri-service` 1.5.0 pulls `@wdio/spec-reporter` 9.31.2 transitively. Never rely on that nested copy: declare it directly. |
 | | @wdio/tauri-service | 1.5.0 | npm | `driverProvider: 'embedded'`. The Tauri docs ("WebDriver") state that this is how macOS is supported: plain `tauri-driver` (2.1.0) supports only Windows and Linux. |
 | | tauri-plugin-wdio-webdriver | 1.5.0 | crates.io | Embedded WebDriver server. Requires `tauri ^2.10.0`. Compiled only in an `e2e` cargo feature, never in release builds. |
 
