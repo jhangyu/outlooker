@@ -3,7 +3,8 @@
 // Usage: node scripts/fetch-postgres.mjs [--target <triple>] [--self-test]
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -44,13 +45,34 @@ function prune(dir) {
   }
 }
 
+// Archive files can be read-only; tauri-build copies resources keeping the mode, so a second build
+// could not overwrite its own copy. Make the whole tree owner-writable.
+export function makeWritable(dir) {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isSymbolicLink()) continue;
+    chmodSync(p, statSync(p).mode | 0o200);
+    if (e.isDirectory()) makeWritable(p);
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2);
   if (args.includes("--self-test")) {
     try {
       verify(Buffer.from("x"), "0".repeat(64));
     } catch {
-      console.log("self-test ok: wrong hash rejected");
+      const t = mkdtempSync(join(tmpdir(), "fetch-pg-selftest-"));
+      try {
+        mkdirSync(join(t, "d"));
+        writeFileSync(join(t, "d", "f"), "x");
+        chmodSync(join(t, "d", "f"), 0o444);
+        makeWritable(t);
+        if (!(statSync(join(t, "d", "f")).mode & 0o200)) throw new Error("self-test failed: read-only file not made writable");
+      } finally {
+        rmSync(t, { recursive: true, force: true });
+      }
+      console.log("self-test ok: wrong hash rejected, read-only files made writable");
       return;
     }
     throw new Error("self-test failed: wrong hash accepted");
@@ -61,6 +83,7 @@ async function main() {
   const expected = pinnedHash(triple);
   const stamp = join(DEST, ".sha256");
   if (existsSync(stamp) && readFileSync(stamp, "utf8").trim() === expected) {
+    makeWritable(DEST); // repairs trees fetched before the read-only fix
     console.log(`PostgreSQL ${VERSION} (${triple}) already present`);
     return;
   }
@@ -82,6 +105,7 @@ async function main() {
     const top = join(tmp, `postgresql-${VERSION}-${triple}`);
     if (!existsSync(join(top, "bin"))) throw new Error(`unexpected archive layout in ${asset}`);
     prune(top);
+    makeWritable(top);
     rmSync(DEST, { recursive: true, force: true });
     mkdirSync(dirname(DEST), { recursive: true });
     renameSync(top, DEST);
