@@ -5,7 +5,7 @@ Finding format: `- [blocker|should-fix|nit] file:line — finding — evidence`.
 
 ## R1-01 — IN REVIEW
 
-Commits reviewed: bc20348 (kickoff).
+Commits reviewed: bc20348 (kickoff), 70a8f42 (contract: DTOs, sink, gate, TS client, schema).
 
 Pass 1 (bc20348):
 - Ownership: all 108 paths are R1-01 rows or kickoff stubs of §1 / §5 (`git show --stat bc20348`). OK.
@@ -13,9 +13,18 @@ Pass 1 (bc20348):
 - Toolchain: `rustc --version` in src-tauri prints `rustc 1.99.1`; `mise exec -- node --version` prints `v24.22.1`; `engines.node` is `>=24.22 <25`. OK.
 - Forbidden deps: none in `Cargo.lock` (sqlx, bindgen, testcontainers, postgresql_embedded, tauri-specta, mail-parser: grep RC=1). npm `extract-zip` / `tar-stream` are transitive only (`npm ls`: @wdio/cli via @puppeteer/browsers, webdriverio via archiver), not used by the fetch script. OK.
 - No-dark grep over package.json, src, tauri.conf.json: RC=1. OK.
-- tauri.conf.json: identifier `us.jhangy.outlooker`, no `bundle.resources`, CSP `script-src 'self'`, `img-src 'self' data: mailimg: http://mailimg.localhost`, `frame-src 'self'` (spec Part 03 §5.6). Capabilities: `dialog:allow-open`, `log:default`. OK.
+- tauri.conf.json: identifier `us.jhangy.outlooker`, no `bundle.resources`, CSP `script-src 'self'`, `img-src 'self' data: mailimg: http://mailimg.localhost`, `frame-src 'self'` (spec Part 03 §5.6). Capabilities: `dialog:allow-open`, `log:default`. Single-instance plugin registered first (lib.rs:9). OK.
 - Findings:
-  - [blocker] package.json:31-46 — `@wdio/local-runner` and `@wdio/spec-reporter` (9.32.0; spec Part 01 §9 "Required" / "declare it directly") are missing; plan §2.1 item 2 requires every Part 01 §9 npm dependency pinned in the kickoff. Evidence: `grep -c 'local-runner\|spec-reporter' package.json` prints 0. Fix: `mise exec -- npm install --save-dev --save-exact @wdio/local-runner@9.32.0 @wdio/spec-reporter@9.32.0`, commit package.json and package-lock.json. Sent to team-lead.
+  - [blocker] package.json:31-46 — `@wdio/local-runner` and `@wdio/spec-reporter` (9.32.0; spec Part 01 §9 "Required" / "declare it directly") are missing; plan §2.1 item 2 requires every Part 01 §9 npm dependency pinned in the kickoff. Evidence: `grep -c 'local-runner\|spec-reporter' package.json` prints 0. Fix: `mise exec -- npm install --save-dev --save-exact @wdio/local-runner@9.32.0 @wdio/spec-reporter@9.32.0`, commit package.json and package-lock.json. Sent to team-lead; open.
+
+Pass 1 (70a8f42):
+- Ownership: `core/src/dto/*.rs`, `core/src/{sink.rs,gate/mod.rs}`, `src-tauri/schemas/condition-group.json`, `src/api/**`. All R1-01. OK.
+- C1: every type of Part 03 §1.2 and §4–§9 present with the spec fields and serde attributes (internally tagged `AppError` / `SearchQuery` / `ConditionNode` / `SqlResult` / `EnqueueResult`, camelCase fields, `Language` "zh-TW" / "en"); `SqlResult::Table.rows` is `Vec<Vec<Option<String>>>` as the foundation plan rule 4 states. `COMMANDS` = 24 names in Part 03 §3 order with `app_retry` third (commands.rs:2-10); `names::ALL` = 6 events.
+- C2 `EventSink` / `CoreEvent::{name,payload}` / `RecordingSink` / `NullSink` (sink.rs); C3 `Gate` single-slot with `busy_reason` mapping and `released()` via `Notify` (no polling) (gate/mod.rs); C4 `call` re-throws `AppError` and wraps other rejections as `internal`, 24 `api.*` wrappers, `EVENTS`, `onEvent`, `pickPstFiles` / `pickFolder` with the `VITE_E2E` bypass.
+- Leaf rule: `grep -rE "crate::(lifecycle|importer|search|sql_console|maintenance|settings|db|gate|paths|app)" src-tauri/crates/outlooker-core/src/dto` RC=1; no `From<…> for AppError` in `dto`.
+- Acceptance (my runs): `cargo test -p outlooker-core --locked --lib -- dto:: gate:: sink::` RC=0 (59 tests incl. `worked_example_matches_spec_json`, `worked_example_root_validates_against_schema`, `every_activity_blocks_every_activity`, `released_resolves_after_drop`, `recording_sink_keeps_order_and_names`); then `git diff --exit-code src/api/bindings` RC=0; `commands.json` 24 entries incl. `app_retry`, `events.json` 6 entries; `mise exec -- npx vitest run src/api` RC=0 (2 files, 6 tests); `npm run typecheck` RC=0 at 79fc2f3 (detached worktree); `cargo build --workspace --locked` RC=0.
+- Open (not blocking): src-tauri/src/lib.rs:8-18 has no `.invoke_handler(tauri::generate_handler![])` (foundation plan R1-01 Behavior: "empty command handler").
+- Open (ownership to confirm): 8ab36de edits `src/test/setup.ts` (R1-01 row of §5, ResizeObserver stub for Fluent MessageBar). Asked team-lead whether impl-r101 made it or it was routed.
 
 ## R1-02 — PASS
 
@@ -72,19 +81,30 @@ Pass 1:
 - Acceptance (my run): `cargo test -p outlooker-core --locked --lib importer::` RC=0, 25 tests ok incl. `fromhtml_golden`, `big5_and_gbk`, `hostile_corpus_is_clean`, `golden_plain`, `golden_inline`, `one_pixel_image_loses_src`, `known_hash_skips_encode`, `resize_to_2048`, `limits_rejected`, `key_table`, `invariants_over_goldens`.
 - Findings: none blocking; see parking lot.
 
-## R1-06 — IN REVIEW
+## R1-06 — PASS
 
-Commits reviewed: 11e381e (C10 shared contract, locales, test helpers).
+Commits reviewed: 11e381e (C10 shared contract, locales, test helpers), 26beebd (boot, app frame, failed / blocking screens), 60c5d1b (import screen, removal dialog), 32f5580 (settings, onboarding, global tests), f7399fb (global test fixes).
 
-Pass 1 (11e381e, partial task):
-- Ownership: `src/app/{AppStatusContext.tsx,i18n.ts,testing.tsx}`, `src/components/common/*`, `src/locales/{zh-TW,en}/{common,import,onboarding,settings}.json`. All R1-06. OK.
-- C10: `EmptyState` props (EmptyState.tsx:4-10), `formatAppError(err, t)` (formatAppError.ts:10), `useAppStatus()` (AppStatusContext.tsx:68) present with the §2.2 / frontend-plan shapes; `useLanguageSwitch` calls `changeLanguage` then `settingsUpdate({ language, webpQuality: null })` (hooks.tsx:23-36) as planned.
-- Locale parity (python key-set diff over the working tree): common 41/41, import 53/53, onboarding 36/36, settings 57/57 equal; no key containing pause / worker / re-encode / format / highlight / drag / drop.
-- Typecheck not judged yet: depends on R1-01 bindings and `src/api/call.ts` (`isAppError`), not yet on main. Full acceptance re-run at the final R1-06 commit.
+Pass 1:
+- Ownership: every path is under `src/app/**`, `src/components/common/**`, `src/screens/{onboarding,import,settings}/**` or `src/locales/{zh-TW,en}/{common,onboarding,import,settings}.json`. All R1-06. OK.
+- C10: `EmptyState` props (EmptyState.tsx:4-10), `formatAppError(err, t)` (formatAppError.ts:10), `useAppStatus()` (AppStatusContext.tsx:68), screen entry names exported. OK.
+- Theme: one `<FluentProvider theme={webLightTheme}>` (App.tsx:78); no dark token anywhere in `src` (global test + grep).
+- Out-of-scope controls: removal dialog shows only the PST's `messageCount` and the "kept if found in other PST files" sentence, no deleted / kept split (RemoveDialog.tsx:12, 39); no pause / worker / re-encode / drag-and-drop control or key (grep over `src/screens`, `src/components`, `src/app`).
+- i18n: no hard-coded JSX text or `title=` / `label=` / `placeholder=` / `aria-label=` literal in non-test `.tsx` (grep); locale key sets equal for all 6 namespaces.
+- Acceptance (my run in a detached worktree at 79fc2f3 with `node_modules` linked): `mise exec -- npm run typecheck` RC=0; `mise exec -- npx vitest run` RC=0, 16 files / 68 tests. Named tests present and passing: `boot subscribes to every event before calling app_status`, `library:changed with messages > 0 updates useAppStatus().counts.messages`, `Failed screen Retry calls appRetry`, `each screen renders its empty state`, `removal dialog shows messageCount and calls pstRemove only after confirm`, `WebP quality outside 1-100 is not sent`, locale parity, cimode no-literal, no-dark, no-out-of-scope-controls (global.test.tsx:53-128).
+- Findings: none blocking; see parking lot.
 
-## R1-07 — NOT STARTED
+## R1-07 — PASS
 
-Commits reviewed: none yet.
+Commits reviewed: ff548dd (search / sql locales, DSL builder, query composition, mail components, SQL editor), 25d984a (search and advanced SQL screens).
+
+Pass 1:
+- Ownership: every path is under `src/components/{mail,dsl,sql-editor}/**`, `src/screens/{search,advanced-sql}/**` or `src/locales/{zh-TW,en}/{search,sql}.json`. All R1-07. OK.
+- Security (Part 02 §7.1 layer 2, Part 03 §5.6): `MailPreview` is the only HTML sink: `<iframe sandbox="" srcDoc={html} referrerPolicy="no-referrer">` (MailPreview.tsx:14); no `dangerouslySetInnerHTML`, `innerHTML`, `eval`, `new Function` or `allow-` token in non-test `src` (grep).
+- Type rule: no `interface` / `type` named like a `src/api/bindings` type outside the bindings directory (loop over all 47 binding names).
+- Limits: `MAX_LIST_ROWS = 100_000` (pages.ts:12), `COUNT_CAP = 10_000` (search/index.tsx:19), `sqlExecute` with `maxRows: MAX_ROWS` = 10,000 and a `crypto.randomUUID()` execution id (advanced-sql/index.tsx:22, 137).
+- Acceptance (same run as R1-06): all R1-07 named tests present and passing — sandbox / no `allow-`, 600 pages × 200 rows stop at 100,000 with the cap row, `10,000+` / `9,999`, worked example deep-equals spec JSON, stale sequence dropped, `library:changed` refetches `filterOptions` without a list reload, `maxRows: 10000`, truncated MessageBar, MailList vs table mode, column-4 key/value list, Run disabled while executing; the R1-06 global tests iterate the `search` and `sql` namespaces.
+- Findings: none blocking; see parking lot.
 
 ## Parking lot
 
@@ -103,3 +123,4 @@ Commits reviewed: none yet.
 - [nit] src-tauri/crates/outlooker-core/tests/db_schema.rs:100 — "second `ensure_search_indexes` is a no-op" is asserted only as "does not error". Fix: record `pg_class.oid` of the six indexes before and after the second call and assert equality.
 - [nit] src-tauri/crates/outlooker-core/src/db/credentials.rs:7 — `Credentials` derives `Debug`, and `DbConn` (pools.rs:35) holds it, so any `{:?}` log of either prints the three passwords. Fix: hand-written `Debug` that redacts the fields.
 - [nit] src-tauri/crates/outlooker-core/src/importer/normalize/mod.rs:81-92 — an HTML body over 16 MB falls through to the RTF `\fromhtml1` path; spec Part 04 §5.5 says it falls through to rule 3 (plain text). Fix: skip the RTF-HTML branch when the HTML body was rejected for size.
+- [nit] src/screens/import/index.tsx:73 and src/screens/settings/index.tsx:60 — `db_status` is refetched every 10 s (`refetchInterval: 10_000`) while the screen is open; it runs `pg_database_size` and index queries each time, and spec Part 03 §8.3 / §9 deliver maintenance state through `maintenance:status-changed`. Fix: refetch `dbStatus` on that event and on `library:changed` instead of on a timer.
