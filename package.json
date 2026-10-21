@@ -11,7 +11,8 @@
     "build": "tsc --noEmit -p . && vite build",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
-    "e2e": "wdio run wdio.conf.ts",
+    "e2e": "node tests/e2e/build.mjs && node tests/e2e/run.mjs",
+    "e2e:build": "node tests/e2e/build.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
