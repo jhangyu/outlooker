@@ -64,6 +64,20 @@ pub fn free_space(path: &Path) -> Result<u64, AppError> {
         .ok_or_else(|| AppError::file_access(path, "unknownVolume"))
 }
 
+/// Canonical form of a path that may not exist yet: canonical nearest existing ancestor + the remaining components.
+fn resolve_path(path: &Path) -> Result<PathBuf, AppError> {
+    let mut rest = Vec::new();
+    let mut probe = path.to_path_buf();
+    while !probe.exists() {
+        let name = probe.file_name().ok_or_else(|| AppError::file_access(path, "noExistingAncestor"))?.to_owned();
+        rest.push(name);
+        probe.pop();
+    }
+    let mut out = probe.canonicalize().map_err(|e| AppError::file_access(path, &e.to_string()))?;
+    out.extend(rest.iter().rev());
+    Ok(out)
+}
+
 fn emit(sink: &Arc<dyn EventSink>, phase: DataDirMovePhase, copied: u64, total: u64, error: Option<AppError>) {
     sink.emit(CoreEvent::DataDirMoveProgress(DataDirMoveProgress { phase, bytes_copied: copied as i64, bytes_total: total as i64, error }));
 }
@@ -76,10 +90,14 @@ impl Supervisor {
         if !target.is_absolute() {
             return Err(AppError::invalid("target", "notAbsolute"));
         }
+        let old = self.paths();
+        let old_root = old.data_root().canonicalize().map_err(|e| AppError::file_access(old.data_root(), &e.to_string()))?;
+        if resolve_path(&target)?.starts_with(&old_root) {
+            return Err(AppError::invalid("target", "insideDataRoot"));
+        }
         if target.exists() && std::fs::read_dir(&target).map(|mut d| d.next().is_some()).unwrap_or(true) {
             return Err(AppError::invalid("target", "notEmpty"));
         }
-        let old = self.paths();
         let (files, bytes) = tree_stats(old.data_root()).map_err(|e| AppError::file_access(old.data_root(), &e.to_string()))?;
         if (free_space(&target)? as f64) < bytes as f64 * 1.1 {
             return Err(AppError::file_access(&target, "insufficientSpace"));

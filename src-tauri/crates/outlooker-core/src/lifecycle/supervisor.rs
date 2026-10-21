@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -153,6 +153,6 @@ impl Supervisor {
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn fail_next_move_verify(&self) {
-        self.inner.fail_next_verify.store(true, Ordering::SeqCst);
+        self.inner.fail_next_verify.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }

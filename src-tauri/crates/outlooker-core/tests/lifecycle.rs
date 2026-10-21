@@ -256,6 +256,17 @@ async fn move_into_non_empty_is_invalid() {
 }
 
 #[tokio::test]
+async fn move_into_own_subfolder_is_invalid() {
+    let r = rig();
+    ready(&r).await;
+    for target in [r.root.join("backup"), r.root.join("auth/x/y"), r.root.clone()] {
+        assert_eq!(r.sup.move_data_dir(target.display().to_string()).await, Err(AppError::invalid("target", "insideDataRoot")));
+    }
+    assert!(!r.root.join("backup").exists());
+    r.sup.shutdown_db().await.unwrap();
+}
+
+#[tokio::test]
 async fn move_while_import_is_busy() {
     let r = rig();
     ready(&r).await;
