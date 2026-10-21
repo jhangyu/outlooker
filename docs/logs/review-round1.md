@@ -19,12 +19,21 @@ Pass 1 (bc20348):
 
 ## R1-02 — IN REVIEW
 
-Commits reviewed: f22cae5 (vendor).
+Commits reviewed: f22cae5 (vendor), 9dc6196 (FFI wrapper, fixture, generator).
 
-Pass 1 (f22cae5):
-- Ownership: 1076 paths under `src-tauri/native/libpff/` plus `scripts/vendor-libpff.sh`; all R1-02. OK.
-- `src-tauri/native/libpff/ORIGIN` has `commit=bb5bcc0`, `run_id=32393676269` and the sdist sha256; `include/libpff.h`, `common/types.h`, `libpff/libpff_definitions.h` exist. Vendored before the 2026-11-18 artifact expiry. OK.
-- `scripts/vendor-libpff.sh`: `gh run download <run> -R jhangyu/libpff -n cibw-sdist`, system tar, no autotools, writes ORIGIN. OK.
+Pass 1 (f22cae5, 9dc6196):
+- Ownership: f22cae5 = 1076 paths under `src-tauri/native/libpff/` + `scripts/vendor-libpff.sh`; 9dc6196 = `crates/pff/{build.rs,src/*,tests/outlook_pst.rs}`, `scripts/fixtures/make-pst.ps1`, `tests/fixtures/external/{NOTICE,outlook.pst}`. All R1-02. OK.
+- C5 Produces (foundation plan R1-02): every listed signature present in `crates/pff/src/lib.rs` (version, Error, Result, check_signature, File::{open,root_folder,message_store}, Item::{identifier … attached_item}, AttachmentType, filetime_to_unix_micros) and `src/tags.rs` (all 20 tags, values match). Only platform branch is `#[cfg(windows)]` UTF-16 open (lib.rs:112-135, 147-156), which the Stage 1 Behavior defines. OK.
+- build.rs: copies the tree to `$OUT_DIR/libpff-src`, Unix `sh configure --disable-nls --disable-shared-libs --with-zlib=no` in the copy, MSVC defines `_CRT_SECURE_NO_WARNINGS` / `UNICODE` / `WINVER=0x0501`, `HAVE_LOCAL_<LIB>` for the 17 libs, no zlib. Matches spec Part 01 §4.3. OK.
+- Acceptance (my runs):
+  - `grep -q bb5bcc0 src-tauri/native/libpff/ORIGIN` + three `test -f`: RC=0.
+  - `cargo test -p pff --locked`: RC=0; `version_is_20260625`, `non_pst_is_error`, `outlook_pst_folders`, `outlook_pst_walk_is_deterministic`, `outlook_pst_welcome_message`, `filetime_conversion` ok; doctest `lib.rs - (line 4) - compile fail ... ok`.
+  - `otool -L target/debug/deps/outlook_pst-8158793779263bfb`: only `/usr/lib/libSystem.B.dylib`; libz count 0.
+  - `grep -rn libpff_set_codepage src-tauri/crates`: RC=1.
+  - NOTICE contains `CC-BY-4.0` and `c3631ff`; `shasum -a 256` of `tests/fixtures/external/outlook.pst` equals `scripts/tmp/outlook.pst` (df01707f…4e24).
+  - `pwsh -NoProfile -Command "[ScriptBlock]::Create(...)"`: not runnable, `zsh: command not found: pwsh` (RC=127). Instrument missing, not a pass. Sent to team-lead for a decision (install PowerShell or move the check to the Windows phase).
+- Findings:
+  - [blocker] scripts/fixtures/make-pst.ps1:38 — `$ns.AddStoreEx($path, 3)   # olStoreUnicode`: Outlook `OlStoreType` is olStoreDefault=1, olStoreUnicode=2, olStoreANSI=3, so 3 creates ANSI (97-2002) PSTs, against spec Part 04 §12.1 (`AddStoreEx(path, olStoreUnicode)`). ANSI stores keep strings in a codepage, which invalidates the cjk.pst charset / trigram fixtures. Fix: change `3` to `2`. Sent to team-lead.
 
 ## R1-03 — NOT STARTED
 
@@ -38,9 +47,15 @@ Commits reviewed: none yet.
 
 Commits reviewed: none yet.
 
-## R1-06 — NOT STARTED
+## R1-06 — IN REVIEW
 
-Commits reviewed: none yet.
+Commits reviewed: 11e381e (C10 shared contract, locales, test helpers).
+
+Pass 1 (11e381e, partial task):
+- Ownership: `src/app/{AppStatusContext.tsx,i18n.ts,testing.tsx}`, `src/components/common/*`, `src/locales/{zh-TW,en}/{common,import,onboarding,settings}.json`. All R1-06. OK.
+- C10: `EmptyState` props (EmptyState.tsx:4-10), `formatAppError(err, t)` (formatAppError.ts:10), `useAppStatus()` (AppStatusContext.tsx:68) present with the §2.2 / frontend-plan shapes; `useLanguageSwitch` calls `changeLanguage` then `settingsUpdate({ language, webpQuality: null })` (hooks.tsx:23-36) as planned.
+- Locale parity (python key-set diff over the working tree): common 41/41, import 53/53, onboarding 36/36, settings 57/57 equal; no key containing pause / worker / re-encode / format / highlight / drag / drop.
+- Typecheck not judged yet: depends on R1-01 bindings and `src/api/call.ts` (`isAppError`), not yet on main. Full acceptance re-run at the final R1-06 commit.
 
 ## R1-07 — NOT STARTED
 
@@ -50,3 +65,7 @@ Commits reviewed: none yet.
 
 - [nit] R1-01 bc20348 commit message — "registry re-check deferred to cargo and npm resolution" records no registry check (Global Constraints "Versions"). All pins equal Part 01, so no wrong version resulted.
 - [nit] R1-01 bc20348 — `npm run typecheck` fails at the kickoff commit (stubs import `src/api/bindings/*`, generated in the contract commit; stated in the commit message). Foundation plan R1-01 Behavior says typecheck passes after the kickoff. Transient; re-checked at the final R1-01 commit.
+- [should-fix] src-tauri/crates/pff/build.rs:31 — the `$OUT_DIR/libpff-src/.prepared` marker is never invalidated: after a re-vendor (`ORIGIN` changes, build.rs reruns) the stale copy is compiled. Fix: write the `ORIGIN` content into `.prepared` and re-copy when it differs.
+- [should-fix] src-tauri/crates/pff/src/lib.rs:388-394 — `attachment_data` returns `Ok(Some(buf))` truncated when `libpff_attachment_data_read_buffer` returns 0 before `size` bytes are read; a short read looks like success (silent data loss). Fix: return `Err` when `filled < size`.
+- [nit] scripts/fixtures/make-pst.ps1:29-31 — PT_SYSTIME read-back is compared as strings (`"$back" -ne "$value"`); Outlook may return the time with a different DateTimeKind / local offset, which would throw a false "Outlook did not keep property". Fix: compare `[datetime]` values via `.ToUniversalTime()` for 0x0040 tags. Windows-phase risk only.
+- [nit] scripts/fixtures/make-pst.ps1:194-200 — corrupt.pst zeroes 512 bytes at 60 % of the file; spec Part 04 §12.1 wants "one item's data block". The R2-09 test pre-registers both outcomes, so this is acceptable; a comment noting that the offset is not proven to be inside an item block would help.
