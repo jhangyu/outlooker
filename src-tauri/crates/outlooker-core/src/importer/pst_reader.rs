@@ -76,16 +76,48 @@ fn ipm_root_id(file: &File) -> Option<u32> {
 /// error row and its subtree is skipped. Paths: below the IPM root relative to it (`Inbox/Projects`); the IPM
 /// root itself is its own name; other folders `~/<path from the PST root>` (the PST root itself is `~`).
 fn scan<'f>(file: &'f File) -> pff::Result<(Vec<WalkFolder<'f>>, ScanResult)> {
-    let ipm = ipm_root_id(file);
-    let root = file.root_folder()?;
+    let (walk, out) = walk_tree(
+        file.root_folder()?,
+        ipm_root_id(file),
+        |item| Ok((i64::from(item.identifier()?), item.folder_name().ok().flatten().unwrap_or_default())),
+        |item| {
+            let list = || -> pff::Result<(usize, Vec<(Item<'f>, String)>)> {
+                let messages = item.sub_message_count()?;
+                let n = item.sub_folder_count()?;
+                let subs = (0..n)
+                    .map(|i| {
+                        let sub = item.sub_folder(i)?;
+                        let name = sub.folder_name().ok().flatten().unwrap_or_default();
+                        Ok((sub, name))
+                    })
+                    .collect::<pff::Result<Vec<_>>>()?;
+                Ok((messages, subs))
+            };
+            list().map_err(|e| e.message)
+        },
+    )?;
+    Ok((walk.into_iter().map(|(item, id, path, messages)| WalkFolder { item, id, path, messages }).collect(), out))
+}
+
+type Walked<N> = (N, i64, String, usize);
+
+/// Tree walk behind `scan`, generic so a test can feed a synthetic tree. `info` = (identifier, name) of a node;
+/// `kids` = (message count, (child, child name) in index order) or the listing error message. A folder
+/// identifier seen twice (cycle in a corrupt PST) is skipped with one `parse` / `degraded` row.
+fn walk_tree<N, E>(
+    root: N,
+    ipm: Option<u32>,
+    info: impl Fn(&N) -> Result<(i64, String), E>,
+    kids: impl Fn(&N) -> Result<(usize, Vec<(N, String)>), String>,
+) -> Result<(Vec<Walked<N>>, ScanResult), E> {
     let mut walk = Vec::new();
     let mut out = ScanResult { folders: Vec::new(), items_total: 0, scan_errors: Vec::new() };
+    let mut visited = std::collections::HashSet::new();
     // (item, parent id, path from the PST root, path relative to the IPM root if below it)
-    type Pending<'f> = (Item<'f>, Option<i64>, Vec<String>, Option<Vec<String>>);
-    let mut stack: Vec<Pending<'f>> = vec![(root, None, Vec::new(), None)];
+    type Pending<N> = (N, Option<i64>, Vec<String>, Option<Vec<String>>);
+    let mut stack: Vec<Pending<N>> = vec![(root, None, Vec::new(), None)];
     while let Some((item, parent, from_root, below_ipm)) = stack.pop() {
-        let id = i64::from(item.identifier()?);
-        let name = item.folder_name().ok().flatten().unwrap_or_default();
+        let (id, name) = info(&item)?;
         let is_ipm = ipm.is_some_and(|n| i64::from(n) == id);
         let rel: Option<Vec<String>> = if is_ipm { Some(Vec::new()) } else { below_ipm };
         let path = match &rel {
@@ -94,17 +126,18 @@ fn scan<'f>(file: &'f File) -> pff::Result<(Vec<WalkFolder<'f>>, ScanResult)> {
             None if from_root.is_empty() => "~".to_owned(),
             None => format!("~/{}", from_root.join("/")),
         };
-        let listed = (|| -> pff::Result<(usize, Vec<Item<'f>>)> {
-            let messages = item.sub_message_count()?;
-            let n = item.sub_folder_count()?;
-            let subs = (0..n).map(|i| item.sub_folder(i)).collect::<pff::Result<Vec<_>>>()?;
-            Ok((messages, subs))
-        })();
+        if !visited.insert(id) {
+            let mut err = ItemError::new(ImportErrorStage::Parse, ImportErrorSeverity::Degraded, &path, 0, "folder cycle");
+            err.pst_item_id = None;
+            out.scan_errors.push(err);
+            continue;
+        }
+        let listed = kids(&item);
         out.folders.push(FolderIn { pst_folder_id: id, parent_pst_folder_id: parent, name: name.clone(), path: path.clone() });
         let (messages, subs) = match listed {
             Ok(v) => v,
             Err(e) => {
-                let mut err = ItemError::new(ImportErrorStage::Scan, ImportErrorSeverity::Degraded, &path, 0, &e.message);
+                let mut err = ItemError::new(ImportErrorStage::Scan, ImportErrorSeverity::Degraded, &path, 0, &e);
                 err.pst_item_id = None;
                 out.scan_errors.push(err);
                 continue;
@@ -112,13 +145,13 @@ fn scan<'f>(file: &'f File) -> pff::Result<(Vec<WalkFolder<'f>>, ScanResult)> {
         };
         out.items_total += messages as i64;
         // children are pushed in reverse so they pop in index order
-        for sub in subs.into_iter().rev() {
-            let seg = display_segment(&sub.folder_name().ok().flatten().unwrap_or_default());
+        for (sub, sub_name) in subs.into_iter().rev() {
+            let seg = display_segment(&sub_name);
             let child_root: Vec<String> = from_root.iter().cloned().chain(std::iter::once(seg.clone())).collect();
             let child_rel = rel.as_ref().map(|r| r.iter().cloned().chain(std::iter::once(seg)).collect());
             stack.push((sub, Some(id), child_root, child_rel));
         }
-        walk.push(WalkFolder { item, id, path, messages });
+        walk.push((item, id, path, messages));
     }
     Ok((walk, out))
 }
@@ -347,6 +380,26 @@ mod tests {
         assert_eq!(filetime(None), None);
         let old = filetime(Some(100_000_000_000_000_000)).unwrap(); // 1917
         assert!(old < UNIX_EPOCH);
+    }
+
+    #[test]
+    fn folder_cycle_is_skipped_with_one_error_row() {
+        // 1 (root) -> 2 -> 3 -> 2 (cycle back); 1 -> 4 is a normal sibling
+        let tree = |n: i64| -> (usize, Vec<(i64, String)>) {
+            match n {
+                1 => (0, vec![(2, "A".into()), (4, "D".into())]),
+                2 => (1, vec![(3, "B".into())]),
+                3 => (1, vec![(2, "A".into())]),
+                _ => (1, vec![]),
+            }
+        };
+        let (walk, out) =
+            walk_tree::<i64, ()>(1, None, |n| Ok((*n, String::new())), |n| Ok(tree(*n))).expect("walk terminates");
+        let ids: Vec<i64> = walk.iter().map(|w| w.1).collect();
+        assert_eq!(ids, vec![1, 2, 3, 4]);
+        assert_eq!(out.items_total, 3);
+        assert_eq!(out.scan_errors.len(), 1);
+        assert_eq!(out.scan_errors[0].message, "folder cycle");
     }
 
     #[test]
