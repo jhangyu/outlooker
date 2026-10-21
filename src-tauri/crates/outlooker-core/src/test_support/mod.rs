@@ -1,4 +1,6 @@
 //! Real-PostgreSQL test cluster (spec Part 01 §9): production initdb flags, migrated, both pools.
+pub mod import_fixtures;
+
 use tempfile::TempDir;
 
 use crate::db::{connect, connect_admin, migrate, Credentials, Db, DbConn, Pools, DB_NAME};
