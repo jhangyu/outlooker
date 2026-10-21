@@ -35,7 +35,7 @@ function Set-Prop($item, $tag, $value) {
 function New-Store($name) {
   $path = Join-Path $Out "$name.pst"
   if (Test-Path $path) { Remove-Item $path }
-  $ns.AddStoreEx($path, 3)   # olStoreUnicode
+  $ns.AddStoreEx($path, 2)   # olStoreUnicode
   $store = $ns.Stores | Where-Object { $_.FilePath -eq $path }
   if (-not $store) { throw "store $path not mounted" }
   return @{ Path = $path; Store = $store; Root = $store.GetRootFolder() }
