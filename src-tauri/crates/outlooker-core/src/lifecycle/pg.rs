@@ -126,11 +126,16 @@ fn pid_owner(pid: u32, our_postgres: &Path) -> PidOwner {
     }
 }
 
-/// Create `path` owner-only (0600 on Unix) before any secret is written; truncates an existing file.
+/// Create `path` owner-only (0600 on Unix) before any secret is written.
+/// A leftover file is removed first: the mode only applies on creation.
 fn write_private(path: &Path, content: &str) -> std::io::Result<()> {
     use std::io::Write;
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
     let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
     opts.open(path)?.write_all(content.as_bytes())
@@ -380,6 +385,8 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let f = dir.path().join("pw");
+        std::fs::write(&f, "old").unwrap(); // leftover from a crashed run
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
         write_private(&f, "secret").unwrap();
         assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "secret");
