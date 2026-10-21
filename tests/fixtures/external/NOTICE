@@ -1,0 +1,7 @@
+tests/fixtures/external/outlook.pst
+
+Source: https://raw.githubusercontent.com/libyal/testdata/refs/heads/main/pst/outlook.pst
+Repository: https://github.com/libyal/testdata (commit c3631ff)
+License: CC-BY-4.0 (Creative Commons Attribution 4.0 International)
+Copyright libyal contributors.
+The file is used unmodified as a parser test fixture.

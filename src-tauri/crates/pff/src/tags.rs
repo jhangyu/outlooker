@@ -1,0 +1,21 @@
+//! MAPI property tags used by the importer (values from include/libpff/mapi.h and [MS-OXPROPS]).
+pub const MESSAGE_CLASS: u32 = 0x001a;
+pub const SUBJECT: u32 = 0x0037;
+pub const SENDER_NAME: u32 = 0x0c1a;
+pub const SENDER_ADDRESS_TYPE: u32 = 0x0c1e;
+pub const SENDER_EMAIL_ADDRESS: u32 = 0x0c1f;
+pub const SENDER_SMTP_ADDRESS: u32 = 0x5d01;
+pub const INTERNET_MESSAGE_ID: u32 = 0x1035;
+pub const INTERNET_CODEPAGE: u32 = 0x3fde;
+pub const MESSAGE_CODEPAGE: u32 = 0x3ffd;
+pub const RECIPIENT_TYPE: u32 = 0x0c15;
+pub const DISPLAY_NAME: u32 = 0x3001;
+pub const ADDRESS_TYPE: u32 = 0x3002;
+pub const EMAIL_ADDRESS: u32 = 0x3003;
+pub const SMTP_ADDRESS: u32 = 0x39fe;
+pub const ATTACH_SIZE: u32 = 0x0e20;
+pub const ATTACH_FILENAME: u32 = 0x3704;
+pub const ATTACH_METHOD: u32 = 0x3705;
+pub const ATTACH_LONG_FILENAME: u32 = 0x3707;
+pub const ATTACH_MIME_TAG: u32 = 0x370e;
+pub const ATTACH_CONTENT_ID: u32 = 0x3712;
