@@ -5,3 +5,5 @@ pub mod pg;
 pub mod start;
 pub mod status;
 pub mod supervisor;
+
+pub use supervisor::{Supervisor, SupervisorConfig};
