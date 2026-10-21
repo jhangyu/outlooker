@@ -317,7 +317,7 @@ flowchart LR
 | postgres postmaster + backends | Lifecycle Supervisor (`lifecycle::pg`) | Started after app start (or after first-run init) → stopped at app exit | Started by `pg_ctl start -w`, so the postmaster is detached from the app process. Its PID and port are read from `pgdata/postmaster.pid`. Listens on `127.0.0.1` only; no Unix socket (`unix_socket_directories = ''`). |
 | initdb, pg_ctl | Lifecycle Supervisor | Seconds per call | Run with `tokio::process`, with `LC_ALL` set explicitly (01 §6). |
 
-PST parsing is in-process (01 §4). Consequence: a crash inside libpff C code ends the whole app. §6.3 ("poison item") makes such a crash cost one item, not the whole import.
+PST parsing is in-process (01 §4). Consequence: a crash inside libpff C code ends the whole app. §6.3 ("poison item") retries the item once and skips it after a second crash, so a crash costs at most one item, never the whole import.
 
 ## 2. Lifecycle
 
@@ -489,7 +489,7 @@ flowchart LR
 | Undecodable body charset | encoding_rs reports malformed bytes | Decode with replacement characters (U+FFFD). Error row (stage `Html`) only if no charset can be found. | Mail shows with replacement characters | Stored |
 | Bad inline image | `image` decode error | Error row (stage `Image`). Drop that image. The message is kept. | The image shows as broken in the preview | Message stored without the image |
 | Panic in a rayon task (sanitizer, decoder) | `catch_unwind` around each item | Error row (stage `Html` or `Image`). Skip the item. | Error count | Item missing |
-| Crash inside libpff C code (segfault) | Process dies | At next start: §6.3 poison-item rule | The job resumes and that item is listed as an error | One item lost |
+| Crash inside libpff C code (segfault) | Process dies | At next start: §6.3 poison-item rule (retry the item once; skip it after a second crash on the same item) | The job resumes. After a second crash, that item is listed as an error. | No item lost after one crash; one item lost after two |
 | PST cannot be opened or becomes unreadable mid-job | `pff` open/read error on the file itself | Job `Failed`, error row (stage `Open`/`Scan`) | `Failed` with reason. `import_resume` is possible after the file is back. | Committed batches are kept |
 | Disk free space low | Writer checks free space on the data_root volume before each batch commit, and the queue checks before job start | Below 2 GiB: stop the job like a cancel (drain, commit), then `Failed` with an error row (stage `Store`, "disk space low"). The 2 GiB margin keeps PostgreSQL from reaching a real disk-full state. | `Failed` + reason. Resume after space is freed. | Committed batches are kept |
 | Real disk full anyway (SQLSTATE `53100`, or PANIC on WAL write) | Writer error / health monitor | `53100`: as above. PANIC: the PostgreSQL crash path below. | Same | Last batch rolled back |
@@ -511,7 +511,18 @@ flowchart LR
 
 ### 6.3 Poison item (libpff crash)
 
-All libpff calls happen on the reader thread. Before the reader touches item `seq`, it overwrites `<data_root>/import-inflight` with `{ job_id, seq, folder path, pst item id }` (no fsync: page-cache writes survive a process crash). When the job ends normally, the file is deleted. At the next start, if the file exists and its job is resumed, the reader skips that one item and writes an error row (stage `Parse`, "parser crashed on this item"). A repeated crash therefore costs one item per crash, not an endless restart loop.
+All libpff calls happen on the reader thread. The marker file `<data_root>/import-inflight` holds `{ job_id, seq, folder_path, pst_item_id, attempts }`, where `attempts` counts how many times the reader has started this item. Writes use overwrite without fsync: page-cache writes survive a process crash. After a power loss the marker can be stale or missing, which at worst gives one item one extra attempt.
+
+Rules:
+1. **Job start / resume.** Before the reader writes anything, it loads an existing marker into memory as the *pending record*, but only if the marker's `job_id` equals the job being started. A marker of another job is ignored and overwritten.
+2. **Before the reader touches item `seq`:**
+   - No pending record for this `seq`: write the marker with `attempts = 1`. This is the normal case, including the items between `cursor_seq` and the pending `seq` that are read again on resume.
+   - The pending record names this `seq` with `attempts == 1`: the process died once while on this item. The cause can be a plain kill or power loss, not only a parser crash. Write the marker with `attempts = 2`, then retry the item once.
+   - The pending record names this `seq` with `attempts >= 2`: the process died twice on the same item. Do not touch it. Write one `import_errors` row (severity `item_skipped`, stage `parse`, "parser crashed on this item", with the folder path and PST item id). The item advances the cursor like any skipped item (04 §5.9).
+3. **Item done.** After the reader finishes its libpff calls for an item, the next item's marker write (rule 2) replaces the marker. Once the reader passes the pending `seq`, the pending record is dropped.
+4. **Job end.** At normal job end (`Completed`, `Cancelled`, `Failed`), the marker file is deleted. On a shutdown that leaves the job `Queued` (§2.5), it is also deleted, because the item in progress completed cleanly.
+
+Result: a one-off kill or power loss costs no item. A true poison item costs one item, after two crashes. The app never enters an endless restart loop.
 
 ## 7. Security
 
@@ -596,7 +607,7 @@ Perf data set: a seeded generator writes 1M synthetic messages (mixed Traditiona
 | Unit | Pure units: normalize (charset, RTF de-encapsulation, sanitizer rules), dedupe key, DSL → SQL compiler output, Work Gate conflict rules, Event Emitter throttling, `AppPhase` transitions | `cargo test`, Vitest | Sanitizer corpus: `<script>`, `onerror=`, `javascript:` links, CSS `url()`, `<base>`, remote `<img>` |
 | Integration (real PG) | `outlooker-core` against the bundled PG 18.6 with production initdb flags in a temp dir | `cargo test` + a test helper (01 §9) | Lifecycle: first-run init, CJK self-check, stale `postmaster.pid`, orphan postmaster, port conflict (occupied port) |
 | Importer | libyal fixture PSTs + a byte-corrupted copy + one Big5/GBK PST (outside git) | `cargo test` | Corrupted items are logged and skipped and the job completes; cross-PST dedupe; remove PST keeps shared messages |
-| Fault injection | Crash, cancel, disk | `cargo test` with test-only hooks (`cfg(test)` free-space threshold override; kill the postmaster with `pg_ctl stop -m immediate` mid-batch) | Cancel then resume gives the same row counts as one uninterrupted run; a PG crash mid-import resumes with no duplicates; low disk space stops the job cleanly; a simulated poison item is skipped on resume |
+| Fault injection | Crash, cancel, disk | `cargo test` with test-only hooks (`cfg(test)` free-space threshold override; kill the postmaster with `pg_ctl stop -m immediate` mid-batch) | Cancel then resume gives the same row counts as one uninterrupted run; a PG crash mid-import resumes with no duplicates; low disk space stops the job cleanly; a marker with `attempts = 1` makes the item retry and succeed (no error row); a marker with `attempts = 2` makes it skip with one `parse` error row; a marker of another job is ignored |
 | Read-only bypass | SQL Console on `outlooker_ro` | `cargo test` | Each must fail: `INSERT/UPDATE/DELETE`, `SET TRANSACTION READ WRITE` then a write in the same run, `SET ROLE outlooker_app`, `CREATE TEMP TABLE`, `COPY ... TO '/tmp/x'`, `pg_read_file`, `DO $$...$$` with a write, `nextval`, `CREATE FUNCTION`, `ALTER ROLE` |
 | Frontend | Screens and components with a mocked Typed API Client | Vitest + Testing Library | Preview iframe has `sandbox=""`; no dark-theme tokens; every UI string comes from the locale files |
 | E2E | Real app on macOS and Windows (Linux if built) | WebdriverIO + `@wdio/tauri-service` embedded driver | Onboarding → import fixture → search (English and Chinese) → preview with an inline image → Advanced SQL mail-list mode → remove PST |
@@ -1710,7 +1721,7 @@ Thread model and channels follow 02 §4 (component `core::importer`); this secti
 - Per-item failures (libpff error on one item, undecodable body, panic inside `normalize`) become one
   `import_errors` row (`severity = 'item_skipped'`, stage `parse`/`html`/`image`) and the item still advances the
   cursor. Errors that make the file unreadable (stage `open`/`scan`) fail the job (`job_failed`). A crash inside
-  libpff is handled by 02 §6.3 (in-flight marker file).
+  libpff is handled by 02 §6.3 (in-flight marker file with `attempts`: retry once, skip after a second crash on the same item).
 - Cancellation: shared flag; reader stops after the current item, the pipeline drains, the writer commits the last
   batch and its checkpoint (03 §7.2, 02 §6).
 - Disk guard: before each batch the writer checks free space on the data-dir volume; below 2 GB the job fails with
