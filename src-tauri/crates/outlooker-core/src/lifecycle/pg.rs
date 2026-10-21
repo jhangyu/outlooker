@@ -126,6 +126,16 @@ fn pid_owner(pid: u32, our_postgres: &Path) -> PidOwner {
     }
 }
 
+/// Create `path` owner-only (0600 on Unix) before any secret is written; truncates an existing file.
+fn write_private(path: &Path, content: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    opts.open(path)?.write_all(content.as_bytes())
+}
+
 fn newest_server_log(log_dir: &Path) -> String {
     let newest = std::fs::read_dir(log_dir)
         .into_iter()
@@ -225,7 +235,10 @@ impl PgController {
         let parent = pgdata.parent().ok_or_else(|| AppError::internal("pgdata has no parent"))?;
         tokio::fs::create_dir_all(parent).await.map_err(|e| io_err("create data root", e))?;
         let pwfile = parent.join(".initdb-pw");
-        tokio::fs::write(&pwfile, pw).await.map_err(|e| io_err("write pwfile", e))?;
+        if let Err(e) = write_private(&pwfile, pw) {
+            let _ = std::fs::remove_file(&pwfile);
+            return Err(io_err("write pwfile", e));
+        }
         let args: Vec<OsString> = vec![
             "-D".into(), pgdata.into(), "-U".into(), ADMIN_ROLE.into(),
             OsString::from(format!("--pwfile={}", pwfile.display())),
@@ -360,6 +373,17 @@ impl PgController {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn pwfile_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("pw");
+        write_private(&f, "secret").unwrap();
+        assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "secret");
+    }
 
     #[test]
     fn auto_conf_clamps_shared_buffers() {

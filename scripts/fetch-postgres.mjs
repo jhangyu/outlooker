@@ -4,7 +4,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -72,7 +71,10 @@ async function main() {
   if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
   const buffer = Buffer.from(await res.arrayBuffer());
   verify(buffer, expected);
-  const tmp = mkdtempSync(join(tmpdir(), "outlooker-pg-"));
+  // Work dir inside the repo (gitignored) so the final rename never crosses drives/devices.
+  const work = join(ROOT, "scripts", "tmp");
+  mkdirSync(work, { recursive: true });
+  const tmp = mkdtempSync(join(work, "fetch-pg-"));
   try {
     const archive = join(tmp, asset);
     writeFileSync(archive, buffer);
