@@ -3,9 +3,9 @@
 Reviewer: rev-r1. Plan: `docs/superpowers/plans/2026-10-21-outlooker-plan.md` §3, §5; procedure `docs/superpowers/plans/2026-10-21-outlooker-plan-foundation.md` "R1-REV / R2-REV steps"; spec `docs/superpowers/specs/2026-10-21-outlooker-design.md`.
 Finding format: `- [blocker|should-fix|nit] file:line — finding — evidence`. Verdict words appear only in section headings.
 
-## R1-01 — IN REVIEW
+## R1-01 — PASS
 
-Commits reviewed: bc20348 (kickoff), 70a8f42 (contract: DTOs, sink, gate, TS client, schema).
+Commits reviewed: bc20348 (kickoff), 70a8f42 (contract: DTOs, sink, gate, TS client, schema), 8ab36de (ResizeObserver stub in setup.ts), e72c88d (wdio local-runner and spec-reporter).
 
 Pass 1 (bc20348):
 - Ownership: all 108 paths are R1-01 rows or kickoff stubs of §1 / §5 (`git show --stat bc20348`). OK.
@@ -15,7 +15,7 @@ Pass 1 (bc20348):
 - No-dark grep over package.json, src, tauri.conf.json: RC=1. OK.
 - tauri.conf.json: identifier `us.jhangy.outlooker`, no `bundle.resources`, CSP `script-src 'self'`, `img-src 'self' data: mailimg: http://mailimg.localhost`, `frame-src 'self'` (spec Part 03 §5.6). Capabilities: `dialog:allow-open`, `log:default`. Single-instance plugin registered first (lib.rs:9). OK.
 - Findings:
-  - [blocker] package.json:31-46 — `@wdio/local-runner` and `@wdio/spec-reporter` (9.32.0; spec Part 01 §9 "Required" / "declare it directly") are missing; plan §2.1 item 2 requires every Part 01 §9 npm dependency pinned in the kickoff. Evidence: `grep -c 'local-runner\|spec-reporter' package.json` prints 0. Fix: `mise exec -- npm install --save-dev --save-exact @wdio/local-runner@9.32.0 @wdio/spec-reporter@9.32.0`, commit package.json and package-lock.json. Sent to team-lead; open.
+  - [blocker, closed by lead ruling and e72c88d] package.json:31-46 — `@wdio/local-runner` / `@wdio/spec-reporter` 9.32.0 (spec Part 01 §9) were missing from the kickoff. Lead ruling: not a blocker (the final plan adds them in R2-14 Step 1); impl-r101 added them in e72c88d anyway. Plan-wording note in the parking lot.
 
 Pass 1 (70a8f42):
 - Ownership: `core/src/dto/*.rs`, `core/src/{sink.rs,gate/mod.rs}`, `src-tauri/schemas/condition-group.json`, `src/api/**`. All R1-01. OK.
@@ -23,8 +23,10 @@ Pass 1 (70a8f42):
 - C2 `EventSink` / `CoreEvent::{name,payload}` / `RecordingSink` / `NullSink` (sink.rs); C3 `Gate` single-slot with `busy_reason` mapping and `released()` via `Notify` (no polling) (gate/mod.rs); C4 `call` re-throws `AppError` and wraps other rejections as `internal`, 24 `api.*` wrappers, `EVENTS`, `onEvent`, `pickPstFiles` / `pickFolder` with the `VITE_E2E` bypass.
 - Leaf rule: `grep -rE "crate::(lifecycle|importer|search|sql_console|maintenance|settings|db|gate|paths|app)" src-tauri/crates/outlooker-core/src/dto` RC=1; no `From<…> for AppError` in `dto`.
 - Acceptance (my runs): `cargo test -p outlooker-core --locked --lib -- dto:: gate:: sink::` RC=0 (59 tests incl. `worked_example_matches_spec_json`, `worked_example_root_validates_against_schema`, `every_activity_blocks_every_activity`, `released_resolves_after_drop`, `recording_sink_keeps_order_and_names`); then `git diff --exit-code src/api/bindings` RC=0; `commands.json` 24 entries incl. `app_retry`, `events.json` 6 entries; `mise exec -- npx vitest run src/api` RC=0 (2 files, 6 tests); `npm run typecheck` RC=0 at 79fc2f3 (detached worktree); `cargo build --workspace --locked` RC=0.
-- Open (not blocking): src-tauri/src/lib.rs:8-18 has no `.invoke_handler(tauri::generate_handler![])` (foundation plan R1-01 Behavior: "empty command handler").
-- Open (ownership to confirm): 8ab36de edits `src/test/setup.ts` (R1-01 row of §5, ResizeObserver stub for Fluent MessageBar). Asked team-lead whether impl-r101 made it or it was routed.
+- Pass 2 (8ab36de, e72c88d):
+  - 8ab36de: `src/test/setup.ts` ResizeObserver stub, made by impl-r101 (the owner) at the lead's request (lead confirmation). Ownership OK.
+  - e72c88d: the package.json diff is only the two devDependencies at exact `9.32.0` plus a reformatted `engines` block; the caret/tilde grep on package.json gives RC=1; lockfile and `npm ls --depth=0` show both at 9.32.0. At e72c88d (detached worktree): `npm run typecheck` RC=0, `npx vitest run` RC=0 (16 files, 68 tests).
+  - Missing `.invoke_handler(tauri::generate_handler![])` (lib.rs:8-18): lead ruling, parking lot (R2-13 owns the 24 handlers).
 
 ## R1-02 — PASS
 
@@ -40,7 +42,7 @@ Pass 1 (f22cae5, 9dc6196):
   - `otool -L target/debug/deps/outlook_pst-8158793779263bfb`: only `/usr/lib/libSystem.B.dylib`; libz count 0.
   - `grep -rn libpff_set_codepage src-tauri/crates`: RC=1.
   - NOTICE contains `CC-BY-4.0` and `c3631ff`; sha256 of `tests/fixtures/external/outlook.pst` equals `scripts/tmp/outlook.pst` (df01707f…4e24).
-  - `pwsh -NoProfile -Command "[ScriptBlock]::Create(...)"`: NOT RUN — `zsh: command not found: pwsh` (RC=127). Instrument missing, not a pass. Tagged needs-user-decision and sent to team-lead (install PowerShell on the Mac, or move the check to the Windows phase).
+  - pwsh syntax check: the first attempt could not run (`pwsh` not on PATH, RC=127). Rerun with PowerShell 7.6.7 at `scripts/tmp/pwsh/pwsh` (lead instruction): `scripts/tmp/pwsh/pwsh -NoProfile -Command "[ScriptBlock]::Create((Get-Content -Raw scripts/fixtures/make-pst.ps1)) | Out-Null"` RC=0; control `[ScriptBlock]::Create('if (')` RC=1 ("Missing condition in if statement"), so the check can fail. Closed; the real fixture run stays in the Windows phase (W2).
 - Findings (pass 1):
   - [blocker] scripts/fixtures/make-pst.ps1:38 — `AddStoreEx($path, 3)` creates ANSI PSTs (OlStoreType: olStoreUnicode=2, olStoreANSI=3), against spec Part 04 §12.1. Fixed in 5120f28.
 
@@ -66,6 +68,7 @@ Pass 1:
 - Ownership: `core/src/db/{mod,pools,credentials,indexes}.rs`, `core/src/db/migrations/V{1,2}__*.sql`, `core/src/test_support/mod.rs`, `core/tests/db_schema.rs`. All R1-04. OK.
 - Security (Part 02 §7.2, §7.3; Part 04 §1, §8.1): V1 creates `outlooker_app` / `outlooker_ro` with `NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`, ro `CONNECTION LIMIT 2`; V2 has every `ALTER ROLE outlooker_ro SET …` line, `REVOKE ALL ON SCHEMA public FROM PUBLIC`, `REVOKE TEMP … FROM PUBLIC`, `GRANT TEMP` to app, `SELECT, INSERT, UPDATE, DELETE, MAINTAIN` to app, `SELECT` on the six views only to ro; view bodies equal Part 04 §8.2; views owned by `outlooker_app`. Role passwords are 64-hex values set after migration (db/mod.rs:38-44). Credentials file 0600 on Unix (credentials.rs:36-40). OK.
 - Acceptance (my runs): `cargo test -p outlooker-core --locked --features test-support --test db_schema` RC=0 with the 8 named tests ok; `cargo test -p outlooker-core --locked --lib db::indexes` RC=0 (`ddl_matches_migration`).
+- Test change judged: `ro_role_sees_only_views` sets `default_transaction_read_only = off` before `CREATE TEMP TABLE` (db_schema.rs:61-64). It still tests the spec requirement and is the stronger test: a user can run that SET inside an Advanced SQL session, so `REVOKE TEMP` (Part 04 §8.1) must hold on its own, and the 42501 proves it does.
 - Plan deviation accepted: `show_trgm('郵件系統')` prints multibyte trigrams as hashes, so the test asserts 5 trigrams and overlap with `show_trgm('郵件系')` (db_schema.rs:16-20) instead of the literal `郵件系`.
 - Findings: none blocking; see parking lot.
 
@@ -79,6 +82,7 @@ Pass 1:
 - Hostile corpus `tests/golden/hostile.html` covers every acceptance item (`<script>`, `onerror=`, `javascript:`, `vbscript:`, CSS `url(`, `<iframe`, `<form`, `<base`, `<meta http-equiv`, `position:fixed`, remote `<img>`, `expression(`, `behavior`, `<svg><script>`).
 - Dedupe key equals Part 04 §4.1 (prefixes, U+001F joins, Message-ID rules 1-5, body whitespace and zero-width deletion). WebP: 25 MB / 40 MP limits, ≤2 px skip, 2,048 px Lanczos3 resize, BLAKE3 of source bytes before decode.
 - Acceptance (my run): `cargo test -p outlooker-core --locked --lib importer::` RC=0, 25 tests ok incl. `fromhtml_golden`, `big5_and_gbk`, `hostile_corpus_is_clean`, `golden_plain`, `golden_inline`, `one_pixel_image_loses_src`, `known_hash_skips_encode`, `resize_to_2048`, `limits_rejected`, `key_table`, `invariants_over_goldens`.
+- Mutation check (lead request; isolated worktree, cp backup, restored from the backup): adding `"position"` to `STYLE_PROPERTIES` (sanitize.rs:43) made `hostile_corpus_is_clean` fail (RC=101, `left: ["position"]`, output `<div style="position:fixed;…">`); after the restore the 3 sanitizer tests pass (RC=0). The hostile test can turn red.
 - Findings: none blocking; see parking lot.
 
 ## R1-06 — PASS
@@ -86,6 +90,7 @@ Pass 1:
 Commits reviewed: 11e381e (C10 shared contract, locales, test helpers), 26beebd (boot, app frame, failed / blocking screens), 60c5d1b (import screen, removal dialog), 32f5580 (settings, onboarding, global tests), f7399fb (global test fixes).
 
 Pass 1:
+- Deviations judged: `import.meta.glob` instead of `node:fs` in global.test.tsx (no @types/node; the no-dark test asserts more than 20 source files, so an empty glob cannot pass); the no-literal test skips text inside `.cm-editor` (lead ruling: CodeMirror chrome and user SQL are not UI strings); `eventsMock.reset` restores its implementation. All three keep the tests meaningful.
 - Ownership: every path is under `src/app/**`, `src/components/common/**`, `src/screens/{onboarding,import,settings}/**` or `src/locales/{zh-TW,en}/{common,onboarding,import,settings}.json`. All R1-06. OK.
 - C10: `EmptyState` props (EmptyState.tsx:4-10), `formatAppError(err, t)` (formatAppError.ts:10), `useAppStatus()` (AppStatusContext.tsx:68), screen entry names exported. OK.
 - Theme: one `<FluentProvider theme={webLightTheme}>` (App.tsx:78); no dark token anywhere in `src` (global test + grep).
@@ -124,3 +129,5 @@ Pass 1:
 - [nit] src-tauri/crates/outlooker-core/src/db/credentials.rs:7 — `Credentials` derives `Debug`, and `DbConn` (pools.rs:35) holds it, so any `{:?}` log of either prints the three passwords. Fix: hand-written `Debug` that redacts the fields.
 - [nit] src-tauri/crates/outlooker-core/src/importer/normalize/mod.rs:81-92 — an HTML body over 16 MB falls through to the RTF `\fromhtml1` path; spec Part 04 §5.5 says it falls through to rule 3 (plain text). Fix: skip the RTF-HTML branch when the HTML body was rejected for size.
 - [nit] src/screens/import/index.tsx:73 and src/screens/settings/index.tsx:60 — `db_status` is refetched every 10 s (`refetchInterval: 10_000`) while the screen is open; it runs `pg_database_size` and index queries each time, and spec Part 03 §8.3 / §9 deliver maintenance state through `maintenance:status-changed`. Fix: refetch `dbStatus` on that event and on `library:changed` instead of on a timer.
+- [nit] plan §2.1 item 2 wording — the kickoff omitted `@wdio/local-runner` / `@wdio/spec-reporter` (spec Part 01 §9) because the full plan adds them in R2-14 Step 1; added early in e72c88d. Align the §2.1 "every npm dependency" wording with that step.
+- [nit] src-tauri/src/lib.rs:8-18 — no `.invoke_handler(tauri::generate_handler![])` (foundation plan R1-01 Behavior). Lead ruling: R2-13 adds the 24 handlers.
