@@ -1,0 +1,8 @@
+[
+  "app:status-changed",
+  "import:progress",
+  "import:status-changed",
+  "library:changed",
+  "data-dir:move-progress",
+  "maintenance:status-changed"
+]

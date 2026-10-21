@@ -1,0 +1,22 @@
+/// Every Tauri command (spec Part 03 §3 plus §4 `app_retry`). R2-13 registers exactly this list.
+pub const COMMANDS: [&str; 24] = [
+    "app_status", "app_initialize", "app_retry",
+    "search_mail", "search_count", "filter_options", "mail_get",
+    "saved_query_list", "saved_query_create", "saved_query_update", "saved_query_delete",
+    "sql_execute", "sql_cancel",
+    "pst_list", "import_enqueue", "import_cancel", "import_resume", "pst_remove", "import_errors",
+    "settings_get", "settings_update",
+    "data_dir_move", "maintenance_run", "db_status",
+];
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn export_command_names() {
+        let mut sorted = super::COMMANDS.to_vec();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 24, "command names are unique");
+        crate::dto::events::write_name_list("commands.json", &super::COMMANDS);
+    }
+}
