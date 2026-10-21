@@ -29,7 +29,7 @@ for the Advanced SQL screen.
 | Risk | Mitigation / verification |
 |---|---|
 | Chinese pg_trgm needs a UTF-8 libc locale; verified on macOS only. Windows locale (`en-US`, then `English_United States.65001`) unverified. | Startup self-check `SELECT similarity('測試測試','測試') > 0`; failure is fatal. First Windows build must run it. |
-| Query plans, DB size (estimate ~2.9 GB per 100k messages with images, ~1.4 GB without), import throughput (target ≥ 150 msg/s) and search latency (target p95 ≤ 500 ms at 1M messages) are estimates. | 1M-message load test (Part 04 §12.3) with pre-registered pass thresholds. |
+| Query plans, DB size (estimate ~3.15 GB per 100k messages with images, ~1.65 GB without), import throughput (target ≥ 150 msg/s) and search latency (target p95 ≤ 500 ms at 1M messages) are estimates. | 1M-message load test (Part 04 §12.3) with pre-registered pass thresholds. |
 | The libpff fork ships no sample PST. | Test PSTs are generated on Windows with an Outlook automation script (Part 04 §12). Unverified: whether Outlook allows setting Message-ID / sent time on drafts; the script must fail loudly if not. |
 | Outlook HTML wrapped in RTF has no existing converter crate. | In-house converter (~200 lines, Part 01 §5); pure-RTF mail falls back to the plain-text body. |
 | Webview scroll-height limit for long lists. | 100k-row cap; test scrolling on WebView2 and WKWebView. |
@@ -822,7 +822,7 @@ Negation is not offered (requirements list only AND/OR). Limits: tree depth ≤ 
 | `sender` | `messages.sender_search` ILIKE | trigram GIN `messages_sender_trgm` |
 | `recipient` | `messages.recipients_search` ILIKE; strict `kinds` subset adds an `EXISTS` recheck on `message_recipients(kind, search_text)` | trigram GIN `messages_recipients_trgm` |
 | `subject` | `messages.subject` ILIKE | trigram GIN |
-| `body` | `messages.body_text` ILIKE, OR the English tsvector expression `@@ websearch_to_tsquery('english', value)` when `value` contains an ASCII letter | trigram GIN `messages_body_trgm` + expression GIN `messages_body_fts` |
+| `body` | `messages.body_text` ILIKE, OR the stored English tsvector `messages.body_tsv @@ websearch_to_tsquery('english', value)` when `value` contains an ASCII letter | trigram GIN `messages_body_trgm` + GIN `messages_body_fts` on `body_tsv` |
 | `dateRange` | `messages.sort_at` (= `coalesce(sent_at, '-infinity')`) | btree `messages_sort` |
 | `folder` | `message_occurrences.folder_id` → `folders.path` (= or prefix `LIKE path/%`) | `occurrences_folder` |
 | `hasAttachment` | `messages.has_attachments` | — |
@@ -1362,6 +1362,8 @@ CREATE TABLE messages (
     body_source        text    NOT NULL CHECK (body_source IN ('html', 'rtf_html', 'text', 'rtf_text', 'none')),
     body_html          text,                            -- sanitized fragment, NULL when no HTML/RTF-HTML body
     body_text          text    NOT NULL DEFAULT '',     -- plain text used for search and text-only display
+    body_tsv           tsvector NOT NULL
+                       GENERATED ALWAYS AS (to_tsvector('english'::regconfig, left(subject || ' ' || body_text, 100000))) STORED,  -- §3, §7.4
     snippet            text    NOT NULL DEFAULT '' CHECK (length(snippet) <= 200),
     has_attachments    boolean NOT NULL DEFAULT false,  -- true iff at least one row in attachments
     first_pst_id       bigint  REFERENCES pst_sources(id) ON DELETE SET NULL,
@@ -1530,8 +1532,7 @@ CREATE INDEX messages_body_trgm         ON messages USING gin (body_text gin_trg
 CREATE INDEX messages_subject_trgm      ON messages USING gin (subject gin_trgm_ops);
 CREATE INDEX messages_sender_trgm       ON messages USING gin (sender_search gin_trgm_ops);
 CREATE INDEX messages_recipients_trgm   ON messages USING gin (recipients_search gin_trgm_ops) WITH (gin_pending_list_limit = 16384);
-CREATE INDEX messages_body_fts          ON messages USING gin
-    (to_tsvector('english'::regconfig, left(subject || ' ' || body_text, 100000)));
+CREATE INDEX messages_body_fts          ON messages USING gin (body_tsv);
 ```
 
 | Index | Purpose (query it serves) |
@@ -1563,16 +1564,24 @@ CREATE INDEX messages_body_fts          ON messages USING gin
 | `messages_subject_trgm` | Subject substring. |
 | `messages_sender_trgm` | Sender partial match on display name or address. |
 | `messages_recipients_trgm` | Recipient partial match (to/cc/bcc). Pending list 16 MB. |
-| `messages_body_fts` | English stemming match + ranking via `ts_rank`. Expression index; the query compiler emits the identical expression from one Rust constant `TSV_EXPR`, so the planner matches it. |
+| `messages_body_fts` | English stemming match + ranking via `ts_rank`, on the stored column `body_tsv`. The generation expression of `body_tsv` is the Rust constant `TSV_EXPR` (byte-identical in the migration). |
 
 Deliberately **not** indexed: `has_attachments` (boolean, low selectivity — a filter on rows already narrowed),
 `folders.path` (folders is small: thousands of rows), `messages.message_id` (dedupe goes through
 `dedupe_key`; Advanced SQL lookups by Message-ID are rare and a sequential scan of the narrow heap is acceptable).
 
-Why `body_tsv` is an expression index and not a stored column: a stored `tsvector` of a 4 KB body costs ≈ 3 KB per
-row in the heap/TOAST (≈ 3 GB at 1M messages) while results are ordered by time, not rank (03 §5.2), so the
-vector is needed only inside the index. The Advanced SQL view exposes the same expression as a column (§8.2), so
-`WHERE body_tsv @@ …` there also uses the index.
+Why `body_tsv` is a stored generated column and not only an expression index: phase A of §7.4 evaluates the body
+predicate as a filter on up to W rows, without the index. With an expression index every row that fails `ILIKE`
+recomputes `to_tsvector`. Measured by planner-6 on the 3,000-message loadgen library, newest 2,949 rows, term
+`zygotic`, warm cache:
+- recomputed `to_tsvector`: 897.8 ms;
+- stored `body_tsv`: 122.0 ms;
+- `ILIKE` alone: 106.9 ms.
+So the stored column removes about 98% of the extra cost. Cost of the column:
+- ≈ 2.5 KB per message of TOAST (§6.7);
+- the writer backend computes `to_tsvector` once per inserted row (≈ 0.3 ms/row, the same work the index build
+  did before; the build now reads the stored value).
+`messages_body_fts` is dropped and rebuilt by §6.4 like before; the column itself is never dropped.
 
 ---
 
@@ -2039,13 +2048,14 @@ repeated logos stored once).
 | TOAST `body_text` (pglz ≈ 50%) | ≈ 2 KB | 200 MB |
 | `messages_body_trgm` | ≈ 3 KB | 300 MB |
 | `messages_body_fts` | ≈ 1.5 KB | 150 MB |
+| TOAST `body_tsv` (stored generated column, added after the first load test, see §3) | ≈ 2.5 KB | 250 MB |
 | subject/sender/recipients trigram indexes | ≈ 0.5 KB | 50 MB |
 | `message_recipients` + indexes | ≈ 0.8 KB | 80 MB |
 | occurrences, attachments, inline_images + indexes, btrees | ≈ 0.4 KB | 40 MB |
 | `image_blobs` (WebP, uncompressed storage) | ≈ 15 KB | 1,500 MB |
-| **Total** | **≈ 29 KB** | **≈ 2.9 GB (≈ 1.4 GB without images)** |
+| **Total** | **≈ 31.5 KB** | **≈ 3.15 GB (≈ 1.65 GB without images)** |
 
-At 1M messages this is ≈ 29 GB, consistent with the "50 GB+ of PST" target because attachments (usually most of
+At 1M messages this is ≈ 31.5 GB, consistent with the "50 GB+ of PST" target because attachments (usually most of
 a PST's bytes) are not stored. The image share is the largest uncertainty; the load test reports each line
 from `pg_total_relation_size` / `pg_relation_size` and the gate in §12.3 fails if the measured total deviates from
 this table by more than 2× in either direction, which triggers a revision of this section.
@@ -2063,10 +2073,10 @@ Expected write throughput (gate in §12.3): ≥ 1,500 messages/s through the Wri
 |---|---|
 | Chinese substring | pg_trgm treats a run of CJK characters as one word (no spaces) and extracts every 3-character sequence. `ILIKE '%報價單%'` extracts the single trigram `報價單` and finds it in the GIN index; the heap recheck confirms the exact substring. Requires a UTF-8 libc `LC_CTYPE` (§1), enforced by the startup self-check (02 §2.2 step 6). |
 | English substring | Same trigram path, case-insensitive (pg_trgm default build is case-insensitive; `ILIKE` recheck too). |
-| English stemming | `to_tsvector('english', …)` index; body conditions with at least one ASCII letter add `OR <TSV_EXPR> @@ websearch_to_tsquery('english', $raw)`, so `invoice` also matches `invoices`/`invoiced`. Queries made only of stop words produce an empty tsquery, which matches nothing; the ILIKE branch still applies. |
+| English stemming | `to_tsvector('english', …)` index; body conditions with at least one ASCII letter add `OR m.body_tsv @@ websearch_to_tsquery('english', $raw)`, so `invoice` also matches `invoices`/`invoiced`. Queries made only of stop words produce an empty tsquery, which matches nothing; the ILIKE branch still applies. |
 | Mixed text in one message | Both indexes cover the same column; each term uses whichever matches. |
 | Mixed term (`Q3報價`) | Letters, digits and CJK are all word characters, so the term is one word; its trigrams (`q3報`, `3報價`) index it. |
-| Ranking | `ts_rank(<TSV_EXPR>, websearch_to_tsquery('english', $raw))` is available in Advanced SQL (`v_mail.body_tsv`). Search results are ordered by time (03 §5.2). |
+| Ranking | `ts_rank(body_tsv, websearch_to_tsquery('english', $raw))` is available in Advanced SQL (`v_mail.body_tsv`). Search results are ordered by time (03 §5.2). |
 | Known limits | Full-width vs half-width forms (`ＡＢＣ` vs `ABC`) and Traditional vs Simplified Chinese are not unified. Lexemes ≥ 2 KB (long CJK runs) are dropped from the tsvector by PostgreSQL (docs 12.11); CJK is served by trigrams anyway. |
 
 ### 7.2 Short queries (< 3 characters)
@@ -2091,7 +2101,7 @@ ever appear as bind parameters `$n`; the SQL text is assembled only from constan
 | `recipient{value, kinds}` with kinds empty or all three | `m.recipients_search ILIKE $p` | if ≥ 3 chars |
 | `recipient{value, kinds}` with a strict subset | `(m.recipients_search ILIKE $p AND EXISTS (SELECT 1 FROM message_recipients r WHERE r.message_id = m.id AND r.kind = ANY($k) AND r.search_text ILIKE $p))` | if ≥ 3 chars |
 | `subject{value}` | `m.subject ILIKE $p` | if ≥ 3 chars |
-| `body{value}` | `(m.body_text ILIKE $p OR <TSV_EXPR> @@ websearch_to_tsquery('english', $q))`; the tsquery branch only when `value` contains `[A-Za-z]`; `$q` = raw trimmed value | if ≥ 3 chars |
+| `body{value}` | `(m.body_tsv @@ websearch_to_tsquery('english', $q) OR m.body_text ILIKE $p)` (tsquery branch first, §7.4); the tsquery branch only when `value` contains `[A-Za-z]`; `$q` = raw trimmed value | if ≥ 3 chars |
 | `dateRange{from,to}` | `m.sort_at >= $f` if `from`, else `m.sort_at > '-infinity'`; `AND m.sort_at < $t` if `to` (NULL sent times never match a date range) | no (served by `messages_sort` in ordered mode) |
 | `folder{folderPath, includeSubfolders}` | `EXISTS (SELECT 1 FROM message_occurrences o WHERE o.message_id = m.id AND o.folder_id = ANY (SELECT f.id FROM folders f WHERE f.path = $p` + (`OR f.path LIKE $pp` with `$pp = escape(path) || '/%'` when `includeSubfolders`) + `))` | no |
 | `hasAttachment{value}` | `m.has_attachments = $p` | no |
@@ -2099,8 +2109,8 @@ ever appear as bind parameters `$n`; the SQL text is assembled only from constan
 | group `and` | `(c1 AND c2 …)` | if **any** child indexable |
 | group `or` | `(c1 OR c2 …)` | if **all** children indexable |
 
-`TSV_EXPR` = `to_tsvector('english'::regconfig, left(m.subject || ' ' || m.body_text, 100000))` — the same text as
-in `messages_body_fts`.
+`TSV_EXPR` = `to_tsvector('english'::regconfig, left(subject || ' ' || body_text, 100000))` — the generation expression of `messages.body_tsv` (§2). The compiler never emits it; queries
+use the stored column `m.body_tsv`, so neither phase recomputes a tsvector.
 
 The simple query (03 §5.1) is compiled through the same function as the tree
 `and(or(sender t, recipient t, subject t, body t) for each term t)`; with 4 indexable branches each term becomes a
@@ -2131,13 +2141,13 @@ SELECT w.id, w.sort_at
 FROM (SELECT m0.* FROM messages m0
       WHERE (m0.sort_at, m0.id) < ($cs, $ci)
       ORDER BY m0.sort_at DESC, m0.id DESC
-      LIMIT 10000) AS m                     -- W = 10,000
+      LIMIT 5000) AS m                      -- W = 5,000
 WHERE <predicate>
 ORDER BY m.sort_at DESC, m.id DESC
 LIMIT $n;
 ```
 If it returns `n` rows: done. Otherwise find the window end
-(`… ORDER BY sort_at DESC, id DESC OFFSET 9999 LIMIT 1`, index-only on `messages_sort`); if there is none, the
+(`… ORDER BY sort_at DESC, id DESC OFFSET 4999 LIMIT 1`, index-only on `messages_sort`); if there is none, the
 window covered everything: done.
 
 Phase B — rest via the indexes:
@@ -2153,9 +2163,14 @@ LIMIT $n_remaining;
 fields for the ids (`WHERE m.id = ANY($ids)`, joined to `addresses`, with
 `(SELECT count(*) FROM message_occurrences o WHERE o.message_id = m.id)` for `occurrence_count`), re-ordered in Rust.
 
-Why it is bounded: phase A touches at most W rows. Phase B runs only when the term matches fewer than
-n/W ≈ 2% of the newest window; for terms with uniform density over time that means ≤ ≈ 2% of the table
-(≈ 20k rechecks at 1M). W is a calibration constant validated in §12.3. Known worst case: a term rare in recent
+Why it is bounded: phase A touches at most W rows and stops as soon as `n` rows match. The measured filter cost is
+≈ 41 µs per row (de-TOAST + `ILIKE` + `@@` on the stored `body_tsv`; planner-6, see §3). So a term that is rare in
+the newest window costs ≈ 205 ms in phase A at W = 5,000, against ≈ 410 ms at W = 10,000. That second figure leaves
+no margin under the 500 ms p95 budget, which is why W = 5,000. Phase B runs only when the term matches fewer than
+n/W ≈ 4% of the newest window; for terms with uniform density over time that means ≤ ≈ 4% of the table (≤ ≈ 40k
+trigram candidates at 1M, of which only false positives and stem-only rows are rechecked). Terms near that 4%
+density are the slowest case; the load test (§12.3) measures them. W is a calibration constant validated in §12.3.
+Inside the body OR, the `body_tsv @@ …` branch is written first, so rows that match by stem skip the `ILIKE`. Known worst case: a term rare in recent
 mail but very common in old mail (an old project name) makes phase B recheck all of its matches; the timeout
 bounds it and the result is `queryTimeout`.
 
@@ -2172,7 +2187,7 @@ Expected shapes (to be confirmed with `EXPLAIN (ANALYZE, BUFFERS)` on the 1M dat
 Phase A
 Limit (rows ≤ 201)
   -> Subquery Scan on m   Filter: (sender_search ~~* '%contoso.com%')
-       -> Limit (rows = 10000)
+       -> Limit (rows = 5000)
             -> Index Scan Backward using messages_sort on messages m0
                  Index Cond: (ROW(sort_at, id) < ROW($1, $2))
 Phase B (only if A found < 201)
@@ -2185,7 +2200,7 @@ Limit
                  Index Cond: (sender_search ~~* '%contoso.com%')
 ```
 Reasoning: `sender_search` is short (< 2 KB) and stored in the heap row, so phase A's filter costs only heap tuple
-reads (10k rows ≈ 1–2 MB). The pattern yields ≈ 9 trigrams (`contoso` and `com` words, `.` is a word boundary),
+reads (5k rows ≈ 0.5–1 MB). The pattern yields ≈ 9 trigrams (`contoso` and `com` words, `.` is a word boundary),
 so the GIN intersection is tiny and phase B rechecks only real matches.
 
 **Recipient `alice`** (kinds empty) — predicate `m.recipients_search ILIKE '%alice%'`.
@@ -2205,11 +2220,11 @@ Limit
                  Index Cond: (body_text ~~* '%報價單%')
 ```
 Reasoning: the pattern has one trigram, so the index returns exactly the rows containing those 3 characters in
-sequence; recheck de-TOASTs only those bodies. Phase A here costs up to 10k body de-TOASTs (≈ 20 MB compressed
+sequence; recheck de-TOASTs only those bodies. Phase A here costs up to 5k body de-TOASTs (≈ 10 MB compressed
 reads), which is the price of making common terms fast; this is the term the W calibration in §12.3 is tuned on.
 For English `invoice` the bitmap becomes
 `BitmapOr(Bitmap Index Scan on messages_body_trgm, Bitmap Index Scan on messages_body_fts)` and the recheck
-evaluates the OR (ILIKE first; the `to_tsvector` recomputation happens only for rows found by the stem branch).
+evaluates the OR against the stored `body_tsv` (no `to_tsvector` recomputation anywhere).
 
 ### 7.6 Other read paths
 
@@ -2298,7 +2313,7 @@ SELECT m.id, m.message_id, m.subject, m.sent_at, m.received_at,
        m.sender_name, a.email AS sender_email,
        m.recipients_search AS recipients, m.recipient_count, m.to_preview,
        m.has_attachments, m.body_text, m.snippet, m.body_source,
-       to_tsvector('english'::regconfig, left(m.subject || ' ' || m.body_text, 100000)) AS body_tsv,
+       m.body_tsv,
        m.imported_at
 FROM messages m LEFT JOIN addresses a ON a.id = m.sender_address_id;
 
