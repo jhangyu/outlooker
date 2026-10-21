@@ -25,4 +25,10 @@ Any production code, scaffolding, dependency installation.
 3 rounds per deliverable.
 
 ## Parking lot
-(empty)
+- Prototype-only features (user ruled out of scope 2026-10-21): exact delete/keep preview on PST removal; true pause / pause all / converter worker count / re-convert images / disk usage breakdown / SQL format button; search term highlighting; drag-and-drop import. UI must not show these controls.
+- macOS signing + notarization of bundled PostgreSQL binaries (release time).
+- CI workflow once a git remote exists.
+- Grep check for forbidden dependency names.
+
+## User decisions log
+- 2026-10-21: Windows x64 machine available; user opens SSH for direct operation after all macOS-side prerequisites are done.
