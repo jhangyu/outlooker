@@ -68,6 +68,8 @@ describe("global UI rules", () => {
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
         const parent = n.parentElement?.tagName;
         if (parent === "STYLE" || parent === "SCRIPT") continue;
+        // CodeMirror renders user SQL and its own fold-gutter glyphs; neither is a UI string.
+        if (n.parentElement?.closest(".cm-editor")) continue;
         const text = (n.textContent ?? "").trim();
         if (text && !KEY.test(text) && !NUMERIC.test(text)) bad.push(text);
       }
