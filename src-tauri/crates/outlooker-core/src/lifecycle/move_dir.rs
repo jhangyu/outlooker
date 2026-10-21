@@ -31,6 +31,8 @@ fn tree_stats(dir: &Path) -> std::io::Result<(u64, u64)> {
 
 fn copy_tree(src: &Path, dst: &Path, copied: &mut u64, on_progress: &mut dyn FnMut(u64)) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
+    // PostgreSQL refuses a pgdata whose mode is not 0700, so directories keep the source mode.
+    std::fs::set_permissions(dst, std::fs::metadata(src)?.permissions())?;
     for e in std::fs::read_dir(src)? {
         let e = e?;
         let to = dst.join(e.file_name());
@@ -98,6 +100,11 @@ impl Supervisor {
             emit(&sink, DataDirMovePhase::Failed, 0, bytes, Some(e));
             return;
         }
+        // The stop wrote WAL / log data, so the verify baseline is measured now, not before the stop.
+        let (files, bytes) = match tree_stats(old.data_root()) {
+            Ok(s) => s,
+            Err(_) => (files, bytes),
+        };
         emit(&sink, DataDirMovePhase::Copying, 0, bytes, None);
         let moved = async {
             let (src, dst, sink2) = (old.data_root().to_path_buf(), target.clone(), sink.clone());
@@ -117,7 +124,7 @@ impl Supervisor {
             emit(&sink, DataDirMovePhase::Verifying, bytes, bytes, None);
             let (f2, b2) = tree_stats(&target).map_err(|e| AppError::file_access(&target, &e.to_string()))?;
             if self.inner.fail_next_verify.swap(false, Ordering::SeqCst) || f2 != files || b2 != bytes {
-                return Err(AppError::internal("data dir move verify failed: file count or size differs"));
+                return Err(AppError::internal(format!("data dir move verify failed: file count or size differs (source {files} files {bytes} bytes, copy {f2} files {b2} bytes)")));
             }
             self.inner.settings.set_data_dir(&target.display().to_string())?;
             self.set_paths(old.with_data_root(target.clone()));
