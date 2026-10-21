@@ -23,4 +23,10 @@ export const config = {
   reporters: ["spec"],
   logLevel: "warn",
   waitforTimeout: 10_000,
+  // An explicit switchToWindow turns off the tauri-service auto-focus check, which otherwise waits 5 s for
+  // window.__TAURI__ (not exposed, withGlobalTauri is off) before every element command.
+  before: async (_caps: unknown, _specs: unknown, browser: WebdriverIO.Browser) => {
+    const [handle] = await browser.getWindowHandles();
+    await browser.switchToWindow(handle!);
+  },
 };
