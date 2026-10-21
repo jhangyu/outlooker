@@ -7,3 +7,10 @@ publish = false
 [dependencies]
 outlooker-core = { path = "../outlooker-core", features = ["test-support"] }
 tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros"] }
+tokio-postgres = "=0.7.18"
+image = "=0.25.10"
+rayon = "=1.12.0"
+serde_json = "=1.0.154"
+
+[dev-dependencies]
+tempfile = "=3.27.0"

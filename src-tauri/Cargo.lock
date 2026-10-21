@@ -3522,8 +3522,13 @@ dependencies = [
 name = "outlooker-loadgen"
 version = "0.1.0"
 dependencies = [
+ "image",
  "outlooker-core",
+ "rayon",
+ "serde_json",
+ "tempfile",
  "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]
