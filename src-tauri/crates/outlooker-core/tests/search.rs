@@ -1,3 +1,4 @@
+#![cfg(feature = "test-support")]
 //! Search Service tests on seeded rows (spec Part 04 §7, §12.2 rows Search compiler / Search semantics).
 use std::time::{Duration, UNIX_EPOCH};
 
