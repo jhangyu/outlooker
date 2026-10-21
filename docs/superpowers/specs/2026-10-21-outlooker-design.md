@@ -498,7 +498,7 @@ flowchart LR
 | PostgreSQL fails to start | `pg_ctl start` exit code, PG log | Retries per §2.2 step 5 (port), then `Failed` with the last PG log line | Fatal screen with details and "retry" (`app_retry`, 03 §4) | None |
 | CJK trigram self-check fails | §2.2 step 6 | `Failed` ("database misconfigured") | Fatal screen | None |
 | Data dir move fails after copy began | Copy or verify error, or start error at the new location | Start PG again from the old location. Delete the partial copy. Old data untouched. | `data-dir:move-progress` `failed` + error | None |
-| Advanced SQL write attempt | PostgreSQL `25006` (read-only transaction) or `42501` (permission denied) | `readOnlyViolation` | Error in the SQL screen | None |
+| Advanced SQL write attempt | PostgreSQL `25006` (read-only transaction), `55000` (write into a non-updatable view) or `42501` on a statement without result columns — exact rule in 04 §8.1 | `readOnlyViolation` | Error in the SQL screen | None |
 | Advanced SQL slow query | `57014` after `statement_timeout` | `queryTimeout` | Error in the SQL screen | None |
 
 ### 6.2 Cancel / resume semantics
@@ -649,7 +649,7 @@ pub enum AppError {
     QueryTimeout { timeout_ms: u32 },
     Cancelled,
     SqlError { sqlstate: String, message: String, position: Option<u32> }, // Advanced SQL only
-    ReadOnlyViolation,                            // Advanced SQL attempted a write (SQLSTATE 25006)
+    ReadOnlyViolation,                            // Advanced SQL attempted a write (SQLSTATE mapping: 04 §8.1)
     Busy { reason: BusyReason },                  // operation conflicts with a running job
     FileAccess { path: String, reason: String },  // missing, unreadable, not writable, insufficient space
     NotAPst { path: String },
@@ -1068,7 +1068,7 @@ pub enum SqlResult {
         truncated: bool,
         elapsed_ms: u32,
     },
-    Command { tag: String, elapsed_ms: u32 },   // statement returned no result columns (e.g. SET); tag = PostgreSQL command tag
+    Command { tag: String, elapsed_ms: u32 },   // statement returned no result columns (e.g. SET); tag = first keyword of the statement, uppercased (known limit, 04 §8.1)
 }
 pub struct ColumnMeta { pub name: String, pub pg_type: String }   // pg_type = type name, e.g. "int8", "text", "timestamptz"
 #[serde(untagged)]
@@ -1078,7 +1078,7 @@ pub type CellValue = Option<String>;   // TS: string | null
 - **Schema visible to the user:** the six read-only views `v_mail`, `v_recipients`, `v_occurrences`, `v_attachments`, `v_folders`, `v_pst_sources` (04 §8.2); role `outlooker_ro` has no privilege on base tables. The editor's autocomplete schema for `@codemirror/lang-sql` is a static constant in the frontend generated from the same view list.
 - **Mode detection:** from the prepared statement's column metadata (04 §8.1 step 2): `MailList` when the result has a column named exactly `id` (case-sensitive, as returned by PostgreSQL) of type `int8`, `int4` or `int2` — e.g. any query selecting `v_mail.id`. Otherwise `Table`. In `MailList` mode the core collects the ids (first `max_rows`), loads `MailRow`s for them in one query, and keeps the query's row order. Clicking a row calls `mail_get(id)` for column 4.
 - **Cell encoding (`Table`):** rows come from tokio-postgres `simple_query` (01 §7), so every value is PostgreSQL's text output (`t`/`f` for booleans, `\x…` hex for `bytea`) or `null`. Values are cut at 2,000 characters with a trailing `…`. The frontend right-aligns cells whose `pgType` is numeric (`int2`, `int4`, `int8`, `float4`, `float8`, `numeric`); it does not parse them, so no precision is lost.
-- **Read-only:** runs on the dedicated read-only pool (role with only `SELECT` grants, `default_transaction_read_only = on`), inside `BEGIN READ ONLY … ROLLBACK`. Write attempts → `readOnlyViolation`.
+- **Read-only:** runs on the dedicated read-only pool (role with only `SELECT` grants, `default_transaction_read_only = on`), inside `BEGIN READ ONLY … ROLLBACK`. Write attempts → `readOnlyViolation`. SQLSTATE mapping (one rule, defined in 04 §8.1): `25006` and `55000` → `readOnlyViolation`; `42501` → `readOnlyViolation` only when the statement prepared successfully and has no result columns (a write), otherwise `sqlError` with `sqlstate: "42501"` (e.g. `SELECT * FROM messages`, a base table without grant).
 - **Limits:** `statement_timeout = 30 s`; one statement only (multiple statements → `invalidInput{field:"sql", reason:"multipleStatements"}`); `max_rows` cap enforced by `DECLARE … CURSOR` + `FETCH FORWARD max_rows + 1` (04 §8.1 step 4). SQLSTATE `57014` maps to `cancelled` when `sql_cancel` was called for this execution, otherwise to `queryTimeout{timeoutMs: 30000}`.
 - **Mail-list hydration:** the `id` text values are parsed as integers and loaded with the same hydrate query as `search_mail` (04 §7.4) on the app pool.
 - **Concurrency:** one running execution at a time. The frontend disables Run while executing; the core enforces it with `invalidInput{field:"executionId", reason:"alreadyRunning"}`.
@@ -2245,7 +2245,9 @@ Per execution (03 §6.2), on one connection of the read-only pool, with tokio-po
    SQLSTATE 42601 "cannot insert multiple commands into a prepared statement" (`src/backend/tcop/postgres.c`) →
    `invalidInput{field:"sql", reason:"multipleStatements"}`. Any other error → `sqlError` with its position.
    The prepared statement's `columns()` give `ColumnMeta { name, pg_type: type().name() }`.
-3. No result columns → **Command** mode: `simple_query(sql)`, return the command tag.
+3. No result columns → **Command** mode: `simple_query(sql)`, return `tag` = the first keyword of the statement,
+   ASCII-uppercased (`SET`, `DO`, …). Known limit: tokio-postgres 0.7.18 reports only the row count of
+   `CommandComplete` (`SimpleQueryMessage::CommandComplete(u64)`), so the server's command tag is not available.
 4. Result columns → `simple_query("DECLARE outlooker_c NO SCROLL CURSOR FOR " || sql)`, then
    `simple_query("FETCH FORWARD <max_rows + 1> FROM outlooker_c")`. `simple_query` returns every value as text,
    which feeds the generic table directly (01 §7). The server produces at most `max_rows + 1` rows.
@@ -2254,7 +2256,17 @@ Per execution (03 §6.2), on one connection of the read-only pool, with tokio-po
    first `max_rows + 1` rows (these statements return small results).
 5. `ROLLBACK; DISCARD ALL;` — undoes any `SET` the user issued (02 §7.2).
 
-- Writes fail with SQLSTATE `25006` (read-only transaction) or `42501` (no privilege) → `readOnlyViolation`.
+- SQLSTATE → `AppError` mapping, applied to an error from any of steps 2–4 (single rule; 03 §6.2 refers here):
+  | SQLSTATE | Result |
+  |---|---|
+  | `42601` with message "cannot insert multiple commands into a prepared statement" | `invalidInput{field:"sql", reason:"multipleStatements"}` |
+  | `25006` read-only transaction (a write that reaches the executor inside `BEGIN READ ONLY`) | `readOnlyViolation` |
+  | `55000` object not in prerequisite state (write into a non-updatable view, e.g. `DELETE FROM v_mail`; raised at prepare — measured on PostgreSQL 18.6 by planner-2) | `readOnlyViolation` |
+  | `42501` insufficient privilege, statement prepared and has **no** result columns (a write) | `readOnlyViolation` |
+  | `42501` on a statement with result columns, or raised at prepare (e.g. `SELECT * FROM messages`) | `sqlError{sqlstate:"42501", …}` — the user can fix the query by using the views |
+  | `57014` query canceled | `cancelled` if `sql_cancel` was called for this execution, else `queryTimeout{timeoutMs: 30000}` |
+  | any other | `sqlError{sqlstate, message, position}` |
+  `428C9` (generated column) is not mapped: no view exposed to `outlooker_ro` has a generated column.
 - `temp_file_limit` (superuser-only parameter) cannot be changed by the user; `statement_timeout` changes are
   undone by the rollback.
 - Server-side file and program access (`COPY … TO PROGRAM`, `pg_read_file`, `lo_import`) needs superuser or
