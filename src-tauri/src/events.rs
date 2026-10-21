@@ -139,7 +139,7 @@ fn emit_now(app: &AppHandle, e: &CoreEvent) {
 }
 
 impl TauriSink {
-    /// Spawns the trailing-flush task: it sleeps on a deadline timer (or on `notify` when nothing is pending).
+    /// Spawns the trailing-flush task: it waits on a deadline timer (or on `notify` when nothing is pending).
     pub fn new(app: AppHandle) -> Arc<TauriSink> {
         let sink = Arc::new(TauriSink {
             app: app.clone(),

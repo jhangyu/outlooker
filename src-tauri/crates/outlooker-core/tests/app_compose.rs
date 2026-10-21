@@ -85,7 +85,9 @@ fn opts(import_tuning: ImportTuning) -> BuildOptions {
 
 async fn wait_phase(s: &Services, want: AppPhase) {
     let mut w = s.supervisor.phase_watch();
-    timeout(LONG, w.wait_for(|p| *p == want)).await.expect("phase timeout").expect("supervisor dropped");
+    let r = timeout(LONG, w.wait_for(|p| *p == want || *p == AppPhase::Failed)).await;
+    let reached = *r.expect("phase timeout").expect("supervisor dropped");
+    assert_eq!(reached, want, "supervisor failed: {:?}", s.supervisor.status().await);
 }
 
 /// Onboarding through the Supervisor only (no worker): returns Ready services on `<root>/data`.
