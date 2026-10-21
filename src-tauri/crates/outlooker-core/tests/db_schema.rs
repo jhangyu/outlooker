@@ -1,3 +1,4 @@
+#![cfg(feature = "test-support")]
 use outlooker_core::db::{indexes, Credentials, Db};
 use outlooker_core::dto::error::AppError;
 use outlooker_core::test_support::TestCluster;
