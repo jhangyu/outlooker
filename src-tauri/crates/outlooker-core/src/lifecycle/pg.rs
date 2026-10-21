@@ -81,6 +81,30 @@ fn last_line(text: &str) -> String {
     text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_owned()
 }
 
+/// Why one initdb candidate failed: `Locale` = try the next locale, `Fatal` = stop and report.
+enum CandidateError {
+    Locale(AppError),
+    Fatal(AppError),
+}
+
+impl From<AppError> for CandidateError {
+    fn from(e: AppError) -> Self {
+        CandidateError::Fatal(e)
+    }
+}
+
+/// initdb stderr that points at the chosen locale (unknown name, unusable settings), not at the host.
+fn initdb_locale_failure(stderr: &str) -> bool {
+    let s = stderr.to_ascii_lowercase();
+    s.contains("invalid locale") || s.contains("no usable system locales") || (s.contains("locale") && s.contains("does not exist"))
+}
+
+/// The FATAL / ERROR lines of initdb's stderr (the last line is only "removing data directory"); falls back to the last line.
+fn initdb_detail(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr.lines().map(str::trim).filter(|l| l.contains("FATAL:") || l.contains("ERROR:") || l.starts_with("initdb: error")).collect();
+    if lines.is_empty() { last_line(stderr) } else { lines.join("; ") }
+}
+
 /// One connection for the self-check and role setup. `db::connect` re-exports this.
 pub async fn connect(port: u16, user: &str, password: &str, dbname: &str) -> Result<tokio_postgres::Client, AppError> {
     let mut cfg = tokio_postgres::Config::new();
@@ -223,10 +247,15 @@ impl PgController {
                     log::info!("initdb locale {locale} passed the CJK trigram self-check");
                     return Ok(locale.to_owned());
                 }
-                Err(e) => {
+                Err(CandidateError::Locale(e)) => {
                     log::warn!("initdb locale {locale} rejected: {e}");
                     failures.push(format!("{locale}: {e}"));
                     let _ = tokio::fs::remove_dir_all(pgdata).await;
+                }
+                // Any other failure (shared memory, disk, permissions) is not fixed by another locale.
+                Err(CandidateError::Fatal(e)) => {
+                    let _ = tokio::fs::remove_dir_all(pgdata).await;
+                    return Err(e);
                 }
             }
         }
@@ -236,13 +265,13 @@ impl PgController {
         )))
     }
 
-    async fn try_candidate(&self, pgdata: &Path, pw: &str, locale: &str, ram: u64) -> Result<(), AppError> {
+    async fn try_candidate(&self, pgdata: &Path, pw: &str, locale: &str, ram: u64) -> Result<(), CandidateError> {
         let parent = pgdata.parent().ok_or_else(|| AppError::internal("pgdata has no parent"))?;
         tokio::fs::create_dir_all(parent).await.map_err(|e| io_err("create data root", e))?;
         let pwfile = parent.join(".initdb-pw");
         if let Err(e) = write_private(&pwfile, pw) {
             let _ = std::fs::remove_file(&pwfile);
-            return Err(io_err("write pwfile", e));
+            return Err(io_err("write pwfile", e).into());
         }
         let args: Vec<OsString> = vec![
             "-D".into(), pgdata.into(), "-U".into(), ADMIN_ROLE.into(),
@@ -254,19 +283,20 @@ impl PgController {
         let _ = tokio::fs::remove_file(&pwfile).await;
         let out = out?;
         if !out.status.success() {
-            return Err(AppError::internal(format!("initdb: {}", last_line(&String::from_utf8_lossy(&out.stderr)))));
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let e = AppError::internal(format!("initdb: {}", initdb_detail(&stderr)));
+            return Err(if initdb_locale_failure(&stderr) { CandidateError::Locale(e) } else { CandidateError::Fatal(e) });
         }
         tokio::fs::write(pgdata.join("postgresql.auto.conf"), auto_conf(ram)).await.map_err(|e| io_err("write postgresql.auto.conf", e))?;
         tokio::fs::write(pgdata.join("pg_hba.conf"), HBA_CONF).await.map_err(|e| io_err("write pg_hba.conf", e))?;
         let port = self.start(pgdata).await?;
         let check = async {
-            let postgres = connect(port, ADMIN_ROLE, pw, "postgres").await?;
-            postgres.batch_execute("CREATE DATABASE outlooker").await.map_err(|e| AppError::internal(e.to_string()))?;
+            let postgres = connect(port, ADMIN_ROLE, pw, "postgres").await?;            postgres.batch_execute("CREATE DATABASE outlooker").await.map_err(|e| AppError::internal(e.to_string()))?;
             drop(postgres);
             let db = connect(port, ADMIN_ROLE, pw, "outlooker").await?;
             db.batch_execute("CREATE EXTENSION IF NOT EXISTS pg_trgm").await.map_err(|e| AppError::internal(e.to_string()))?;
             let ok: bool = db.query_one(CJK_SELF_CHECK, &[]).await.map_err(|e| AppError::internal(e.to_string()))?.get(0);
-            if ok { Ok(()) } else { Err(AppError::internal(format!("CJK trigram self-check failed for locale {locale}"))) }
+            if ok { Ok(()) } else { Err(CandidateError::Locale(AppError::internal(format!("CJK trigram self-check failed for locale {locale}")))) }
         }
         .await;
         self.stop(pgdata, StopMode::Fast).await?;
@@ -390,6 +420,21 @@ mod tests {
         write_private(&f, "secret").unwrap();
         assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "secret");
+    }
+
+    #[test]
+    fn initdb_stderr_classification() {
+        let shm = "creating directory /x ... ok\nselecting dynamic shared memory implementation ... posix\n\
+                   2026-10-22 03:00:00.000 CST [1] FATAL:  could not create shared memory segment: No space left on device\n\
+                   child process exited with exit code 1\ninitdb: removing data directory \"/x\"\n";
+        assert!(!initdb_locale_failure(shm));
+        let detail = initdb_detail(shm);
+        assert!(detail.contains("could not create shared memory segment"), "{detail}");
+        assert!(!detail.contains("removing data directory"));
+        let bad = "initdb: error: invalid locale name \"zh_XX.UTF-8\"\n";
+        assert!(initdb_locale_failure(bad));
+        assert!(initdb_detail(bad).contains("invalid locale name"));
+        assert_eq!(initdb_detail("something\nlast words\n"), "last words");
     }
 
     #[test]
