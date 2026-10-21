@@ -27,4 +27,6 @@ Frozen 2026-10-22 under the user's standing authorization ("after the full execu
 2 implementation rounds (plan). Inside a round: at most 2 fix iterations per failing gate before the leader stops and reports.
 
 ## Parking lot
-(empty)
+- For R2-12 / R2-REV: outlooker_ro can turn default_transaction_read_only off in its own session (found by impl-r104), so the SQL console must open every statement with BEGIN READ ONLY itself and the role's SELECT-only grants remain the real guard; R2-REV checks this.
+- Plan §2.1 says the kickoff pins every Part 01 §9 npm dep, but @wdio/local-runner and @wdio/spec-reporter are added by R2-14 Step 1 (accepted).
+- sha256 pins for the 5 non-macOS-arm64 PostgreSQL targets are untested until the Windows phase.
