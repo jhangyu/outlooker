@@ -288,12 +288,13 @@ impl PgController {
             if out.status.success() {
                 return Ok(port);
             }
+            // logging_collector moves the real error (e.g. "could not bind") into the newest server log.
             let text = format!(
-                "{}\n{}\n{}",
+                "{}\n{}\n{}\n{}",
                 String::from_utf8_lossy(&out.stdout),
                 String::from_utf8_lossy(&out.stderr),
-                // logging_collector moves the real error (e.g. "could not bind") into the newest server log.
-                format!("{}\n{}", tokio::fs::read_to_string(&startup_log).await.unwrap_or_default(), newest_server_log(&log_dir))
+                tokio::fs::read_to_string(&startup_log).await.unwrap_or_default(),
+                newest_server_log(&log_dir)
             );
             if text.contains("could not bind") || text.contains("Address already in use") {
                 bind_attempts += 1;
@@ -303,10 +304,10 @@ impl PgController {
             }
             if text.contains("lock file") && text.contains("already exists") && !pid_retry_done {
                 pid_retry_done = true;
-                if let Some(pid) = read_pid(pgdata) {
-                    if matches!(pid_owner(pid, &self.paths.pg_bin("postgres")), PidOwner::OurPostgres | PidOwner::Foreign) {
-                        return Err(AppError::file_access(pgdata, "inUseByOtherUser"));
-                    }
+                if let Some(pid) = read_pid(pgdata)
+                    && matches!(pid_owner(pid, &self.paths.pg_bin("postgres")), PidOwner::OurPostgres | PidOwner::Foreign)
+                {
+                    return Err(AppError::file_access(pgdata, "inUseByOtherUser"));
                 }
                 let _ = tokio::fs::remove_file(pgdata.join("postmaster.pid")).await;
                 continue;
