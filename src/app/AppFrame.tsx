@@ -1,0 +1,213 @@
+import {
+  Accordion, AccordionHeader, AccordionItem, AccordionPanel, Badge, Body1, Button, Caption1, MessageBar, MessageBarBody,
+  Spinner, Tab, TabList, Title2, Toaster, ToggleButton, makeStyles, tokens,
+} from "@fluentui/react-components";
+import {
+  ArrowDownload24Regular, Database24Regular, ErrorCircleRegular, Search24Regular, Settings24Regular,
+} from "@fluentui/react-icons";
+import { useQuery } from "@tanstack/react-query";
+import { useState, type JSX } from "react";
+import { useTranslation } from "react-i18next";
+import { api } from "../api/commands";
+import type { AppError } from "../api/bindings/AppError";
+import type { AppPhase } from "../api/bindings/AppPhase";
+import { formatAppError, toAppError, useLanguageSwitch } from "../components/common";
+import { AdvancedSqlScreen } from "../screens/advanced-sql";
+import { ImportScreen } from "../screens/import";
+import { OnboardingScreen } from "../screens/onboarding";
+import { SearchScreen } from "../screens/search";
+import { SettingsScreen } from "../screens/settings";
+import { useMoveSession } from "../screens/settings/moveSession";
+import { useAppStatus, useNavigation, useOnboardingActive, type ScreenId } from "./AppStatusContext";
+
+const useStyles = makeStyles({
+  app: { display: "grid", gridTemplateRows: "48px 1fr", gridTemplateColumns: "68px 1fr", height: "100vh", overflow: "hidden" },
+  titleBar: {
+    gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalL, backgroundColor: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand,
+  },
+  brand: { width: "68px", display: "grid", placeItems: "center" },
+  logo: {
+    width: "28px", height: "28px", borderRadius: tokens.borderRadiusMedium, display: "grid", placeItems: "center",
+    backgroundColor: tokens.colorNeutralBackground1, color: tokens.colorBrandForeground1, fontWeight: tokens.fontWeightBold,
+  },
+  appName: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightSemibold },
+  crumb: { opacity: 0.9 },
+  spacer: { flex: 1 },
+  langButton: { color: tokens.colorNeutralForegroundOnBrand },
+  rail: {
+    backgroundColor: tokens.colorNeutralBackground3, borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalXS}`, display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS,
+  },
+  railTab: { flexDirection: "column", height: "60px", justifyContent: "center", gap: "2px", fontSize: tokens.fontSizeBase100 },
+  railGap: { flex: 1 },
+  main: { minWidth: 0, minHeight: 0, overflow: "hidden", backgroundColor: tokens.colorNeutralBackground3 },
+  center: {
+    height: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+    gap: tokens.spacingVerticalM, padding: tokens.spacingHorizontalXXL, boxSizing: "border-box", textAlign: "center",
+  },
+  failedIcon: { fontSize: "48px", color: tokens.colorStatusDangerForeground1 },
+  details: { width: "min(720px, 100%)", textAlign: "left" },
+  pre: { whiteSpace: "pre-wrap", fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200, margin: 0 },
+});
+
+const SCREENS: Record<ScreenId, () => JSX.Element | null> = {
+  search: SearchScreen,
+  advancedSql: AdvancedSqlScreen,
+  import: ImportScreen,
+  settings: SettingsScreen,
+};
+
+export function FailedScreen({ error, onRetry }: { error: AppError | null; onRetry: () => Promise<unknown> }) {
+  const s = useStyles();
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const [retryError, setRetryError] = useState<AppError | null>(null);
+  const retry = async () => {
+    setBusy(true);
+    setRetryError(null);
+    try {
+      await onRetry();
+    } catch (e) {
+      setRetryError(toAppError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className={s.center} data-testid="failed-screen">
+      <ErrorCircleRegular className={s.failedIcon} aria-hidden />
+      <Title2>{t("failed.title")}</Title2>
+      <Body1>{t("failed.body")}</Body1>
+      {error ? <Body1>{formatAppError(error, t)}</Body1> : null}
+      {retryError ? (
+        <MessageBar intent="error">
+          <MessageBarBody>{formatAppError(retryError, t)}</MessageBarBody>
+        </MessageBar>
+      ) : null}
+      {error ? (
+        <Accordion collapsible className={s.details}>
+          <AccordionItem value="details">
+            <AccordionHeader>{t("failed.details")}</AccordionHeader>
+            <AccordionPanel>
+              <pre className={s.pre}>{error.kind === "internal" ? error.detail : JSON.stringify(error, null, 2)}</pre>
+            </AccordionPanel>
+          </AccordionItem>
+        </Accordion>
+      ) : null}
+      <Button appearance="primary" onClick={retry} disabled={busy} data-testid="failed-retry">
+        {t("failed.retry")}
+      </Button>
+    </div>
+  );
+}
+
+function BlockingScreen({ phase }: { phase: AppPhase }) {
+  const s = useStyles();
+  const { t } = useTranslation();
+  return (
+    <div className={s.center} data-testid="blocking-screen">
+      <Spinner size="large" label={t(`phase.${phase}`)} />
+      <Caption1>{t("phase.hint")}</Caption1>
+    </div>
+  );
+}
+
+function TitleBar() {
+  const s = useStyles();
+  const { t, i18n } = useTranslation();
+  const { screen } = useNavigation();
+  const setLanguage = useLanguageSwitch();
+  const psts = useQuery({ queryKey: ["pstList"], queryFn: () => api.pstList() });
+  const running = psts.data?.find((p) => p.status === "running");
+  const total = running?.progress?.itemsTotal ?? null;
+  const importing = running
+    ? total
+      ? t("titlebar.importing", { percent: Math.round(((running.progress?.itemsDone ?? 0) / total) * 100) })
+      : t("titlebar.scanning")
+    : null;
+  return (
+    <header className={s.titleBar} data-testid="title-bar">
+      <div className={s.brand}>
+        <div className={s.logo} aria-hidden>
+          O
+        </div>
+      </div>
+      <span className={s.appName}>{t("app.name")}</span>
+      <span className={s.crumb}>· {t(`nav.${screen}`)}</span>
+      <span className={s.spacer} />
+      {importing ? <Badge appearance="filled" color="informative">{importing}</Badge> : null}
+      <div role="group" aria-label={t("language.label")}>
+        {(["zh-TW", "en"] as const).map((lng) => (
+          <ToggleButton
+            key={lng}
+            size="small"
+            appearance="transparent"
+            className={s.langButton}
+            checked={i18n.language === lng}
+            onClick={() => void setLanguage(lng)}
+          >
+            {t(`language.${lng}`)}
+          </ToggleButton>
+        ))}
+      </div>
+    </header>
+  );
+}
+
+function NavRail() {
+  const s = useStyles();
+  const { t } = useTranslation();
+  const { screen, go } = useNavigation();
+  const tab = (id: ScreenId, icon: JSX.Element) => (
+    <Tab value={id} icon={icon} className={s.railTab} data-testid={`nav-${id}`}>
+      {t(`nav.${id}`)}
+    </Tab>
+  );
+  return (
+    <TabList
+      vertical
+      selectedValue={screen}
+      onTabSelect={(_, d) => go(d.value as ScreenId)}
+      aria-label={t("nav.main")}
+      className={s.rail}
+    >
+      {tab("search", <Search24Regular />)}
+      {tab("advancedSql", <Database24Regular />)}
+      {tab("import", <ArrowDownload24Regular />)}
+      <div className={s.railGap} />
+      {tab("settings", <Settings24Regular />)}
+    </TabList>
+  );
+}
+
+export function AppFrame() {
+  const s = useStyles();
+  const status = useAppStatus();
+  const onboarding = useOnboardingActive();
+  const { screen } = useNavigation();
+  // A data-folder move drives the phase through stoppingDb → startingDb → ready (Part 03 §8.2). Its own blocking
+  // dialog on the Settings screen shows the progress, so the frame stays mounted until that dialog is closed.
+  const moving = useMoveSession() !== null;
+  const Screen = SCREENS[screen];
+  let body: JSX.Element;
+  if (status.phase === "failed") body = <FailedScreen error={status.error} onRetry={() => api.appRetry()} />;
+  else if (onboarding) body = <OnboardingScreen />;
+  else if (status.phase !== "ready" && !moving) body = <BlockingScreen phase={status.phase} />;
+  else
+    body = (
+      <div className={s.app}>
+        <TitleBar />
+        <NavRail />
+        <main className={s.main}>
+          <Screen />
+        </main>
+      </div>
+    );
+  return (
+    <>
+      {body}
+      <Toaster toasterId="app" position="bottom-end" />
+    </>
+  );
+}

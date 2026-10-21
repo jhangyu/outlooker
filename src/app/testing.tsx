@@ -54,19 +54,24 @@ type Handler = (payload: unknown) => void;
 const handlers = new Map<string, Set<Handler>>();
 
 /** Replacement module for src/api/events in tests: vi.mock("<rel>/api/events", async () => (await import("<rel>/app/testing")).eventsMock). */
+const register = async (name: string, handler: Handler) => {
+  const set = handlers.get(name) ?? new Set<Handler>();
+  set.add(handler);
+  handlers.set(name, set);
+  return () => {
+    set.delete(handler);
+  };
+};
+
 export const eventsMock = {
-  onEvent: vi.fn(async (name: string, handler: Handler) => {
-    const set = handlers.get(name) ?? new Set<Handler>();
-    set.add(handler);
-    handlers.set(name, set);
-    return () => set.delete(handler);
-  }),
+  onEvent: vi.fn(register),
   emit(name: string, payload: unknown) {
     handlers.get(name)?.forEach((h) => h(payload));
   },
   reset() {
     handlers.clear();
-    eventsMock.onEvent.mockClear();
+    eventsMock.onEvent.mockReset();
+    eventsMock.onEvent.mockImplementation(register);
   },
 };
 
