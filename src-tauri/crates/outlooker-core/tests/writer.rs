@@ -1,3 +1,4 @@
+#![cfg(feature = "test-support")]
 //! Bulk writer tests (spec Part 04 §4.2, §6.1–§6.3) on a real PostgreSQL test cluster.
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};

@@ -1,3 +1,4 @@
+#![cfg(feature = "test-support")]
 //! PST removal tests (spec Part 04 §4.3, §12.2 row Removal).
 use outlooker_core::importer::remove::{self, RemoveStats};
 use outlooker_core::importer::types::{EncodedImage, InlineImageOut, NormalizedMail};
