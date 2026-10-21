@@ -51,17 +51,18 @@ impl EventSink for TestSink {
     fn emit(&self, e: CoreEvent) {
         if let CoreEvent::ImportStatusChanged(c) = &e {
             let watched = self.watched.lock().unwrap().clone();
-            if let Some((pst_id, db)) = watched {
-                if c.pst_id == pst_id && c.status != ImportStatus::Queued {
-                    // multi_thread test runtime: block this worker thread for one catalog query
-                    let valid = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(async {
-                            let admin = db.connect_admin().await.expect("admin connection");
-                            missing_or_invalid(&admin).await.expect("index check").is_empty()
-                        })
-                    });
-                    self.probes.lock().unwrap().push((c.status, valid));
-                }
+            if let Some((pst_id, db)) = watched
+                && c.pst_id == pst_id
+                && c.status != ImportStatus::Queued
+            {
+                // multi_thread test runtime: block this worker thread for one catalog query
+                let valid = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        let admin = db.connect_admin().await.expect("admin connection");
+                        missing_or_invalid(&admin).await.expect("index check").is_empty()
+                    })
+                });
+                self.probes.lock().unwrap().push((c.status, valid));
             }
         }
         self.rec.emit(e.clone());

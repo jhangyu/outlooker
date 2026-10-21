@@ -82,13 +82,12 @@ impl Throttle {
         let Some((key, window)) = throttle_key(&e) else {
             let flush = ends_job(&e);
             let mut out = vec![e];
-            if flush {
-                if let Some(slot) = self.slots.get_mut(&ThrottleKey::LibraryChanged) {
-                    if let Some(pending) = slot.pending.take() {
-                        slot.mark(now, &pending);
-                        out.push(pending);
-                    }
-                }
+            if flush
+                && let Some(slot) = self.slots.get_mut(&ThrottleKey::LibraryChanged)
+                && let Some(pending) = slot.pending.take()
+            {
+                slot.mark(now, &pending);
+                out.push(pending);
             }
             return out;
         };

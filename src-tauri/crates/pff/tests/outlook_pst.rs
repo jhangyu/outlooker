@@ -56,7 +56,7 @@ fn version_is_20260625() {
 #[test]
 fn non_pst_is_error() {
     let cargo_toml = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
-    assert_eq!(pff::check_signature(&cargo_toml).unwrap(), false);
+    assert!(!pff::check_signature(&cargo_toml).unwrap());
     assert!(File::open(&cargo_toml).is_err());
     assert!(pff::check_signature(&fixture()).unwrap());
 }
