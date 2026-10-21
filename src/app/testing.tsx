@@ -12,6 +12,15 @@ import type { PstSource } from "../api/bindings/PstSource";
 import { AppStatusProvider, type ScreenId } from "./AppStatusContext";
 import { createI18n } from "./i18n";
 
+// jsdom has no ResizeObserver; Fluent's MessageBar needs one. (src/test/setup.ts belongs to R1-01, so the stub lives here.)
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 export function makeStatus(p: Partial<AppStatus> = {}): AppStatus {
   return { phase: "ready", dataDir: "/data", language: "en", counts: { messages: 0, psts: 0 }, error: null, ...p };
 }
