@@ -1,0 +1,6 @@
+repo=jhangyu/libpff
+commit=bb5bcc0
+run_id=32393676269
+artifact=cibw-sdist
+sdist=libpff_python-20260625.tar.gz
+sha256=5a62a75934f8ddf3f8d0498a3c0bddb2ae436200ed791b9a56f637c3e093bec6

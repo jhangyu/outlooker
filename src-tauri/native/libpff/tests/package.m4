@@ -1,0 +1,5 @@
+m4_define([AT_PACKAGE_NAME], [libpff])
+m4_define([AT_PACKAGE_TARNAME], [libpff])
+m4_define([AT_PACKAGE_VERSION], [20260625])
+m4_define([AT_PACKAGE_STRING], [libpff 20260625])
+m4_define([AT_PACKAGE_BUGREPORT], [https://github.com/libyal/libpff/issues])
