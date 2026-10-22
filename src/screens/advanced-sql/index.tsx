@@ -46,7 +46,7 @@ const useStyles = makeStyles({
   },
   title: { ...ellipsis },
   count: { flexShrink: 0, whiteSpace: "nowrap", color: tokens.colorNeutralForeground3 },
-  muted: { display: "block", color: tokens.colorNeutralForeground3, padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}` },
+  note: { display: "block", color: tokens.colorNeutralForeground3, padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}` },
   inset: { margin: tokens.spacingHorizontalM },
   fill: { flex: 1, minHeight: 0 },
   detail: {
@@ -222,7 +222,7 @@ export function AdvancedSqlScreen() {
   if (!result) {
     const empty = status.counts.messages === 0 ? (
       <EmptyState icon={<DatabaseRegular />} title={t("empty.noMailTitle")} body={t("empty.noMailBody")}
-        action={<Button appearance="primary" onClick={() => go("import")}>{t("common:action.goImport")}</Button>} />
+        action={<Button appearance="primary" size="small" onClick={() => go("import")}>{t("common:action.goImport")}</Button>} />
     ) : (
       <EmptyState icon={<DatabaseRegular />} title={t("empty.noRunTitle")} body={t("empty.noRunBody")} />
     );
@@ -247,7 +247,7 @@ export function AdvancedSqlScreen() {
             <Caption1 className={s.count}>{t("result.rows", { n: formatNumber(result.rows.length, lng) })}</Caption1>
           </div>
           {truncated}
-          {result.missingIds > 0 ? <Caption1 className={s.muted}>{t("result.missing", { n: formatNumber(result.missingIds, lng) })}</Caption1> : null}
+          {result.missingIds > 0 ? <Caption1 className={s.note}>{t("result.missing", { n: formatNumber(result.missingIds, lng) })}</Caption1> : null}
           <div className={s.fill}>
             <MailList rows={result.rows} selectedId={mailId} onSelect={setMailId} hasMore={false} capped={false} loadingMore={false}
               onEndReached={noop} ariaLabel={t("mode.mailList")} monthHeaders={false} compact />
