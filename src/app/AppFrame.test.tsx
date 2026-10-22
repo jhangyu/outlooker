@@ -6,7 +6,26 @@ vi.mock("../api/dialog");
 vi.mock("../api/events", async () => (await import("./testing")).eventsMock);
 vi.mock("../screens/search", async () => {
   const { useAppStatus } = await import("./AppStatusContext");
-  return { SearchScreen: () => <span data-testid="probe">{String(useAppStatus().counts.messages)}</span> };
+  const { useState } = await import("react");
+  return {
+    SearchScreen: () => {
+      const [q, setQ] = useState("");
+      return (
+        <>
+          <span data-testid="probe">{String(useAppStatus().counts.messages)}</span>
+          <input data-testid="search-box" value={q} onChange={(e) => setQ(e.target.value)} />
+        </>
+      );
+    },
+  };
+});
+vi.mock("../components/sql-editor", async (importOriginal) => {
+  const { createElement } = await import("react");
+  return {
+    ...(await importOriginal<typeof import("../components/sql-editor")>()),
+    SqlEditor: (p: { value: string; onChange(v: string): void; ariaLabel: string }) =>
+      createElement("textarea", { "data-testid": "sql-editor", "aria-label": p.ariaLabel, value: p.value, onChange: (e: { target: { value: string } }) => p.onChange(e.target.value) }),
+  };
 });
 
 import { api } from "../api/commands";
@@ -41,6 +60,19 @@ describe("App frame", () => {
     eventsMock.emit("app:status-changed", makeStatus({ phase: "ready" }));
     expect(await screen.findByTestId("title-bar")).toBeTruthy();
     expect(screen.getByTestId("nav-import")).toBeTruthy();
+  });
+
+  it("keeps the SQL text and the search text when switching screens", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("nav-advancedSql"));
+    fireEvent.change(await screen.findByTestId("sql-editor"), { target: { value: "select 1" } });
+    fireEvent.click(screen.getByTestId("nav-import"));
+    fireEvent.click(screen.getByTestId("nav-advancedSql"));
+    expect((screen.getByTestId("sql-editor") as HTMLTextAreaElement).value).toBe("select 1");
+    fireEvent.change(screen.getByTestId("search-box"), { target: { value: "invoice" } });
+    fireEvent.click(screen.getByTestId("nav-settings"));
+    fireEvent.click(screen.getByTestId("nav-search"));
+    expect((screen.getByTestId("search-box") as HTMLInputElement).value).toBe("invoice");
   });
 
   it("shows onboarding while setup is needed", async () => {
