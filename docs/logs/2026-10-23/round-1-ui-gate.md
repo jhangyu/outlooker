@@ -1,6 +1,6 @@
-## full gate on HEAD 6b35009 (includes 7e02d16, cdde7dc)
+## full gate on HEAD 25d8e6b (after review fixes 3dfe7e5, 73e2d15)
 - npm run build: PASS RC=0
-- npm test: PASS RC=0 (70 tests)
-- npx vitest run src/app src/components/mail: PASS RC=0 (25 tests)
-- stale-ref grep: only src/components/mail/fixtures.ts:14 (expected)
+- npm test: PASS RC=0 (71 tests)
+- npx vitest run src/app src/components/mail src/screens/search: PASS RC=0 (34 tests)
+- grep onEvent src/screens/search/index.tsx: PASS no match (grep RC=1)
 - overall: PASS
