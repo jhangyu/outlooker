@@ -1,13 +1,15 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../api/commands");
+vi.mock("../../api/dialog");
 vi.mock("../../api/events", async () => (await import("../../app/testing")).eventsMock);
 
 import { api } from "../../api/commands";
 import type { MailRow } from "../../api/bindings/MailRow";
 import type { SearchPage } from "../../api/bindings/SearchPage";
-import { eventsMock, mockApiDefaults, renderWithProviders } from "../../app/testing";
+import { App } from "../../app/App";
+import { eventsMock, makeStatus, mockApiDefaults, renderWithProviders } from "../../app/testing";
 import { makeMailRow, stubViewport } from "../../components/mail/fixtures";
 import { SearchScreen } from ".";
 
@@ -70,13 +72,16 @@ describe("Search screen", () => {
     expect(screen.queryByText("older result")).toBeNull();
   });
 
-  it("library:changed triggers a filterOptions refetch and not a list reload", async () => {
+  it("library:changed refetches filterOptions and shows the new-mail bar without reloading the list", async () => {
+    vi.mocked(api.appStatus).mockResolvedValue(makeStatus({ counts: { messages: 10, psts: 1 } }));
     vi.mocked(api.searchMail).mockResolvedValue(page([makeMailRow(1, { subject: "first" })]));
-    renderWithProviders(<SearchScreen />, READY);
+    render(<App />);
+    await screen.findByTestId("search-box");
     type("alpha");
     expect(await screen.findByText("first")).toBeTruthy();
     await waitFor(() => expect(api.filterOptions).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(eventsMock.onEvent).toHaveBeenCalledWith("library:changed", expect.any(Function)));
+    expect(screen.queryByTestId("new-mail-bar")).toBeNull();
     act(() => eventsMock.emit("library:changed", { counts: { messages: 11, psts: 1 } }));
     await waitFor(() => expect(api.filterOptions).toHaveBeenCalledTimes(2));
     expect(api.searchMail).toHaveBeenCalledTimes(1);
@@ -84,6 +89,24 @@ describe("Search screen", () => {
     fireEvent.click(screen.getByTestId("new-mail-refresh"));
     await waitFor(() => expect(api.searchMail).toHaveBeenCalledTimes(2));
     expect(screen.queryByTestId("new-mail-bar")).toBeNull();
+  });
+
+  it("leaving Search, a library change and coming back neither refetches nor misses the new-mail bar", async () => {
+    vi.mocked(api.appStatus).mockResolvedValue(makeStatus({ counts: { messages: 10, psts: 1 } }));
+    vi.mocked(api.searchMail).mockResolvedValue(page([makeMailRow(1, { subject: "first" })]));
+    render(<App />);
+    await screen.findByTestId("search-box");
+    type("invoice");
+    expect(await screen.findByText("first")).toBeTruthy();
+    await waitFor(() => expect(api.searchCount).toHaveBeenCalled());
+    const mails = vi.mocked(api.searchMail).mock.calls.length;
+    const counts = vi.mocked(api.searchCount).mock.calls.length;
+    fireEvent.click(screen.getByTestId("nav-import"));
+    act(() => eventsMock.emit("library:changed", { counts: { messages: 11, psts: 1 } }));
+    fireEvent.click(screen.getByTestId("nav-search"));
+    expect(await screen.findByTestId("new-mail-bar")).toBeTruthy();
+    expect(api.searchMail).toHaveBeenCalledTimes(mails);
+    expect(api.searchCount).toHaveBeenCalledTimes(counts);
   });
 
   it("shows the short-query hint and selects the first row", async () => {
