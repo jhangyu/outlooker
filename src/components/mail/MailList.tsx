@@ -7,6 +7,8 @@ import type { MailRow } from "../../api/bindings/MailRow";
 import { formatDay } from "../common";
 
 export const ROW_HEIGHT = 32;
+/** Prototype `.mail-item.compact`: sender + date, subject, snippet on three lines. */
+const COMPACT_ROW_HEIGHT = 72;
 export const PREFETCH_ROWS = 50;
 
 export type Entry = { kind: "month"; key: string; label: string } | { kind: "mail"; key: string; row: MailRow };
@@ -21,6 +23,8 @@ export interface MailListProps {
   onEndReached(): void;
   ariaLabel: string;
   monthHeaders?: boolean;
+  /** Three-line rows without avatar for narrow columns (prototype `mailItem(…, true)`). */
+  compact?: boolean;
 }
 
 /** Rows arrive newest first (Part 03 §5.2); a header entry starts each local month, undated mail last. */
@@ -46,7 +50,8 @@ const useStyles = makeStyles({
   item: { position: "absolute", top: 0, left: 0, width: "100%", height: `${ROW_HEIGHT}px`, boxSizing: "border-box" },
   month: {
     display: "flex", alignItems: "center", padding: `0 ${tokens.spacingHorizontalM}`,
-    backgroundColor: tokens.colorNeutralBackground2, color: tokens.colorNeutralForeground3,
+    backgroundColor: tokens.colorNeutralBackground2, color: tokens.colorNeutralForeground2,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   row: {
     display: "grid", gridTemplateColumns: "24px minmax(120px, 22%) 1fr auto", alignItems: "center",
@@ -54,6 +59,12 @@ const useStyles = makeStyles({
     borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
     ":hover": { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
+  compact: {
+    gridTemplateColumns: "1fr auto", gridTemplateRows: "20px 20px 16px", gap: `0 ${tokens.spacingHorizontalS}`, height: `${COMPACT_ROW_HEIGHT}px`,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS} ${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+  },
+  span: { gridColumn: "1 / 3" },
+  small: { fontSize: tokens.fontSizeBase200 },
   selected: {
     backgroundColor: tokens.colorBrandBackground2,
     boxShadow: `inset 3px 0 0 ${tokens.colorCompoundBrandStroke}`,
@@ -63,7 +74,7 @@ const useStyles = makeStyles({
   sender: { fontWeight: tokens.fontWeightSemibold },
   subject: { color: tokens.colorBrandForeground2 },
   snippet: { color: tokens.colorNeutralForeground3 },
-  meta: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalXS, color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
+  meta: { display: "flex", whiteSpace: "nowrap", alignItems: "center", gap: tokens.spacingHorizontalXS, color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
   footer: { display: "flex", alignItems: "center", justifyContent: "center", height: `${ROW_HEIGHT}px`, color: tokens.colorNeutralForeground3 },
 });
 
@@ -81,7 +92,7 @@ export function MailList(p: MailListProps) {
         : buildEntries(p.rows, lng, undated),
     [p.rows, p.monthHeaders, lng, undated],
   );
-  const v = useVirtualizer({ count: entries.length, getScrollElement: () => ref.current, estimateSize: () => ROW_HEIGHT, overscan: 10 });
+  const v = useVirtualizer({ count: entries.length, getScrollElement: () => ref.current, estimateSize: () => (p.compact ? COMPACT_ROW_HEIGHT : ROW_HEIGHT), overscan: 10 });
   const items = v.getVirtualItems();
   const lastIndex = items.length > 0 ? items[items.length - 1]!.index : -1;
   const { hasMore, loadingMore, capped, onEndReached } = p;
@@ -120,6 +131,24 @@ export function MailList(p: MailListProps) {
           const row = en.row;
           const selected = row.id === p.selectedId;
           const name = row.from.name ?? row.from.address ?? "";
+          const meta = (
+            <span className={s.meta}>
+              {row.hasAttachments ? <AttachRegular aria-hidden /> : null}
+              {row.occurrenceCount > 1 ? <CounterBadge count={row.occurrenceCount} size="small" appearance="ghost" /> : null}
+              <span>{formatDay(row.sentAt, lng)}</span>
+            </span>
+          );
+          if (p.compact) {
+            return (
+              <div key={en.key} role="option" aria-selected={selected} data-testid="mail-row" data-mail-id={row.id}
+                className={mergeClasses(s.item, s.row, s.compact, selected && s.selected)} style={style} onClick={() => p.onSelect(row.id)}>
+                <span className={mergeClasses(s.ellipsis, s.sender)}>{name}</span>
+                {meta}
+                <span className={mergeClasses(s.ellipsis, s.span, s.subject)}>{row.subject || t("preview.noSubject")}</span>
+                <span className={mergeClasses(s.ellipsis, s.span, s.small, s.snippet)}>{row.snippet}</span>
+              </div>
+            );
+          }
           return (
             <div key={en.key} role="option" aria-selected={selected} data-testid="mail-row" data-mail-id={row.id}
               className={mergeClasses(s.item, s.row, selected && s.selected)} style={style} onClick={() => p.onSelect(row.id)}>
@@ -129,11 +158,7 @@ export function MailList(p: MailListProps) {
                 <span className={s.subject}>{row.subject || t("preview.noSubject")}</span>
                 {row.snippet ? <span className={s.snippet}>{` — ${row.snippet}`}</span> : null}
               </span>
-              <span className={s.meta}>
-                {row.hasAttachments ? <AttachRegular aria-hidden /> : null}
-                {row.occurrenceCount > 1 ? <CounterBadge count={row.occurrenceCount} size="small" appearance="ghost" /> : null}
-                <span>{formatDay(row.sentAt, lng)}</span>
-              </span>
+              {meta}
             </div>
           );
         })}

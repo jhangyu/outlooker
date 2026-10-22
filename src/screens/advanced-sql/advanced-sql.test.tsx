@@ -64,6 +64,9 @@ describe("Advanced SQL screen", () => {
     runSql("SELECT id, subject FROM v_mail");
     await waitFor(() => expect(screen.getByTestId("sql-result").getAttribute("data-mode")).toBe("mailList"));
     expect(screen.getAllByTestId("mail-row")).toHaveLength(1);
+    // Compact rows (prototype `mailItem(…, true)`): no avatar, subject on its own line.
+    expect(screen.getByTestId("mail-row").querySelector(".fui-Avatar")).toBeNull();
+    expect(screen.getByText("from sql")).toBeTruthy();
     expect(screen.getByText("1 ids matched no message")).toBeTruthy();
     await waitFor(() => expect(api.mailGet).toHaveBeenCalledWith(7));
     vi.mocked(api.sqlExecute).mockResolvedValueOnce(TABLE);

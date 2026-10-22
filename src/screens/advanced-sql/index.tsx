@@ -1,6 +1,6 @@
 import {
   Badge, Button, Caption1, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Field, Input,
-  MessageBar, MessageBarBody, Subtitle2, Toolbar, ToolbarButton, makeStyles, tokens,
+  Body1Strong, MessageBar, MessageBarBody, Toolbar, ToolbarButton, makeStyles, tokens,
 } from "@fluentui/react-components";
 import { DatabaseRegular, DeleteRegular, LockClosedRegular, PlayRegular, SaveRegular, StopRegular, TableRegular } from "@fluentui/react-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -25,18 +25,25 @@ const noop = () => {};
 const useStyles = makeStyles({
   root: { display: "grid", gridTemplateColumns: "1fr 3fr 1fr 3fr", height: "100%", minHeight: 0 },
   col: { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, borderRight: `1px solid ${tokens.colorNeutralStroke2}` },
-  toolbar: { borderBottom: `1px solid ${tokens.colorNeutralStroke2}`, gap: tokens.spacingHorizontalXS },
+  toolbar: { borderBottom: `1px solid ${tokens.colorNeutralStroke2}`, gap: tokens.spacingHorizontalXS, overflow: "hidden" },
+  tool: { minWidth: "auto" },
+  badge: { flexShrink: 0, whiteSpace: "nowrap" },
   spacer: { flex: 1 },
   editor: { flex: 1, minHeight: 0 },
   status: {
     display: "flex", gap: tokens.spacingHorizontalM, padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`, color: tokens.colorNeutralForeground3,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`, alignItems: "center", backgroundColor: tokens.colorNeutralBackground2,
+    color: tokens.colorNeutralForeground2, whiteSpace: "nowrap", overflow: "hidden",
   },
+  statusText: { overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 },
   head: {
     display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS, minHeight: "44px", boxSizing: "border-box",
     padding: `0 ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  muted: { color: tokens.colorNeutralForeground3 },
+  title: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  count: { flexShrink: 0, whiteSpace: "nowrap", color: tokens.colorNeutralForeground3 },
+  muted: { display: "block", color: tokens.colorNeutralForeground3, padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}` },
+  inset: { margin: tokens.spacingHorizontalM },
   fill: { flex: 1, minHeight: 0 },
   detail: { display: "grid", gridTemplateColumns: "max-content 1fr", gap: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`, margin: 0, padding: tokens.spacingHorizontalM, overflow: "auto" },
   key: { fontFamily: tokens.fontFamilyMonospace, color: tokens.colorNeutralForeground3 },
@@ -186,31 +193,42 @@ export function AdvancedSqlScreen() {
     : null;
 
   let statusLine;
-  if (running) statusLine = <span>{t("status.running")}</span>;
+  if (running) statusLine = <span className={s.statusText}>{t("status.running")}</span>;
   else if (result) {
     const n = result.mode === "command" ? 0 : result.rows.length;
     statusLine = (
       <>
-        <span>{t("status.ok", { rows: formatNumber(n, lng), ms: formatNumber(result.elapsedMs, lng) })}</span>
+        <span className={s.statusText}>{t("status.ok", { rows: formatNumber(n, lng), ms: formatNumber(result.elapsedMs, lng) })}</span>
         <span className={s.spacer} />
         <span>{t(`mode.${result.mode}`)}</span>
       </>
     );
-  } else statusLine = <span>{t("status.idle")}</span>;
+  } else statusLine = <span className={s.statusText}>{t("status.idle")}</span>;
 
   let column3;
   let column4;
+  const head3 = (title: string) => (
+    <div className={s.head}>
+      <Body1Strong className={s.title}>{title}</Body1Strong>
+    </div>
+  );
   if (!result) {
-    column3 = status.counts.messages === 0 ? (
+    const empty = status.counts.messages === 0 ? (
       <EmptyState icon={<DatabaseRegular />} title={t("empty.noMailTitle")} body={t("empty.noMailBody")}
         action={<Button appearance="primary" onClick={() => go("import")}>{t("common:action.goImport")}</Button>} />
     ) : (
       <EmptyState icon={<DatabaseRegular />} title={t("empty.noRunTitle")} body={t("empty.noRunBody")} />
     );
+    column3 = (
+      <>
+        {head3(t("mode.mailList"))}
+        {empty}
+      </>
+    );
     column4 = <EmptyState icon={<TableRegular />} title={t("search:preview.pickTitle")} />;
   } else {
     const truncated = result.mode !== "command" && result.truncated ? (
-      <MessageBar intent="warning" data-testid="sql-truncated">
+      <MessageBar intent="warning" className={s.inset} data-testid="sql-truncated">
         <MessageBarBody>{t("result.truncated", { n: formatNumber(MAX_ROWS, lng) })}</MessageBarBody>
       </MessageBar>
     ) : null;
@@ -218,14 +236,14 @@ export function AdvancedSqlScreen() {
       column3 = (
         <>
           <div className={s.head}>
-            <Subtitle2>{t("mode.mailList")}</Subtitle2>
-            <Caption1 className={s.muted}>{t("result.rows", { n: formatNumber(result.rows.length, lng) })}</Caption1>
+            <Body1Strong className={s.title}>{t("mode.mailList")}</Body1Strong>
+            <Caption1 className={s.count}>{t("result.rows", { n: formatNumber(result.rows.length, lng) })}</Caption1>
           </div>
           {truncated}
           {result.missingIds > 0 ? <Caption1 className={s.muted}>{t("result.missing", { n: formatNumber(result.missingIds, lng) })}</Caption1> : null}
           <div className={s.fill}>
             <MailList rows={result.rows} selectedId={mailId} onSelect={setMailId} hasMore={false} capped={false} loadingMore={false}
-              onEndReached={noop} ariaLabel={t("mode.mailList")} monthHeaders={false} />
+              onEndReached={noop} ariaLabel={t("mode.mailList")} monthHeaders={false} compact />
           </div>
         </>
       );
@@ -235,8 +253,8 @@ export function AdvancedSqlScreen() {
       column3 = (
         <>
           <div className={s.head}>
-            <Subtitle2>{t("mode.table")}</Subtitle2>
-            <Caption1 className={s.muted}>{t("result.rows", { n: formatNumber(result.rows.length, lng) })}</Caption1>
+            <Body1Strong className={s.title}>{t("mode.table")}</Body1Strong>
+            <Caption1 className={s.count}>{t("result.rows", { n: formatNumber(result.rows.length, lng) })}</Caption1>
           </div>
           {truncated}
           <div className={s.fill}>
@@ -247,8 +265,8 @@ export function AdvancedSqlScreen() {
       column4 = row ? (
         <>
           <div className={s.head}>
-            <Subtitle2>{t("detail.title")}</Subtitle2>
-            <Caption1 className={s.muted}>{t("detail.row", { n: (rowIndex ?? 0) + 1 })}</Caption1>
+            <Body1Strong className={s.title}>{t("detail.title")}</Body1Strong>
+            <Caption1 className={s.count}>{t("detail.row", { n: (rowIndex ?? 0) + 1 })}</Caption1>
           </div>
           <dl className={s.detail} data-testid="sql-row-detail">
             {result.columns.map((c, j) => (
@@ -264,9 +282,12 @@ export function AdvancedSqlScreen() {
       );
     } else {
       column3 = (
-        <MessageBar intent="success">
-          <MessageBarBody>{t("result.command", { tag: result.tag })}</MessageBarBody>
-        </MessageBar>
+        <>
+          {head3(t("mode.command"))}
+          <MessageBar intent="success" className={s.inset}>
+            <MessageBarBody>{t("result.command", { tag: result.tag })}</MessageBarBody>
+          </MessageBar>
+        </>
       );
       column4 = <EmptyState icon={<TableRegular />} title={t("detail.pick")} />;
     }
@@ -276,17 +297,17 @@ export function AdvancedSqlScreen() {
     <div className={s.root}>
       <SavedQueries items={saved.data ?? []} selectedId={savedId} onPick={pick} onNew={newQuery} />
       <section className={s.col}>
-        <Toolbar className={s.toolbar}>
-          <ToolbarButton appearance="primary" icon={<PlayRegular />} data-testid="sql-run" disabled={running || sql.trim() === ""} onClick={doRun}>
+        <Toolbar size="small" className={s.toolbar}>
+          <ToolbarButton className={s.tool} appearance="primary" icon={<PlayRegular />} data-testid="sql-run" disabled={running || sql.trim() === ""} onClick={doRun}>
             {t("run")}
           </ToolbarButton>
-          <ToolbarButton icon={<StopRegular />} data-testid="sql-cancel" disabled={!running} onClick={cancel}>{t("cancel")}</ToolbarButton>
-          <ToolbarButton icon={<SaveRegular />} data-testid="sql-save" disabled={sql.trim() === ""} onClick={save}>{t("save.action")}</ToolbarButton>
+          <ToolbarButton className={s.tool} icon={<StopRegular />} data-testid="sql-cancel" disabled={!running} onClick={cancel}>{t("cancel")}</ToolbarButton>
+          <ToolbarButton className={s.tool} icon={<SaveRegular />} data-testid="sql-save" disabled={sql.trim() === ""} onClick={save}>{t("save.action")}</ToolbarButton>
           {current ? (
-            <ToolbarButton icon={<DeleteRegular />} onClick={() => setDialog("delete")}>{t("delete.action")}</ToolbarButton>
+            <ToolbarButton className={s.tool} icon={<DeleteRegular />} onClick={() => setDialog("delete")}>{t("delete.action")}</ToolbarButton>
           ) : null}
           <span className={s.spacer} />
-          <Badge appearance="tint" color="informative" icon={<LockClosedRegular />}>{t("readOnly")}</Badge>
+          <Badge className={s.badge} appearance="tint" color="informative" icon={<LockClosedRegular />}>{t("readOnly")}</Badge>
         </Toolbar>
         {errorText ? (
           <MessageBar intent="error">

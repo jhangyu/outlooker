@@ -12,12 +12,12 @@ const useStyles = makeStyles({
   scroll: { height: "100%", overflow: "auto", position: "relative" },
   head: {
     display: "grid", position: "sticky", top: 0, zIndex: 1, height: `${ROW_HEIGHT}px`, alignItems: "center",
-    backgroundColor: tokens.colorNeutralBackground2, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold,
+    backgroundColor: tokens.colorNeutralBackground1, borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+    fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightSemibold,
   },
   row: {
     display: "grid", position: "absolute", top: 0, left: 0, width: "100%", height: `${ROW_HEIGHT}px`, alignItems: "center",
-    boxSizing: "border-box", borderBottom: `1px solid ${tokens.colorNeutralStroke3}`, cursor: "pointer",
+    boxSizing: "border-box", borderBottom: `1px solid ${tokens.colorNeutralStroke3}`, cursor: "pointer", fontSize: tokens.fontSizeBase200,
     ":hover": { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
   selected: { backgroundColor: tokens.colorBrandBackground2, ":hover": { backgroundColor: tokens.colorBrandBackground2 } },
