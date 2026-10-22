@@ -109,6 +109,20 @@ describe("Search screen", () => {
     expect(api.searchCount).toHaveBeenCalledTimes(counts);
   });
 
+  it("keeps the refine pane PST list visible while filterOptions refetches after a library change", async () => {
+    vi.mocked(api.appStatus).mockResolvedValue(makeStatus({ counts: { messages: 10, psts: 1 } }));
+    const opts = { psts: [{ id: 1, displayName: "ArchivePST" }], folders: [] } as never;
+    vi.mocked(api.filterOptions).mockResolvedValueOnce(opts);
+    let release: (v: unknown) => void = () => {};
+    vi.mocked(api.filterOptions).mockImplementationOnce(() => new Promise((r) => (release = r as never)) as never);
+    render(<App />);
+    expect(await screen.findByText("ArchivePST")).toBeTruthy();
+    act(() => eventsMock.emit("library:changed", { counts: { messages: 11, psts: 1 } }));
+    await waitFor(() => expect(api.filterOptions).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("ArchivePST")).not.toBeNull();
+    await act(async () => release(opts));
+  });
+
   it("shows the short-query hint and selects the first row", async () => {
     vi.mocked(api.searchMail).mockResolvedValue(page([makeMailRow(1), makeMailRow(2)], true));
     renderWithProviders(<SearchScreen />, READY);

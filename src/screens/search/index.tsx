@@ -3,7 +3,7 @@ import {
   makeStyles, tokens,
 } from "@fluentui/react-components";
 import { ChevronDownRegular, ChevronUpRegular, MailInboxRegular, SearchRegular } from "@fluentui/react-icons";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
@@ -100,7 +100,7 @@ export function SearchScreen() {
     enabled: query !== null,
     staleTime: Infinity, // changes only through seq or refresh()
   });
-  const filters = useQuery({ queryKey: ["filterOptions", status.counts.messages, status.counts.psts], queryFn: () => api.filterOptions() });
+  const filters = useQuery({ queryKey: ["filterOptions", status.counts.messages, status.counts.psts], queryFn: () => api.filterOptions(), placeholderData: keepPreviousData });
 
   const [picked, setPicked] = useState<{ seq: number; id: number } | null>(null);
   const firstId = pages.rows[0]?.id ?? null;
