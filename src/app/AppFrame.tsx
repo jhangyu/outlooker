@@ -225,12 +225,15 @@ function NavRail() {
 
 export function AppFrame() {
   const s = useStyles();
+  const [visited, setVisited] = useState<ReadonlySet<ScreenId>>(new Set());
   const status = useAppStatus();
   const onboarding = useOnboardingActive();
   const { screen } = useNavigation();
   // A data-folder move drives the phase through stoppingDb → startingDb → ready (Part 03 §8.2). Its own blocking
   // dialog on the Settings screen shows the progress, so the frame stays mounted until that dialog is closed.
   const moving = useMoveSession() !== null;
+  // A screen mounts on its first visit only, so start-up does not pay for screens the user has not opened.
+  if (!visited.has(screen)) setVisited(new Set(visited).add(screen));
   let body: JSX.Element;
   if (status.phase === "failed") body = <FailedScreen error={status.error} onRetry={() => api.appRetry()} />;
   else if (onboarding) body = <OnboardingScreen />;
@@ -241,7 +244,7 @@ export function AppFrame() {
         <TitleBar />
         <NavRail />
         <main className={s.main}>
-          {(Object.entries(SCREENS) as [ScreenId, () => JSX.Element | null][]).map(([id, Screen]) => (
+          {(Object.entries(SCREENS) as [ScreenId, () => JSX.Element | null][]).filter(([id]) => visited.has(id) || id === screen).map(([id, Screen]) => (
             <Activity key={id} mode={screen === id ? "visible" : "hidden"}>
               <Screen />
             </Activity>

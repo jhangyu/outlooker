@@ -64,6 +64,8 @@ describe("App frame", () => {
 
   it("keeps the SQL text and the search text when switching screens", async () => {
     render(<App />);
+    await screen.findByTestId("search-box");
+    expect(screen.queryByTestId("sql-editor")).toBeNull(); // a screen mounts on its first visit
     fireEvent.click(await screen.findByTestId("nav-advancedSql"));
     fireEvent.change(await screen.findByTestId("sql-editor"), { target: { value: "select 1" } });
     fireEvent.click(screen.getByTestId("nav-import"));
