@@ -36,12 +36,11 @@ pub fn no_sqlstate_err(e: &tokio_postgres::Error) -> AppError {
     }
 }
 
-/// 57P01/57P02/57P03 (server shutting down / starting) → `DbNotReady`; 53100 (disk full) →
-/// `FileAccess{"", insufficientSpace}`; any other SQLSTATE → `Internal{"<code>: <message>"}`.
+/// 57P01/57P02/57P03 (server shutting down / starting) → `DbNotReady`; any other SQLSTATE →
+/// `Internal{"<code>: <message>"}` (53100 disk full included: only the writer knows the data root path).
 pub fn sqlstate_err(code: &str, message: &str) -> AppError {
     match code {
         "57P01" | "57P02" | "57P03" => AppError::DbNotReady,
-        "53100" => AppError::FileAccess { path: String::new(), reason: "insufficientSpace".to_owned() },
         _ => AppError::internal(format!("{code}: {message}")),
     }
 }
@@ -100,7 +99,7 @@ mod tests {
         for code in ["57P01", "57P02", "57P03"] {
             assert_eq!(sqlstate_err(code, "x"), AppError::DbNotReady, "{code}");
         }
-        assert_eq!(sqlstate_err("53100", "x"), AppError::FileAccess { path: String::new(), reason: "insufficientSpace".into() });
+        assert_eq!(sqlstate_err("53100", "disk full"), AppError::internal("53100: disk full"));
         assert_eq!(sqlstate_err("23505", "dup"), AppError::internal("23505: dup"));
     }
 }

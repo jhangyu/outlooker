@@ -216,12 +216,13 @@ pub async fn load_known_hashes(client: &Client) -> Result<KnownHashes, AppError>
 pub const AFTER_JOB_VACUUM: &str =
     "VACUUM (ANALYZE) messages, message_recipients, message_occurrences, attachments, inline_images, image_blobs, addresses";
 
-/// `db_err` with `data_root` as the path of an insufficientSpace error (SQLSTATE 53100).
+/// SQLSTATE 53100 (disk full) → `FileAccess{data_root, insufficientSpace}`, else `db_err`.
 fn map_db_error(e: tokio_postgres::Error, data_root: &Path) -> AppError {
-    match db_err(e) {
-        AppError::FileAccess { reason, .. } => AppError::file_access(data_root, &reason),
-        other => other,
-    }
+    disk_full(e.code().map(|c| c.code()), data_root).unwrap_or_else(|| db_err(e))
+}
+
+fn disk_full(sqlstate: Option<&str>, data_root: &Path) -> Option<AppError> {
+    (sqlstate == Some("53100")).then(|| AppError::file_access(data_root, "insufficientSpace"))
 }
 
 const SESSION_SETUP: &str = "SET synchronous_commit = off;
@@ -582,4 +583,17 @@ async fn copy_batch(tx: &Transaction<'_>, items: &[NormalizedItem]) -> Result<()
     }
     w.finish().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disk_full_names_the_data_root() {
+        let root = Path::new("/data/root");
+        assert_eq!(disk_full(Some("53100"), root), Some(AppError::file_access(root, "insufficientSpace")));
+        assert_eq!(disk_full(Some("23505"), root), None);
+        assert_eq!(disk_full(None, root), None);
+    }
 }
