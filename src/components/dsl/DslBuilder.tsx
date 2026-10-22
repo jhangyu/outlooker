@@ -1,5 +1,5 @@
 import {
-  Button, Caption1, Caption1Strong, Card, Checkbox, Dropdown, Input, Option, ToggleButton, makeStyles, tokens,
+  Badge, Button, Caption1, Caption1Strong, Card, Checkbox, Dropdown, Input, Option, ToggleButton, makeStyles, mergeClasses, tokens,
 } from "@fluentui/react-components";
 import { AddRegular, DismissRegular } from "@fluentui/react-icons";
 import { Fragment, useMemo } from "react";
@@ -25,12 +25,27 @@ const useStyles = makeStyles({
     display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS, padding: tokens.spacingHorizontalM,
     borderLeft: `3px solid ${tokens.colorBrandStroke1}`,
   },
+  topGroup: {
+    minWidth: "520px", flex: 1, padding: tokens.spacingHorizontalS, boxShadow: tokens.shadow2,
+    backgroundColor: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderLeft: `3px solid ${tokens.colorBrandStroke1}`,
+  },
+  groups: { display: "flex", flexWrap: "wrap", gap: tokens.spacingHorizontalS, alignItems: "stretch" },
+  joinBadge: { alignSelf: "center" },
   head: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
   spacer: { flex: 1 },
   join: { color: tokens.colorNeutralForeground3, paddingLeft: tokens.spacingHorizontalS },
   cond: { display: "grid", gridTemplateColumns: "150px 92px 1fr 28px", alignItems: "center", gap: tokens.spacingHorizontalS },
   value: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalXS, minWidth: 0 },
   grow: { flex: 1, minWidth: 0 },
+  field: { minWidth: 0, width: "100%" },
+  seg: {
+    display: "inline-flex", flexShrink: 0, border: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusMedium, overflow: "hidden",
+  },
+  segBtn: { minWidth: "auto", border: "none", borderRadius: 0, padding: `0 ${tokens.spacingHorizontalS}` },
+  compact: { minWidth: "auto", flexShrink: 0 },
+  nowrap: { whiteSpace: "nowrap", flexShrink: 0 },
   foot: { display: "flex", gap: tokens.spacingHorizontalS },
 });
 
@@ -42,10 +57,13 @@ interface Ctx {
 
 function OpToggle({ op, onChange }: { op: GroupOp; onChange(op: GroupOp): void }) {
   const { t } = useTranslation("search");
+  const s = useStyles();
   return (
-    <span>
-      <ToggleButton size="small" checked={op === "and"} onClick={() => onChange("and")}>{t("dsl.and")}</ToggleButton>
-      <ToggleButton size="small" checked={op === "or"} onClick={() => onChange("or")}>{t("dsl.or")}</ToggleButton>
+    <span className={s.seg}>
+      {(["and", "or"] as const).map((o) => (
+        <ToggleButton key={o} size="small" className={s.segBtn} checked={op === o} appearance={op === o ? "primary" : "secondary"}
+          onClick={() => onChange(o)}>{t(`dsl.${o}`)}</ToggleButton>
+      ))}
     </span>
   );
 }
@@ -72,7 +90,7 @@ function ValueControl({ cond, ctx }: { cond: CondDraft; ctx: Ctx }) {
           <Input className={s.grow} value={cond.text} maxLength={500} aria-label={t("dsl.value")}
             onChange={(_, d) => patch({ text: d.value })} />
           {KINDS.map((k) => (
-            <ToggleButton key={k} size="small" checked={cond.kinds.includes(k)}
+            <ToggleButton key={k} size="small" className={s.compact} checked={cond.kinds.includes(k)}
               onClick={() => patch({ kinds: cond.kinds.includes(k) ? cond.kinds.filter((x) => x !== k) : [...cond.kinds, k] })}>
               {t(`dsl.kinds.${k}`)}
             </ToggleButton>
@@ -98,7 +116,7 @@ function ValueControl({ cond, ctx }: { cond: CondDraft; ctx: Ctx }) {
               </Option>
             ))}
           </Dropdown>
-          <Checkbox checked={cond.includeSubfolders} label={t("dsl.includeSubfolders")}
+          <Checkbox className={s.nowrap} checked={cond.includeSubfolders} label={t("dsl.includeSubfolders")}
             onChange={(_, d) => patch({ includeSubfolders: d.checked === true })} />
         </span>
       );
@@ -129,7 +147,7 @@ function CondRow({ cond, ctx }: { cond: CondDraft; ctx: Ctx }) {
   const s = useStyles();
   return (
     <div className={s.cond} data-testid="dsl-cond">
-      <Dropdown aria-label={t("dsl.fieldLabel")} value={t(`dsl.field.${cond.field}`)} selectedOptions={[cond.field]}
+      <Dropdown className={s.field} aria-label={t("dsl.fieldLabel")} value={t(`dsl.field.${cond.field}`)} selectedOptions={[cond.field]}
         onOptionSelect={(_, d) => d.optionValue && ctx.set(cond.id, () => ({ ...newCond(d.optionValue as FieldKind), id: cond.id }))}>
         {FIELDS.map((f) => (
           <Option key={f} value={f}>{t(`dsl.field.${f}`)}</Option>
@@ -144,12 +162,13 @@ function CondRow({ cond, ctx }: { cond: CondDraft; ctx: Ctx }) {
 }
 
 function GroupCard({ group, index, depth, ctx }: { group: GroupDraft; index: number; depth: number; ctx: Ctx }) {
+  // Top-level groups (depth 2) are mockup `.dsl-group` tiles that wrap side by side, nested groups stay full width.
   const { t } = useTranslation("search");
   const s = useStyles();
   const append = (node: CondDraft | GroupDraft) =>
     ctx.set(group.id, (g) => ({ ...(g as GroupDraft), children: [...(g as GroupDraft).children, node] }));
   return (
-    <Card appearance="outline" className={s.group}>
+    <Card appearance="outline" className={depth === 2 ? mergeClasses(s.group, s.topGroup) : s.group}>
       <div className={s.head}>
         <Caption1Strong>{t("dsl.group", { n: index })}</Caption1Strong>
         <Caption1>{t("dsl.match")}</Caption1>
@@ -174,7 +193,7 @@ function GroupCard({ group, index, depth, ctx }: { group: GroupDraft; index: num
   );
 }
 
-/** Prototype `#dsl` / `#dslGroups`: root bar, then one outline Card per group (brand left border). */
+/** Prototype `#dsl` / `#dslGroups`: root bar, then wrapping group tiles joined by the root AND/OR badge. */
 export function DslBuilder({ value, onChange, options, leafBudget }: {
   value: GroupDraft;
   onChange(next: GroupDraft): void;
@@ -193,20 +212,21 @@ export function DslBuilder({ value, onChange, options, leafBudget }: {
       <div className={s.bar}>
         <Caption1>{t("dsl.between")}</Caption1>
         <OpToggle op={value.op} onChange={(op) => onChange({ ...value, op })} />
+        <span className={s.spacer} />
         <Button size="small" icon={<AddRegular />} disabled={ctx.full}
           onClick={() => onChange({ ...value, children: [...value.children, newGroup()] })}>
           {t("dsl.addGroup")}
         </Button>
-        <span className={s.spacer} />
         <Button size="small" appearance="subtle" onClick={() => onChange({ ...value, children: [] })}>{t("dsl.clear")}</Button>
       </div>
-      {value.children.map((c, i) =>
-        c.kind === "group" ? (
-          <GroupCard key={c.id} group={c} index={i + 1} depth={2} ctx={ctx} />
-        ) : (
-          <CondRow key={c.id} cond={c} ctx={ctx} />
-        ),
-      )}
+      <div className={s.groups}>
+        {value.children.map((c, i) => (
+          <Fragment key={c.id}>
+            {i > 0 ? <Badge appearance="tint" color="brand" className={s.joinBadge}>{t(`dsl.${value.op}`)}</Badge> : null}
+            {c.kind === "group" ? <GroupCard group={c} index={i + 1} depth={2} ctx={ctx} /> : <CondRow cond={c} ctx={ctx} />}
+          </Fragment>
+        ))}
+      </div>
     </div>
   );
 }

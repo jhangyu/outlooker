@@ -27,7 +27,7 @@ export function AttachmentCard({ attachment: a }: { attachment: AttachmentMeta }
       </span>
       <div className={s.text}>
         <Body1Strong className={s.name} title={a.fileName}>{a.fileName}</Body1Strong>
-        <Caption1>{`${formatBytes(a.sizeBytes, i18n.language)} · ${a.mimeType}`}</Caption1>
+        <Caption1 className={s.name} title={a.mimeType}>{`${formatBytes(a.sizeBytes, i18n.language)} · ${a.mimeType}`}</Caption1>
       </div>
       {/* Disabled buttons get no pointer events, so the Tooltip wraps a span. */}
       <Tooltip content={t("preview.downloadLater")} relationship="description">

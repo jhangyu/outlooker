@@ -13,11 +13,14 @@ import { MailPreview } from "./MailPreview";
 const useStyles = makeStyles({
   root: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0, backgroundColor: tokens.colorNeutralBackground1 },
   head: {
-    maxHeight: "45%", overflowY: "auto", flexShrink: 0, display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS,
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    maxHeight: "45%", overflowY: "auto", flexShrink: 0, display: "flex", flexDirection: "column", gap: tokens.spacingVerticalL,
+    padding: `${tokens.spacingVerticalXL} ${tokens.spacingHorizontalXXL}`, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   meta: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalM },
   spacer: { flex: 1 },
+  persona: { minWidth: 0 },
+  ellipsis: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  date: { whiteSpace: "nowrap", flexShrink: 0, alignSelf: "flex-start", color: tokens.colorNeutralForeground3 },
   line: { display: "grid", gridTemplateColumns: "48px 1fr", gap: tokens.spacingHorizontalS, color: tokens.colorNeutralForeground2 },
   chips: { display: "flex", flexWrap: "wrap", gap: tokens.spacingHorizontalXS, alignItems: "center" },
   body: { flex: 1, minHeight: 0, overflow: "auto" },
@@ -56,9 +59,10 @@ export function ReadingPane({ mailId }: { mailId: number | null }) {
         <div className={s.head}>
           <Title3>{m.subject || t("preview.noSubject")}</Title3>
           <div className={s.meta}>
-            <Persona name={m.from.name ?? m.from.address ?? ""} secondaryText={m.from.address ?? ""} avatar={{ size: 40 }} />
+            <Persona className={s.persona} name={m.from.name ?? m.from.address ?? ""} avatar={{ size: 40 }}
+              primaryText={{ className: s.ellipsis }} secondaryText={{ className: s.ellipsis, children: m.from.address ?? "" }} />
             <span className={s.spacer} />
-            <Caption1 title={t("preview.date")}>{formatDateTime(m.sentAt, i18n.language)}</Caption1>
+            <Caption1 className={s.date} title={t("preview.date")}>{formatDateTime(m.sentAt, i18n.language)}</Caption1>
           </div>
           {lines.map((k) => (
             <div key={k} className={s.line}>
