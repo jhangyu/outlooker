@@ -1,1 +1,3 @@
 html, body, #root { height: 100%; margin: 0; }
+/* Fluent Button and Badge set no white-space rule, so labels wrap when a flex row shrinks. */
+.fui-Button, .fui-ToggleButton, .fui-Badge { white-space: nowrap; }

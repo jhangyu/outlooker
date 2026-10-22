@@ -1,6 +1,6 @@
 import {
   Accordion, AccordionHeader, AccordionItem, AccordionPanel, Badge, Body1, Button, Caption1, MessageBar, MessageBarBody,
-  Spinner, Tab, TabList, Title2, Toaster, ToggleButton, makeStyles, tokens,
+  Spinner, Tab, TabList, Title2, Toaster, ToggleButton, makeStyles, mergeClasses, tabClassNames, tokens,
 } from "@fluentui/react-components";
 import {
   ArrowDownload24Regular, Database24Regular, ErrorCircleRegular, Search24Regular, Settings24Regular,
@@ -34,12 +34,42 @@ const useStyles = makeStyles({
   appName: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightSemibold },
   crumb: { opacity: 0.9 },
   spacer: { flex: 1 },
-  langButton: { color: tokens.colorNeutralForegroundOnBrand },
+  seg: {
+    display: "inline-flex", border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStrokeOnBrand2}`,
+    borderRadius: tokens.borderRadiusMedium, overflow: "hidden",
+  },
+  langButton: {
+    color: tokens.colorNeutralForegroundOnBrand, minWidth: "auto", padding: `2px ${tokens.spacingHorizontalM}`,
+    fontSize: tokens.fontSizeBase200, fontWeight: tokens.fontWeightRegular, borderRadius: 0, border: "none",
+    ":hover": { color: tokens.colorNeutralForegroundOnBrand, backgroundColor: tokens.colorBrandBackgroundHover },
+    ":hover:active": { color: tokens.colorNeutralForegroundOnBrand, backgroundColor: tokens.colorBrandBackgroundPressed },
+  },
+  langOn: {
+    backgroundColor: tokens.colorNeutralBackground1, color: tokens.colorBrandForeground2, fontWeight: tokens.fontWeightSemibold,
+    ":hover": { backgroundColor: tokens.colorNeutralBackground1, color: tokens.colorBrandForeground2 },
+    ":hover:active": { backgroundColor: tokens.colorNeutralBackground1, color: tokens.colorBrandForeground2 },
+  },
   rail: {
     backgroundColor: tokens.colorNeutralBackground3, borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalXS}`, display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS,
   },
-  railTab: { flexDirection: "column", height: "60px", justifyContent: "center", gap: "2px", fontSize: tokens.fontSizeBase100 },
+  // Fluent Tab is a grid that puts icon and label in one row; stack them like the mockup rail button.
+  railTab: {
+    gridAutoFlow: "row", justifyItems: "center", justifyContent: "center", rowGap: "2px",
+    padding: `${tokens.spacingVerticalSNudge} 0`, height: "auto",
+  },
+  railTabOn: {
+    backgroundColor: tokens.colorNeutralBackground1, boxShadow: tokens.shadow2,
+    ":enabled:hover": { backgroundColor: tokens.colorNeutralBackground1 },
+    [`& .${tabClassNames.content}`]: { color: tokens.colorBrandForeground1 },
+    [`:enabled:hover .${tabClassNames.content}`]: { color: tokens.colorBrandForeground1 },
+    [`:enabled:active .${tabClassNames.content}`]: { color: tokens.colorBrandForeground1 },
+  },
+  railIcon: { gridColumnStart: 1, gridRowStart: 1, fontSize: "24px", width: "24px", height: "24px" },
+  railLabel: {
+    gridColumnStart: 1, gridRowStart: 2, fontSize: tokens.fontSizeBase100, lineHeight: tokens.lineHeightBase100,
+    padding: 0, whiteSpace: "nowrap",
+  },
   railGap: { flex: 1 },
   main: { minWidth: 0, minHeight: 0, overflow: "hidden", backgroundColor: tokens.colorNeutralBackground3 },
   center: {
@@ -137,13 +167,13 @@ function TitleBar() {
       <span className={s.crumb}>· {t(`nav.${screen}`)}</span>
       <span className={s.spacer} />
       {importing ? <Badge appearance="filled" color="informative">{importing}</Badge> : null}
-      <div role="group" aria-label={t("language.label")}>
+      <div role="group" aria-label={t("language.label")} className={s.seg}>
         {(["zh-TW", "en"] as const).map((lng) => (
           <ToggleButton
             key={lng}
             size="small"
             appearance="transparent"
-            className={s.langButton}
+            className={mergeClasses(s.langButton, i18n.language === lng && s.langOn)}
             checked={i18n.language === lng}
             onClick={() => void setLanguage(lng)}
           >
@@ -160,7 +190,13 @@ function NavRail() {
   const { t } = useTranslation();
   const { screen, go } = useNavigation();
   const tab = (id: ScreenId, icon: JSX.Element) => (
-    <Tab value={id} icon={icon} className={s.railTab} data-testid={`nav-${id}`}>
+    <Tab
+      value={id}
+      icon={{ children: icon, className: s.railIcon }}
+      content={{ className: s.railLabel }}
+      className={mergeClasses(s.railTab, screen === id && s.railTabOn)}
+      data-testid={`nav-${id}`}
+    >
       {t(`nav.${id}`)}
     </Tab>
   );

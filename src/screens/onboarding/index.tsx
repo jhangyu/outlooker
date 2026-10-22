@@ -1,9 +1,9 @@
 import {
-  Body1, Button, Caption1, Card, MessageBar, MessageBarBody, ProgressBar, Subtitle1, Title2, Title3,
-  makeStyles, mergeClasses, tokens,
+  Body1, Body1Strong, Body2, Button, Caption1, Card, MessageBar, MessageBarBody, ProgressBar, Subtitle2, Title3,
+  makeStyles, mergeClasses, shorthands, tokens,
 } from "@fluentui/react-components";
 import {
-  CheckmarkCircleRegular, CircleRegular, CopyRegular, ImageRegular, LockClosedRegular, SearchRegular,
+  CheckmarkCircleRegular, CheckmarkRegular, CircleRegular, CopyRegular, ImageRegular, LockClosedRegular, SearchRegular,
 } from "@fluentui/react-icons";
 import { useState, type JSX } from "react";
 import { useTranslation } from "react-i18next";
@@ -25,23 +25,37 @@ const useStyles = makeStyles({
   },
   left: { borderRight: `1px solid ${tokens.colorNeutralStroke2}` },
   right: { borderLeft: `1px solid ${tokens.colorNeutralStroke2}` },
-  steps: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS },
-  stepItem: { display: "grid", gridTemplateColumns: "28px 1fr", gap: tokens.spacingHorizontalM, alignItems: "center", color: tokens.colorNeutralForeground3 },
+  steps: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column" },
+  stepItem: {
+    display: "grid", gridTemplateColumns: "28px 1fr", gap: tokens.spacingHorizontalM, alignItems: "center",
+    padding: `${tokens.spacingVerticalS} 0`, color: tokens.colorNeutralForeground3,
+  },
   stepCurrent: { color: tokens.colorNeutralForeground1, fontWeight: tokens.fontWeightSemibold },
   num: {
     width: "28px", height: "28px", borderRadius: tokens.borderRadiusCircular, display: "grid", placeItems: "center",
-    border: `1px solid ${tokens.colorNeutralStroke1}`, fontSize: tokens.fontSizeBase200,
+    border: `1px solid ${tokens.colorNeutralStroke1}`, fontSize: tokens.fontSizeBase200, backgroundColor: tokens.colorNeutralBackground1,
   },
-  numCurrent: { backgroundColor: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand, border: "none" },
-  body: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalL, padding: "48px", overflow: "auto" },
-  lead: { color: tokens.colorNeutralForeground3, maxWidth: "720px" },
-  choices: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 360px))", gap: tokens.spacingHorizontalL },
+  numDone: { backgroundColor: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand, border: "none" },
+  numCurrent: { border: `2px solid ${tokens.colorBrandStroke1}`, color: tokens.colorBrandForeground1 },
+  body: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXL, padding: "32px 48px", overflow: "auto" },
+  lead: { color: tokens.colorNeutralForeground2, maxWidth: "760px" },
+  choices: { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: tokens.spacingHorizontalL, maxWidth: "1200px" },
   choice: { padding: tokens.spacingHorizontalL, gap: tokens.spacingVerticalXS },
+  // Card draws its border on ::after; thicken it there so the tile does not shift.
+  choiceOn: {
+    backgroundColor: tokens.colorBrandBackground2,
+    ":hover": { backgroundColor: tokens.colorBrandBackground2 },
+    "::after": { ...shorthands.borderColor(tokens.colorBrandStroke1), ...shorthands.borderWidth(tokens.strokeWidthThick) },
+  },
+  hint: { color: tokens.colorNeutralForeground3 },
   mono: { fontFamily: tokens.fontFamilyMonospace, color: tokens.colorNeutralForeground3, wordBreak: "break-all" },
   checklist: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS },
   check: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
   done: { color: tokens.colorStatusSuccessForeground1 },
-  foot: { display: "flex", gap: tokens.spacingHorizontalS, marginTop: "auto", maxWidth: "740px" },
+  foot: {
+    display: "flex", gap: tokens.spacingHorizontalS, marginTop: "auto", paddingTop: tokens.spacingVerticalL,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
   spacer: { flex: 1 },
   feat: { display: "grid", gridTemplateColumns: "40px 1fr", gap: `2px ${tokens.spacingHorizontalM}` },
   featIcon: {
@@ -104,14 +118,14 @@ export function OnboardingScreen() {
 
   const choice = (testId: string, selected: boolean, onClick: () => void, title: string, hint: string, extra?: JSX.Element) => (
     <Card
-      className={s.choice}
+      className={mergeClasses(s.choice, selected && s.choiceOn)}
       onClick={onClick}
       aria-pressed={selected}
       data-testid={testId}
-      appearance={selected ? "filled-alternative" : "outline"}
+      appearance="outline"
     >
-      <Subtitle1>{title}</Subtitle1>
-      <Caption1>{hint}</Caption1>
+      <Body1Strong>{title}</Body1Strong>
+      <Caption1 className={s.hint}>{hint}</Caption1>
       {extra}
     </Card>
   );
@@ -121,7 +135,7 @@ export function OnboardingScreen() {
     content = (
       <>
         <Title3 as="h2">{t("language.heading")}</Title3>
-        <Body1 className={s.lead}>{t("language.body")}</Body1>
+        <Body2 className={s.lead}>{t("language.body")}</Body2>
         <div className={s.choices}>
           {choice("onboarding-lang-zh-TW", lang === "zh-TW", () => void setLanguage("zh-TW"), t("common:language.zh-TW"), t("language.zhHint"))}
           {choice("onboarding-lang-en", lang === "en", () => void setLanguage("en"), t("common:language.en"), t("language.enHint"))}
@@ -132,7 +146,7 @@ export function OnboardingScreen() {
     content = (
       <>
         <Title3 as="h2">{t("location.heading")}</Title3>
-        <Body1 className={s.lead}>{t("location.body")}</Body1>
+        <Body2 className={s.lead}>{t("location.body")}</Body2>
         <div className={s.choices}>
           {choice("onboarding-dir-default", dirChoice === "default", () => setDirChoice("default"), t("location.default"), t("location.defaultHint"),
             <span className={s.mono}>{status.dataDir}</span>)}
@@ -150,7 +164,7 @@ export function OnboardingScreen() {
     content = (
       <>
         <Title3 as="h2">{t("database.heading")}</Title3>
-        <Body1 className={s.lead}>{t("database.body")}</Body1>
+        <Body2 className={s.lead}>{t("database.body")}</Body2>
         <ProgressBar value={ready ? 1 : undefined} thickness="large" />
         <ul className={s.checklist}>
           {[["database.create", created], ["database.start", ready]].map(([key, ok]) => (
@@ -167,7 +181,7 @@ export function OnboardingScreen() {
     content = (
       <>
         <Title3 as="h2">{t("import.heading")}</Title3>
-        <Body1 className={s.lead}>{t("import.body")}</Body1>
+        <Body2 className={s.lead}>{t("import.body")}</Body2>
         <div>
           <Button appearance="primary" size="large" onClick={pickPst} data-testid="onboarding-pick-pst">
             {t("import.pick")}
@@ -189,12 +203,12 @@ export function OnboardingScreen() {
   return (
     <div className={s.root}>
       <aside className={mergeClasses(s.side, s.left)}>
-        <Title2 as="h1">{t("title")}</Title2>
+        <Title3 as="h1">{t("title")}</Title3>
         <ol className={s.steps}>
           {STEP_KEYS.map((key, i) => (
             <li key={key} className={mergeClasses(s.stepItem, i === step && s.stepCurrent)} aria-current={i === step ? "step" : undefined}>
-              <span className={mergeClasses(s.num, i === step && s.numCurrent)}>
-                {i < step ? <CheckmarkCircleRegular /> : i + 1}
+              <span className={mergeClasses(s.num, i < step && s.numDone, i === step && s.numCurrent)}>
+                {i < step ? <CheckmarkRegular /> : i + 1}
               </span>
               <span>{t(`step.${key}`)}</span>
             </li>
@@ -228,7 +242,7 @@ export function OnboardingScreen() {
         </div>
       </main>
       <aside className={mergeClasses(s.side, s.right)}>
-        <Subtitle1 as="h2">{t("feature.title")}</Subtitle1>
+        <Subtitle2 as="h2">{t("feature.title")}</Subtitle2>
         {feature(<SearchRegular />, t("feature.search"), t("feature.searchBody"))}
         {feature(<CopyRegular />, t("feature.dedupe"), t("feature.dedupeBody"))}
         {feature(<ImageRegular />, t("feature.render"), t("feature.renderBody"))}

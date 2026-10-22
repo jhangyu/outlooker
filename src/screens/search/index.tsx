@@ -1,5 +1,5 @@
 import {
-  Button, Caption1, CounterBadge, MessageBar, MessageBarActions, MessageBarBody, SearchBox, Spinner, Subtitle2, ToggleButton,
+  Body1Strong, Button, Caption1, CounterBadge, MessageBar, MessageBarActions, MessageBarBody, SearchBox, Spinner, ToggleButton,
   makeStyles, tokens,
 } from "@fluentui/react-components";
 import { ChevronDownRegular, ChevronUpRegular, MailInboxRegular, SearchRegular } from "@fluentui/react-icons";
@@ -24,21 +24,28 @@ const useStyles = makeStyles({
   root: { display: "grid", gridTemplateColumns: "260px 1fr", height: "100%", minHeight: 0 },
   main: { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 },
   bar: {
-    display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS, padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
+    display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS, padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`, backgroundColor: tokens.colorNeutralBackground1,
   },
-  box: { flex: 1, maxWidth: "880px" },
-  summary: { color: tokens.colorNeutralForeground3 },
+  box: { flex: 1, maxWidth: "880px", height: "36px" },
+  toggle: { flexShrink: 0 },
+  summary: { color: tokens.colorNeutralForeground3, whiteSpace: "nowrap", flexShrink: 0 },
   dsl: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`, maxHeight: "40%", overflowY: "auto",
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`, backgroundColor: tokens.colorNeutralBackground2,
   },
-  hints: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS, padding: `0 ${tokens.spacingHorizontalL}` },
-  results: { flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "minmax(420px, 34%) 1fr" },
+  hints: {
+    display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS, padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL} 0`,
+  },
+  results: {
+    flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "minmax(420px, 34%) 1fr",
+    margin: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS} 0`, overflow: "hidden", boxShadow: tokens.shadow2,
+    borderRadius: `${tokens.borderRadiusLarge} ${tokens.borderRadiusLarge} 0 0`, backgroundColor: tokens.colorNeutralBackground1,
+  },
   listPane: { display: "flex", flexDirection: "column", minHeight: 0, borderRight: `1px solid ${tokens.colorNeutralStroke2}` },
   paneHead: {
     display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS, minHeight: "44px", boxSizing: "border-box",
-    padding: `0 ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   count: { color: tokens.colorNeutralForeground3 },
   fill: { flex: 1, minHeight: 0 },
@@ -136,58 +143,68 @@ export function SearchScreen() {
       : t("count", { n: formatNumber(count.data.count, lng) });
   }
 
-  let results;
+  let list;
   if (!hasMail) {
-    results = (
+    list = (
       <EmptyState icon={<MailInboxRegular />} title={t("empty.title")} body={t("empty.body")}
         action={<Button appearance="primary" onClick={() => go("import")}>{t("common:action.goImport")}</Button>} />
     );
   } else if (query === null) {
-    results = <EmptyState icon={<SearchRegular />} title={t("idle.title")} body={t("idle.body")} />;
+    list = <EmptyState icon={<SearchRegular />} title={t("idle.title")} body={t("idle.body")} />;
   } else if (pages.error) {
-    results = (
+    list = (
       <MessageBar intent="error">
         <MessageBarBody>{formatAppError(pages.error, t)}</MessageBarBody>
       </MessageBar>
     );
   } else if (pages.isLoading) {
-    results = (
+    list = (
       <div className={s.center}>
         <Spinner />
       </div>
     );
   } else if (pages.rows.length === 0) {
-    results = (
+    list = (
       <EmptyState icon={<SearchRegular />} title={t("zero.title")} body={t("zero.body")}
         action={<Button onClick={clearAll}>{t("zero.clear")}</Button>} />
     );
   } else {
-    results = (
-      <div className={s.results}>
-        <section className={s.listPane}>
-          <div className={s.paneHead}>
-            <Subtitle2>{t("results")}</Subtitle2>
-            {countText ? <Caption1 className={s.count} data-testid="result-count">{countText}</Caption1> : null}
-          </div>
-          <div className={s.fill}>
-            <MailList rows={pages.rows} selectedId={selectedId} onSelect={(id) => setPicked({ seq, id })}
-              hasMore={pages.hasMore} capped={pages.capped} loadingMore={pages.isFetchingNextPage}
-              onEndReached={() => void pages.fetchNextPage()} ariaLabel={t("list.label")} />
-          </div>
-        </section>
-        <ReadingPane mailId={selectedId} />
-      </div>
+    list = (
+      <MailList rows={pages.rows} selectedId={selectedId} onSelect={(id) => setPicked({ seq, id })}
+        hasMore={pages.hasMore} capped={pages.capped} loadingMore={pages.isFetchingNextPage}
+        onEndReached={() => void pages.fetchNextPage()} ariaLabel={t("list.label")} />
     );
   }
+
+  const hints = [
+    pages.shortQuery ? (
+      <MessageBar key="short" intent="warning" data-testid="short-query-hint">
+        <MessageBarBody>{t("shortQueryHint")}</MessageBarBody>
+      </MessageBar>
+    ) : null,
+    composed.problem ? (
+      <MessageBar key="problem" intent="error">
+        <MessageBarBody>{t(`problem.${composed.problem}`)}</MessageBarBody>
+      </MessageBar>
+    ) : null,
+    newMail ? (
+      <MessageBar key="newMail" intent="info" data-testid="new-mail-bar">
+        <MessageBarBody>{t("newMail")}</MessageBarBody>
+        <MessageBarActions>
+          <Button size="small" data-testid="new-mail-refresh" onClick={refresh}>{t("refresh")}</Button>
+        </MessageBarActions>
+      </MessageBar>
+    ) : null,
+  ].filter((h) => h !== null);
 
   return (
     <div className={s.root}>
       <RefinePane value={inputs.refine} onChange={(refine) => setInputs((p) => ({ ...p, refine }))} options={filters.data} />
       <div className={s.main}>
         <div className={s.bar}>
-          <SearchBox className={s.box} input={SEARCH_INPUT} placeholder={t("box.placeholder")} aria-label={t("box.label")}
+          <SearchBox className={s.box} appearance="filled-darker" input={SEARCH_INPUT} placeholder={t("box.placeholder")} aria-label={t("box.label")}
             value={inputs.text} onChange={(_, d) => setInputs((p) => ({ ...p, text: d.value }))} />
-          <ToggleButton data-testid="dsl-toggle" checked={dslOpen} onClick={() => setDslOpen((o) => !o)}
+          <ToggleButton data-testid="dsl-toggle" className={s.toggle} checked={dslOpen} onClick={() => setDslOpen((o) => !o)}
             icon={dslOpen ? <ChevronUpRegular /> : <ChevronDownRegular />} iconPosition="after">
             {t("dsl.toggle")}
             <CounterBadge count={builderLeaves} size="small" />
@@ -200,27 +217,18 @@ export function SearchScreen() {
               options={filters.data ?? { psts: [], folders: [] }} leafBudget={leafBudget} />
           </div>
         ) : null}
-        <div className={s.hints}>
-          {pages.shortQuery ? (
-            <MessageBar intent="warning" data-testid="short-query-hint">
-              <MessageBarBody>{t("shortQueryHint")}</MessageBarBody>
-            </MessageBar>
-          ) : null}
-          {composed.problem ? (
-            <MessageBar intent="error">
-              <MessageBarBody>{t(`problem.${composed.problem}`)}</MessageBarBody>
-            </MessageBar>
-          ) : null}
-          {newMail ? (
-            <MessageBar intent="info" data-testid="new-mail-bar">
-              <MessageBarBody>{t("newMail")}</MessageBarBody>
-              <MessageBarActions>
-                <Button size="small" data-testid="new-mail-refresh" onClick={refresh}>{t("refresh")}</Button>
-              </MessageBarActions>
-            </MessageBar>
-          ) : null}
+        {hints.length > 0 ? <div className={s.hints}>{hints}</div> : null}
+        {/* Prototype keeps the two-pane grid for every state; empty and zero states render inside the list pane. */}
+        <div className={s.results}>
+          <section className={s.listPane}>
+            <div className={s.paneHead}>
+              <Body1Strong>{t("results")}</Body1Strong>
+              {countText ? <Caption1 className={s.count} data-testid="result-count">{countText}</Caption1> : null}
+            </div>
+            <div className={s.fill}>{list}</div>
+          </section>
+          {hasMail ? <ReadingPane mailId={selectedId} /> : <div />}
         </div>
-        <div className={s.fill}>{results}</div>
       </div>
     </div>
   );
