@@ -191,7 +191,7 @@ impl PgController {
         PgController { paths, forced_ports: Arc::new(Mutex::new(Vec::new())) }
     }
 
-    /// Test seam (named in the plan): the next `start` tries these ports first, in order.
+    /// Test seam: the next `start` tries these ports first, in order.
     pub fn with_ports(self, ports: Vec<u16>) -> PgController {
         *self.forced_ports.lock().unwrap() = ports;
         self

@@ -1,4 +1,4 @@
-//! R2-09 Import Manager integration tests (spec Part 02 §4, §6.1–§6.3; Part 03 §7; Part 04 §2.1, §5, §6.4, §6.5, §12.2).
+//! Import Manager integration tests (spec Part 02 §4, §6.1–§6.3; Part 03 §7; Part 04 §2.1, §5, §6.4, §6.5, §12.2).
 //! Every test pre-registers its expected values as constants before it runs the import.
 #![cfg(feature = "test-support")]
 use std::collections::{BTreeMap, BTreeSet};
@@ -207,7 +207,7 @@ fn png(w: u32, h: u32) -> Vec<u8> {
     out.into_inner()
 }
 
-/// The R1-05 sanitizer acceptance patterns (spec Part 04 §12.2 row Sanitizer), matched without a regex crate.
+/// The sanitizer acceptance patterns (spec Part 04 §12.2 row Sanitizer), matched without a regex crate.
 fn hostile_violations(out: &str) -> Vec<String> {
     let lower = out.to_ascii_lowercase();
     let mut found: Vec<String> =

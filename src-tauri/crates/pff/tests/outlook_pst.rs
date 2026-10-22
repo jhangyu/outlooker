@@ -4,7 +4,7 @@ use pff::{tags, File, Item};
 
 fn fixture() -> PathBuf {
     let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../tests/fixtures/external/outlook.pst");
-    assert!(p.exists(), "fixture missing: {} (committed by R1-02)", p.display());
+    assert!(p.exists(), "fixture missing: {}", p.display());
     p
 }
 
