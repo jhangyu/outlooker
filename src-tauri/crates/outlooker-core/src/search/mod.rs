@@ -82,7 +82,7 @@ pub async fn search_page(client: &mut Client, req: &SearchRequest, window: i64) 
     Ok((SearchPage { rows, next_cursor, short_query: c.short_query, elapsed_ms }, ids.phase_b_ran))
 }
 
-/// C13. MailRow for `ids` (hydrate SQL of spec Part 04 §7.4); keeps the order of `ids` (duplicates repeated),
+/// MailRow for `ids` (hydrate SQL of spec Part 04 §7.4); keeps the order of `ids` (duplicates repeated),
 /// ids with no message are skipped.
 pub async fn hydrate_rows(client: &Client, ids: &[i64]) -> Result<Vec<MailRow>, AppError> {
     if ids.is_empty() {
