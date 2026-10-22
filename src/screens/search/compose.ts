@@ -49,7 +49,7 @@ export function splitTerms(text: string): string[] {
   return text.trim().split(/\s+/).filter((t) => t.length > 0);
 }
 
-/** Search box + refine pane + builder → one SearchQuery (plan Decision "Search query composition in the frontend"). */
+/** Search box + refine pane + builder → one SearchQuery (spec §0.5 "Search query composition in the frontend"). */
 export function composeQuery(text: string, refine: RefineState, builder: ConditionGroup | null, now: Date = new Date()): ComposeResult {
   const terms = splitTerms(text);
   if (terms.length > MAX_TERMS) return { query: null, leaves: 4 * terms.length, problem: "tooManyTerms" };

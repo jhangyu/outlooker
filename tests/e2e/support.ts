@@ -1,4 +1,4 @@
-/** `[data-testid="<id>"]` (R1-06 / R1-07 Produces lists). */
+/** `[data-testid="<id>"]` selector. */
 export const tid = (id: string): string => `[data-testid="${id}"]`;
 
 /** Queues native-picker results for the VITE_E2E=1 bypass of src/api/dialog.ts. */
