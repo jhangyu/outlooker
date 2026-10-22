@@ -32,14 +32,21 @@ const useStyles = makeStyles({
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalS}`, display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS,
   },
   body: {
-    overflow: "auto", padding: tokens.spacingHorizontalL, display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
+    overflow: "auto", padding: tokens.spacingHorizontalL, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gridTemplateAreas: '"storage storage db" "language content db" "index index index"',
     gap: tokens.spacingHorizontalL, alignContent: "start",
   },
-  card: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalM, padding: tokens.spacingHorizontalL },
-  wide2: { gridColumn: "span 2" },
-  wide3: { gridColumn: "1 / -1" },
+  card: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalM, padding: tokens.spacingHorizontalL, minWidth: 0 },
+  storage: { gridArea: "storage" },
+  language: { gridArea: "language" },
+  content: { gridArea: "content" },
+  db: { gridArea: "db" },
+  index: { gridArea: "index" },
   head: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
   row: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS, flexWrap: "wrap" },
+  sliderRow: { display: "flex", alignItems: "flex-start", gap: tokens.spacingHorizontalS },
+  sliderCol: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column" },
+  spin: { width: "88px", flexShrink: 0 },
   grow: { flex: 1 },
   mono: { fontFamily: tokens.fontFamilyMonospace },
   muted: { color: tokens.colorNeutralForeground3 },
@@ -93,8 +100,8 @@ export function SettingsScreen() {
     if (dir) setMoveTarget(dir);
   };
 
-  const card = (id: SectionId, icon: JSX.Element, children: ReactNode, wide?: string) => (
-    <Card className={mergeClasses(s.card, wide)} ref={(el) => void (cards.current[id] = el)} aria-labelledby={`set-${id}`}>
+  const card = (id: SectionId, icon: JSX.Element, children: ReactNode) => (
+    <Card className={mergeClasses(s.card, s[id])} ref={(el) => void (cards.current[id] = el)} aria-labelledby={`set-${id}`}>
       <div className={s.head}>
         {icon}
         <Subtitle2 as="h2" id={`set-${id}`}>
@@ -152,7 +159,6 @@ export function SettingsScreen() {
             </Field>
             <Caption1 className={s.muted}>{t("storage.help")}</Caption1>
           </>,
-          s.wide2,
         )}
         {card(
           "language",
@@ -170,16 +176,22 @@ export function SettingsScreen() {
           <ImageRegular />,
           <>
             <Field label={t("webp.label")} validationMessage={invalid ? t("webp.invalid") : undefined} validationState={invalid ? "error" : "none"}>
-              <div className={s.row}>
-                <Slider
-                  className={s.grow}
-                  min={1}
-                  max={100}
-                  step={1}
-                  value={isValidQuality(quality) ? quality : 80}
-                  onChange={(_, d) => setDraft(d.value)}
-                />
+              <div className={s.sliderRow}>
+                <div className={s.sliderCol}>
+                  <Slider
+                    min={1}
+                    max={100}
+                    step={1}
+                    value={isValidQuality(quality) ? quality : 80}
+                    onChange={(_, d) => setDraft(d.value)}
+                  />
+                  <div className={s.ends}>
+                    <Caption1 className={s.muted}>{t("webp.smaller")}</Caption1>
+                    <Caption1 className={s.muted}>{t("webp.sharper")}</Caption1>
+                  </div>
+                </div>
                 <SpinButton
+                  className={s.spin}
                   min={1}
                   max={100}
                   value={Number.isFinite(quality) ? quality : null}
@@ -187,10 +199,6 @@ export function SettingsScreen() {
                 />
               </div>
             </Field>
-            <div className={s.ends}>
-              <Caption1 className={s.muted}>{t("webp.smaller")}</Caption1>
-              <Caption1 className={s.muted}>{t("webp.sharper")}</Caption1>
-            </div>
             <div className={s.row}>
               <Button onClick={applyQuality} data-testid="settings-webp-apply">
                 {t("webp.apply")}
@@ -247,7 +255,6 @@ export function SettingsScreen() {
               <Caption1 className={s.muted}>{t("index.help")}</Caption1>
             </div>
           </>,
-          s.wide3,
         )}
       </div>
       {moveTarget ? <MoveDialog target={moveTarget} onClose={() => setMoveTarget(null)} /> : null}

@@ -1,7 +1,7 @@
 import {
   Badge, Body1, Button, Caption1, DataGrid, DataGridBody, DataGridCell, DataGridHeader, DataGridHeaderCell, DataGridRow,
-  ProgressBar, Subtitle2, TableCellLayout, Title3, createTableColumn, makeStyles, mergeClasses, tokens,
-  type BadgeProps, type TableColumnDefinition,
+  Body1Strong, ProgressBar, Subtitle2, TableCellLayout, createTableColumn, makeStyles, mergeClasses, tokens,
+  type BadgeProps, type TableColumnDefinition, type TableColumnId,
 } from "@fluentui/react-components";
 import { AddRegular, DeleteRegular, DocumentRegular, ErrorCircleRegular, MailInboxRegular, WarningRegular } from "@fluentui/react-icons";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -32,8 +32,13 @@ const useStyles = makeStyles({
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   spacer: { flex: 1 },
-  stat: { display: "flex", flexDirection: "column", alignItems: "flex-end", paddingLeft: tokens.spacingHorizontalL },
-  statValue: { fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase400 },
+  title: { marginRight: tokens.spacingHorizontalM },
+  stat: {
+    display: "flex", flexDirection: "column", padding: `0 ${tokens.spacingHorizontalM}`,
+    borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  statValue: { fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase400, fontVariantNumeric: "tabular-nums" },
+  muted: { color: tokens.colorNeutralForeground3 },
   pane: {
     display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, overflow: "hidden",
     backgroundColor: tokens.colorNeutralBackground1, borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -42,9 +47,27 @@ const useStyles = makeStyles({
     display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS, minHeight: "44px", boxSizing: "border-box",
     padding: `0 ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
+  paneTitle: { flexShrink: 0 },
+  paneFor: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: tokens.colorNeutralForeground3 },
   scroll: { flex: 1, overflow: "auto", minHeight: 0 },
   full: { gridColumn: "1 / -1" },
-  path: { fontFamily: tokens.fontFamilyMonospace, color: tokens.colorNeutralForeground3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block", maxWidth: "280px" },
+  // Fixed column bases (sum 832px): the grid scrolls horizontally instead of squeezing every column to flex: 1 1 0.
+  grid: { minWidth: "832px" },
+  cell: { whiteSpace: "nowrap" },
+  num: { justifyContent: "flex-end", fontVariantNumeric: "tabular-nums" },
+  col_name: { flex: "1 0 220px", minWidth: 0 },
+  col_size: { flex: "0 0 88px" },
+  col_messages: { flex: "0 0 88px" },
+  col_new: { flex: "0 0 72px" },
+  col_date: { flex: "0 0 192px" },
+  col_status: { flex: "0 0 128px" },
+  col_remove: { flex: "0 0 44px" },
+  rowSelected: { backgroundColor: tokens.colorBrandBackground2, ":hover": { backgroundColor: tokens.colorBrandBackground2 } },
+  badge: { flexShrink: 0, whiteSpace: "nowrap" },
+  path: {
+    fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3,
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block", minWidth: 0,
+  },
   card: {
     display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS, padding: tokens.spacingHorizontalM,
     borderBottom: `1px solid ${tokens.colorNeutralStroke3}`, cursor: "pointer", position: "relative",
@@ -52,14 +75,24 @@ const useStyles = makeStyles({
   selected: { backgroundColor: tokens.colorBrandBackground2, boxShadow: `inset 3px 0 0 ${tokens.colorCompoundBrandStroke}` },
   row: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
   name: { flex: 1, fontWeight: tokens.fontWeightSemibold, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  sub: { display: "flex", gap: tokens.spacingHorizontalM, color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
+  sub: {
+    display: "flex", flexWrap: "wrap", gap: tokens.spacingHorizontalM, rowGap: "2px", color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200, "& > span": { whiteSpace: "nowrap" },
+  },
   warn: { color: tokens.colorStatusWarningForeground1 },
+  warnInline: { display: "inline-flex", alignItems: "center", gap: tokens.spacingHorizontalXXS },
   err: { color: tokens.colorStatusDangerForeground1 },
   logEntry: {
-    display: "grid", gridTemplateColumns: "auto 20px 1fr", gap: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+    // 168px fits the longest formatDateTime output at 12px mono ("2026年10月22日 中午12:30", "Oct 22, 2026, 12:30 PM").
+    display: "grid", gridTemplateColumns: "168px 20px 1fr", gap: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
   },
-  logLoc: { gridColumn: "3", color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
+  logTime: { fontFamily: tokens.fontFamilyMonospace, color: tokens.colorNeutralForeground3, whiteSpace: "nowrap" },
+  logMsg: { minWidth: 0, overflowWrap: "anywhere" },
+  logLoc: {
+    gridColumn: "3", fontFamily: tokens.fontFamilyMonospace, wordBreak: "break-all", color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
 });
 
 export function ImportScreen() {
@@ -103,11 +136,8 @@ export function ImportScreen() {
       compare: (a, b) => a.displayName.localeCompare(b.displayName),
       renderHeaderCell: () => t("imported.name"),
       renderCell: (p) => (
-        <TableCellLayout media={<DocumentRegular />}>
+        <TableCellLayout truncate media={<DocumentRegular />} description={{ className: s.path, title: p.path, children: p.path }}>
           <strong>{p.displayName}</strong>
-          <span className={s.path} title={p.path}>
-            {p.path}
-          </span>
         </TableCellLayout>
       ),
     }),
@@ -141,7 +171,7 @@ export function ImportScreen() {
       renderHeaderCell: () => t("imported.status"),
       renderCell: (p) => (
         <span className={s.row}>
-          <Badge appearance="tint" color={BADGE[p.status]} data-testid="pst-status">
+          <Badge appearance="tint" color={BADGE[p.status]} className={s.badge} data-testid="pst-status">
             {t(`status.${p.status}`)}
           </Badge>
           {p.errorCount > 0 ? (
@@ -169,17 +199,22 @@ export function ImportScreen() {
     }),
   ];
 
+  const colClass = (id: TableColumnId) =>
+    mergeClasses(s.cell, s[`col_${String(id)}` as keyof typeof s], (id === "size" || id === "messages" || id === "new") && s.num);
+
   const stat = (value: string, label: string) => (
     <span className={s.stat}>
       <span className={s.statValue}>{value}</span>
-      <Caption1>{label}</Caption1>
+      <Caption1 className={s.muted}>{label}</Caption1>
     </span>
   );
 
   return (
     <div className={s.root}>
       <div className={s.cmdbar}>
-        <Title3 as="h2">{t("title")}</Title3>
+        <Subtitle2 as="h2" className={s.title}>
+          {t("title")}
+        </Subtitle2>
         <Button appearance="primary" icon={<AddRegular />} onClick={addFiles} data-testid="import-add">
           {t("add")}
         </Button>
@@ -205,12 +240,22 @@ export function ImportScreen() {
         <>
           <section className={s.pane} aria-label={t("imported.title")}>
             <div className={s.paneHead}>
-              <Subtitle2 as="h3">{t("imported.title")}</Subtitle2>
+              <Body1Strong as="h3">{t("imported.title")}</Body1Strong>
             </div>
             <div className={s.scroll}>
-              <DataGrid items={list.filter((p) => IMPORTED.includes(p.status))} columns={columns} getRowId={(p) => p.id} sortable>
+              <DataGrid
+                className={s.grid}
+                items={list.filter((p) => IMPORTED.includes(p.status))}
+                columns={columns}
+                getRowId={(p) => p.id}
+                sortable
+              >
                 <DataGridHeader>
-                  <DataGridRow>{({ renderHeaderCell }) => <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>}</DataGridRow>
+                  <DataGridRow>
+                    {({ renderHeaderCell, columnId }) => (
+                      <DataGridHeaderCell className={colClass(columnId)}>{renderHeaderCell()}</DataGridHeaderCell>
+                    )}
+                  </DataGridRow>
                 </DataGridHeader>
                 <DataGridBody<PstSource>>
                   {({ item, rowId }) => (
@@ -218,9 +263,11 @@ export function ImportScreen() {
                       key={rowId}
                       data-testid="pst-row"
                       data-pst-name={item.displayName}
+                      aria-selected={item.id === selected}
+                      className={item.id === selected ? s.rowSelected : undefined}
                       onClick={() => setSelected(item.id)}
                     >
-                      {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
+                      {({ renderCell, columnId }) => <DataGridCell className={colClass(columnId)}>{renderCell(item)}</DataGridCell>}
                     </DataGridRow>
                   )}
                 </DataGridBody>
@@ -229,7 +276,7 @@ export function ImportScreen() {
           </section>
           <section className={s.pane} aria-label={t("queue.title")}>
             <div className={s.paneHead}>
-              <Subtitle2 as="h3">{t("queue.title")}</Subtitle2>
+              <Body1Strong as="h3">{t("queue.title")}</Body1Strong>
             </div>
             <div className={s.scroll} role="listbox" aria-label={t("queue.title")}>
               {list.filter((p) => QUEUED.includes(p.status)).length === 0 ? (
@@ -294,7 +341,13 @@ function QueueCard(props: {
           {t(`status.${pst.status}`)}
         </Badge>
       </div>
-      {running && p ? <Caption1>{t(`phase.${p.phase}`)}</Caption1> : null}
+      {(running && p) || total ? (
+        <div className={s.sub}>
+          {running && p ? <span>{t(`phase.${p.phase}`)}</span> : null}
+          <span className={s.spacer} />
+          {total ? <span>{t("queue.progress", { done: formatNumber(done, lng), total: formatNumber(total, lng), percent })}</span> : null}
+        </div>
+      ) : null}
       {running || p ? (
         <ProgressBar
           value={running && total === null ? undefined : total ? done / total : 0}
@@ -303,12 +356,12 @@ function QueueCard(props: {
         />
       ) : null}
       <div className={s.sub}>
-        {total ? <span>{t("queue.progress", { done: formatNumber(done, lng), total: formatNumber(total, lng), percent })}</span> : null}
         {running && p?.bytesPerSec ? <span>{t("queue.rate", { rate: formatBytes(p.bytesPerSec, lng) })}</span> : null}
         {running && p?.etaSeconds ? <span>{t("queue.eta", { minutes: Math.max(1, Math.round(p.etaSeconds / 60)) })}</span> : null}
         {pst.errorCount > 0 ? (
-          <span className={s.warn}>
-            <WarningRegular /> {t("queue.errors", { n: formatNumber(pst.errorCount, lng) })}
+          <span className={mergeClasses(s.warn, s.warnInline)}>
+            <WarningRegular />
+            {t("queue.errors", { n: formatNumber(pst.errorCount, lng) })}
           </span>
         ) : null}
       </div>
@@ -352,8 +405,14 @@ function ErrorLog({ pst }: { pst: PstSource | null }) {
   return (
     <section className={s.pane} aria-label={t("log.title")}>
       <div className={s.paneHead}>
-        <Subtitle2 as="h3">{t("log.title")}</Subtitle2>
-        {pst ? <Caption1>— {pst.displayName}</Caption1> : null}
+        <Body1Strong as="h3" className={s.paneTitle}>
+          {t("log.title")}
+        </Body1Strong>
+        {pst ? (
+          <Caption1 className={s.paneFor} title={pst.displayName}>
+            — {pst.displayName}
+          </Caption1>
+        ) : null}
       </div>
       <div className={s.scroll}>
         {pst === null ? (
@@ -363,9 +422,9 @@ function ErrorLog({ pst }: { pst: PstSource | null }) {
         ) : (
           rows.map((r) => (
             <div key={r.id} className={s.logEntry}>
-              <Caption1>{formatDateTime(r.occurredAt, i18n.language)}</Caption1>
+              <Caption1 className={s.logTime}>{formatDateTime(r.occurredAt, i18n.language)}</Caption1>
               {r.severity === "jobFailed" ? <ErrorCircleRegular className={s.err} /> : <WarningRegular className={s.warn} />}
-              <Body1>
+              <Body1 className={s.logMsg}>
                 {t(`stage.${r.stage}`)} · {r.message}
               </Body1>
               <span className={s.logLoc}>

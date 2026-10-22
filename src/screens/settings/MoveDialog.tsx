@@ -1,6 +1,6 @@
 import {
   Body1, Button, Caption1, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, MessageBar,
-  MessageBarBody, ProgressBar,
+  MessageBarBody, ProgressBar, makeStyles, tokens,
 } from "@fluentui/react-components";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
@@ -11,11 +11,17 @@ import type { DataDirMoveProgress } from "../../api/bindings/DataDirMoveProgress
 import { formatAppError, formatBytes, toAppError, useAppToast } from "../../components/common";
 import { setMoveSession, useMoveSession } from "./moveSession";
 
+const useStyles = makeStyles({
+  content: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS },
+  body: { overflowWrap: "anywhere" },
+});
+
 /**
  * Progress arrives as `data-dir:move-progress`; boot writes it into the ["moveProgress"] query (Part 03 §8.2).
  * "Started" is the frame-level move session, so AppFrame keeps this dialog mounted while the phase leaves ready.
  */
 export function MoveDialog({ target, onClose }: { target: string; onClose(): void }) {
+  const s = useStyles();
   const { t, i18n } = useTranslation("settings");
   const lng = i18n.language;
   const qc = useQueryClient();
@@ -62,8 +68,8 @@ export function MoveDialog({ target, onClose }: { target: string; onClose(): voi
       <DialogSurface>
         <DialogBody>
           <DialogTitle>{t("move.title")}</DialogTitle>
-          <DialogContent>
-            {!started ? <Body1>{t("move.body", { target })}</Body1> : null}
+          <DialogContent className={s.content}>
+            {!started ? <Body1 className={s.body}>{t("move.body", { target })}</Body1> : null}
             {started ? (
               <>
                 <Body1>{t(`move.phase.${p?.phase ?? "stoppingDb"}`)}</Body1>
