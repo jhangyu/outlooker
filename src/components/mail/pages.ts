@@ -41,6 +41,7 @@ export function useMailPages(query: SearchQuery | null, seq: number): MailPages 
     initialPageParam: null as string | null,
     getNextPageParam: (last, pages) => nextPageParam(last, pages),
     enabled: query !== null,
+    staleTime: Infinity, // changes only through seq or reset()
   });
   const pages = q.data?.pages;
   const derived = useMemo(() => {

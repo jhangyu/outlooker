@@ -6,9 +6,10 @@ import {
   ArrowDownload24Regular, Database24Regular, ErrorCircleRegular, Search24Regular, Settings24Regular,
 } from "@fluentui/react-icons";
 import { useQuery } from "@tanstack/react-query";
-import { useState, type JSX } from "react";
+import { Activity, useState, type JSX } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/commands";
+import logo from "../assets/outlooker-logo.svg";
 import type { AppError } from "../api/bindings/AppError";
 import type { AppPhase } from "../api/bindings/AppPhase";
 import { formatAppError, toAppError, useLanguageSwitch } from "../components/common";
@@ -29,8 +30,9 @@ const useStyles = makeStyles({
   brand: { width: "68px", display: "grid", placeItems: "center" },
   logo: {
     width: "28px", height: "28px", borderRadius: tokens.borderRadiusMedium, display: "grid", placeItems: "center",
-    backgroundColor: tokens.colorNeutralBackground1, color: tokens.colorBrandForeground1, fontWeight: tokens.fontWeightBold,
+    backgroundColor: tokens.colorNeutralBackground1,
   },
+  logoImg: { width: "24px", height: "24px" },
   appName: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightSemibold },
   crumb: { opacity: 0.9 },
   langLabel: { fontSize: tokens.fontSizeBase200, opacity: 0.95 },
@@ -82,6 +84,7 @@ const useStyles = makeStyles({
   pre: { whiteSpace: "pre-wrap", fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200, margin: 0 },
 });
 
+// Every screen stays mounted so it keeps its state. <Activity> hides inactive ones and pauses their effects.
 const SCREENS: Record<ScreenId, () => JSX.Element | null> = {
   search: SearchScreen,
   advancedSql: AdvancedSqlScreen,
@@ -161,8 +164,8 @@ function TitleBar() {
   return (
     <header className={s.titleBar} data-testid="title-bar">
       <div className={s.brand}>
-        <div className={s.logo} aria-hidden>
-          O
+        <div className={s.logo}>
+          <img src={logo} alt="" className={s.logoImg} />
         </div>
       </div>
       <span className={s.appName}>{t("app.name")}</span>
@@ -222,13 +225,15 @@ function NavRail() {
 
 export function AppFrame() {
   const s = useStyles();
+  const [visited, setVisited] = useState<ReadonlySet<ScreenId>>(new Set());
   const status = useAppStatus();
   const onboarding = useOnboardingActive();
   const { screen } = useNavigation();
   // A data-folder move drives the phase through stoppingDb → startingDb → ready (Part 03 §8.2). Its own blocking
   // dialog on the Settings screen shows the progress, so the frame stays mounted until that dialog is closed.
   const moving = useMoveSession() !== null;
-  const Screen = SCREENS[screen];
+  // A screen mounts on its first visit only, so start-up does not pay for screens the user has not opened.
+  if (!visited.has(screen)) setVisited(new Set(visited).add(screen));
   let body: JSX.Element;
   if (status.phase === "failed") body = <FailedScreen error={status.error} onRetry={() => api.appRetry()} />;
   else if (onboarding) body = <OnboardingScreen />;
@@ -239,7 +244,11 @@ export function AppFrame() {
         <TitleBar />
         <NavRail />
         <main className={s.main}>
-          <Screen />
+          {(Object.entries(SCREENS) as [ScreenId, () => JSX.Element | null][]).filter(([id]) => visited.has(id) || id === screen).map(([id, Screen]) => (
+            <Activity key={id} mode={screen === id ? "visible" : "hidden"}>
+              <Screen />
+            </Activity>
+          ))}
         </main>
       </div>
     );

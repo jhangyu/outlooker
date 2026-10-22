@@ -1,7 +1,7 @@
 import { Avatar, Caption1Strong, CounterBadge, Spinner, makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { AttachRegular } from "@fluentui/react-icons";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useMemo, useRef, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { MailRow } from "../../api/bindings/MailRow";
 import { ellipsis, formatDay } from "../common";
@@ -80,13 +80,19 @@ const useStyles = makeStyles({
 });
 
 /**
- * Prototype `#resList` `.mail-item`, one line per mail at 32 px (plan Decision "Fixed-height virtual rows").
+ * Prototype `#resList` `.mail-item`, one line per mail at 32 px.
  * `compact` mail rows are three lines at COMPACT_ROW_HEIGHT; month headers stay 32 px.
  */
 export function MailList(p: MailListProps) {
   const { t, i18n } = useTranslation("search");
   const s = useStyles();
   const ref = useRef<HTMLDivElement>(null);
+  // A hidden <Activity> (display:none) can lose scrollTop in the webview: remember it and restore on re-show.
+  const lastTop = useRef(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && el.scrollTop !== lastTop.current) el.scrollTop = lastTop.current;
+  }, []);
   const lng = i18n.language;
   const undated = t("list.undated");
   const entries = useMemo<Entry[]>(
@@ -120,7 +126,7 @@ export function MailList(p: MailListProps) {
   };
 
   return (
-    <div ref={ref} className={s.scroll} role="listbox" aria-label={p.ariaLabel} tabIndex={0} onKeyDown={onKeyDown} data-testid="mail-list">
+    <div ref={ref} className={s.scroll} role="listbox" aria-label={p.ariaLabel} tabIndex={0} onKeyDown={onKeyDown} onScroll={(e) => (lastTop.current = e.currentTarget.scrollTop)} data-testid="mail-list">
       <div className={s.block} style={{ height: `${v.getTotalSize()}px` }}>
         {items.map((it) => {
           const en = entries[it.index]!;

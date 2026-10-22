@@ -12,6 +12,7 @@ import { pickFolder, pickPstFiles } from "../../api/dialog";
 import type { AppError } from "../../api/bindings/AppError";
 import type { Language } from "../../api/bindings/Language";
 import { useAppStatus, useNavigation } from "../../app/AppStatusContext";
+import logo from "../../assets/outlooker-logo.svg";
 import { formatAppError, toAppError, useAppToast, useLanguageSwitch } from "../../components/common";
 
 type Step = 0 | 1 | 2 | 3;
@@ -60,8 +61,9 @@ const useStyles = makeStyles({
   brandRow: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
   logo: {
     width: "28px", height: "28px", borderRadius: tokens.borderRadiusMedium, display: "grid", placeItems: "center",
-    backgroundColor: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand, fontWeight: tokens.fontWeightBold,
+    backgroundColor: tokens.colorNeutralBackground1,
   },
+  logoImg: { width: "24px", height: "24px" },
   feat: { display: "grid", gridTemplateColumns: "36px 1fr", gap: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}` },
   featIcon: {
     gridRow: "span 2", width: "36px", height: "36px", borderRadius: tokens.borderRadiusLarge, display: "grid",
@@ -209,8 +211,8 @@ export function OnboardingScreen() {
     <div className={s.root}>
       <aside className={mergeClasses(s.side, s.left)}>
         <div className={s.brandRow}>
-          <span className={s.logo} aria-hidden>
-            O
+          <span className={s.logo}>
+            <img src={logo} alt="" className={s.logoImg} />
           </span>
           <strong>{t("common:app.name")}</strong>
         </div>
