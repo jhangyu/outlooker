@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use deadpool_postgres::PoolError;
 use tokio::sync::Notify;
 use tokio_postgres::error::SqlState;
 use tokio_postgres::types::Type;
@@ -24,7 +23,6 @@ pub const CELL_MAX_CHARS: usize = 2_000;
 pub const TIMEOUT_MS: u32 = 30_000;
 
 const BEGIN: &str = "BEGIN READ ONLY";
-const SET_TIMEOUT: &str = "SET LOCAL statement_timeout = '30s'";
 const DECLARE: &str = "DECLARE outlooker_c NO SCROLL CURSOR FOR ";
 
 /// The one running execution (Part 03 §6.3 `execution_id → CancelToken`).
@@ -68,13 +66,6 @@ impl Drop for Registration {
     }
 }
 
-fn pool_err(e: PoolError) -> AppError {
-    match e {
-        PoolError::Closed | PoolError::Backend(_) => AppError::DbNotReady,
-        other => AppError::internal(format!("pool: {other}")),
-    }
-}
-
 fn elapsed_ms(t: Instant) -> u32 {
     u32::try_from(t.elapsed().as_millis()).unwrap_or(u32::MAX)
 }
@@ -85,19 +76,19 @@ impl SqlConsole {
     }
 
     pub async fn saved_list(&self) -> Result<Vec<SavedQuery>, AppError> {
-        let c = self.db.app_pool()?.get().await.map_err(pool_err)?;
+        let c = self.db.app_client().await?;
         saved::list(&c).await
     }
     pub async fn saved_create(&self, input: SavedQueryInput) -> Result<SavedQuery, AppError> {
-        let c = self.db.app_pool()?.get().await.map_err(pool_err)?;
+        let c = self.db.app_client().await?;
         saved::create(&c, &input).await
     }
     pub async fn saved_update(&self, id: i64, input: SavedQueryInput) -> Result<SavedQuery, AppError> {
-        let c = self.db.app_pool()?.get().await.map_err(pool_err)?;
+        let c = self.db.app_client().await?;
         saved::update(&c, id, &input).await
     }
     pub async fn saved_delete(&self, id: i64) -> Result<(), AppError> {
-        let c = self.db.app_pool()?.get().await.map_err(pool_err)?;
+        let c = self.db.app_client().await?;
         saved::delete(&c, id).await
     }
 
@@ -122,7 +113,7 @@ impl SqlConsole {
             *slot = Some(Running { execution_id: req.execution_id.clone(), token: None, cancelled: cancelled.clone(), started: false });
             Registration { running: self.running.clone() }
         };
-        let client = self.db.ro_pool()?.get().await.map_err(pool_err)?;
+        let client = self.db.ro_client().await?;
         if let Some(r) = self.running.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
             r.token = Some(client.cancel_token());
         }
@@ -160,7 +151,7 @@ impl SqlConsole {
     async fn run(&self, client: &Client, sql: &str, max_rows: u32, cancelled: &AtomicBool) -> Result<SqlResult, AppError> {
         let flag = || cancelled.load(Ordering::SeqCst);
         client.batch_execute(BEGIN).await.map_err(|e| map_sql_error(&e, true, flag()))?;
-        client.batch_execute(SET_TIMEOUT).await.map_err(|e| map_sql_error(&e, true, flag()))?;
+        client.batch_execute(&format!("SET LOCAL statement_timeout = {TIMEOUT_MS}")).await.map_err(|e| map_sql_error(&e, true, flag()))?;
         let stmt = client.prepare(sql).await.map_err(|e| map_sql_error(&e, true, flag()))?;
         let columns: Vec<ColumnMeta> =
             stmt.columns().iter().map(|c| ColumnMeta { name: c.name().to_owned(), pg_type: c.type_().name().to_owned() }).collect();
@@ -179,7 +170,7 @@ impl SqlConsole {
                 // SHOW / EXPLAIN: DECLARE accepts only SELECT / VALUES (Part 04 §8.1 step 4).
                 let _ = client.batch_execute("ROLLBACK").await;
                 client.batch_execute(BEGIN).await.map_err(|e| map_sql_error(&e, true, flag()))?;
-                client.batch_execute(SET_TIMEOUT).await.map_err(|e| map_sql_error(&e, true, flag()))?;
+                client.batch_execute(&format!("SET LOCAL statement_timeout = {TIMEOUT_MS}")).await.map_err(|e| map_sql_error(&e, true, flag()))?;
                 client.simple_query(sql).await.map_err(|e| map_sql_error(&e, true, flag()))?
             }
             Err(e) => return Err(map_sql_error(&e, true, flag())),
@@ -200,7 +191,7 @@ impl SqlConsole {
             .position(|c| c.name() == "id" && [Type::INT8, Type::INT4, Type::INT2].contains(c.type_()));
         if let Some(i) = id_col {
             let ids: Vec<i64> = rows.iter().filter_map(|r| r[i].as_deref()?.parse().ok()).collect();
-            let app = self.db.app_pool()?.get().await.map_err(pool_err)?;
+            let app = self.db.app_client().await?;
             let mail = crate::search::hydrate_rows(&app, &ids).await?;
             let missing_ids = u32::try_from(ids.len() - mail.len()).unwrap_or(u32::MAX);
             return Ok(SqlResult::MailList { rows: mail, missing_ids, truncated, elapsed_ms: 0 });

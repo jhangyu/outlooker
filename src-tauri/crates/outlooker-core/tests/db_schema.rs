@@ -1,6 +1,8 @@
 #![cfg(feature = "test-support")]
 use outlooker_core::db::{indexes, Credentials, Db};
 use outlooker_core::dto::error::AppError;
+use outlooker_core::dto::settings::SettingsPatch;
+use outlooker_core::settings::SettingsStore;
 use outlooker_core::test_support::TestCluster;
 
 fn code(e: &tokio_postgres::Error) -> String {
@@ -109,6 +111,17 @@ async fn db_handle_not_ready_when_unset() {
     let client = tc.db.app_pool().unwrap().get().await.unwrap();
     let one: i32 = client.query_one("SELECT 1", &[]).await.unwrap().get(0);
     assert_eq!(one, 1);
+}
+
+#[tokio::test]
+async fn settings_get_uses_cached_quality_after_pool_closed() {
+    let tc = TestCluster::start().await;
+    let store = SettingsStore::load(tc.dir.path().join("settings.json")).unwrap();
+    store.update(&tc.db, SettingsPatch { language: None, webp_quality: Some(55) }).await.unwrap();
+    assert_eq!(store.get(&tc.db).await.unwrap().webp_quality, 55);
+    tc.db.app_pool().unwrap().close();
+    assert_eq!(tc.db.app_client().await.err(), Some(AppError::DbNotReady));
+    assert_eq!(store.get(&tc.db).await.unwrap().webp_quality, 55, "closed pool → cached quality, not Internal");
 }
 
 #[test]

@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
+use deadpool_postgres::{Manager, ManagerConfig, Object, Pool, RecyclingMethod};
 use tokio_postgres::NoTls;
 
 use super::credentials::Credentials;
-use super::{connect, connect_admin, DB_NAME};
+use super::{connect, connect_admin, pool_err, DB_NAME};
 use crate::dto::error::AppError;
 
 fn pool(port: u16, user: &str, password: &str, max: usize) -> Result<Pool, AppError> {
@@ -60,14 +60,16 @@ impl Db {
     pub fn conn(&self) -> Result<DbConn, AppError> {
         self.inner.read().unwrap_or_else(|p| p.into_inner()).clone().ok_or(AppError::DbNotReady)
     }
-    pub fn is_connected(&self) -> bool {
-        self.conn().is_ok()
-    }
     pub fn app_pool(&self) -> Result<Pool, AppError> {
         Ok(self.conn()?.pools.app)
     }
-    pub fn ro_pool(&self) -> Result<Pool, AppError> {
-        Ok(self.conn()?.pools.ro)
+    /// A pooled outlooker_app connection; errors mapped by `pool_err`.
+    pub async fn app_client(&self) -> Result<Object, AppError> {
+        self.conn()?.pools.app.get().await.map_err(pool_err)
+    }
+    /// A pooled outlooker_ro connection; errors mapped by `pool_err`.
+    pub async fn ro_client(&self) -> Result<Object, AppError> {
+        self.conn()?.pools.ro.get().await.map_err(pool_err)
     }
     pub async fn connect_admin(&self) -> Result<tokio_postgres::Client, AppError> {
         let c = self.conn()?;

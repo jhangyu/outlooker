@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 
 use crate::db::indexes::ensure_search_indexes;
-use crate::db::{Db, RFC3339_UTC_FMT, pg_err};
+use crate::db::{db_err, Db, RFC3339_UTC_FMT};
 use crate::dto::error::AppError;
 use crate::dto::events::{MaintenanceRunState, MaintenanceState};
 use crate::dto::settings::MaintenanceTask;
@@ -48,14 +48,14 @@ pub struct Maintenance {
 }
 
 async fn now_text(admin: &tokio_postgres::Client) -> Result<String, AppError> {
-    Ok(admin.query_one(NOW_TEXT, &[&RFC3339_UTC_FMT]).await.map_err(pg_err)?.get(0))
+    Ok(admin.query_one(NOW_TEXT, &[&RFC3339_UTC_FMT]).await.map_err(db_err)?.get(0))
 }
 
 async fn run_task(admin: &tokio_postgres::Client, task: MaintenanceTask) -> Result<(), AppError> {
     match task {
-        MaintenanceTask::Analyze => admin.batch_execute("ANALYZE").await.map_err(pg_err),
+        MaintenanceTask::Analyze => admin.batch_execute("ANALYZE").await.map_err(db_err),
         MaintenanceTask::Vacuum => {
-            admin.batch_execute("VACUUM (ANALYZE)").await.map_err(pg_err)?;
+            admin.batch_execute("VACUUM (ANALYZE)").await.map_err(db_err)?;
             let (blobs, addresses) = crate::importer::remove::delete_orphans(admin).await?;
             log::info!("maintenance vacuum: {blobs} orphan blobs, {addresses} orphan addresses deleted");
             Ok(())
@@ -65,14 +65,14 @@ async fn run_task(admin: &tokio_postgres::Client, task: MaintenanceTask) -> Resu
                 log::info!("maintenance ensure index {name} ({done}/{total})")
             })
             .await?;
-            let leftovers = admin.query(CCNEW_LEFTOVERS, &[]).await.map_err(pg_err)?;
+            let leftovers = admin.query(CCNEW_LEFTOVERS, &[]).await.map_err(db_err)?;
             for row in leftovers {
                 let name: String = row.get(0); // catalog name quoted by quote_ident, not a user value
-                admin.batch_execute(&format!("DROP INDEX CONCURRENTLY {name}")).await.map_err(pg_err)?;
+                admin.batch_execute(&format!("DROP INDEX CONCURRENTLY {name}")).await.map_err(db_err)?;
                 log::info!("maintenance dropped leftover index {name}");
             }
             for (i, name) in REINDEX_INDEXES.iter().enumerate() {
-                admin.batch_execute(&format!("REINDEX INDEX CONCURRENTLY {name}")).await.map_err(pg_err)?;
+                admin.batch_execute(&format!("REINDEX INDEX CONCURRENTLY {name}")).await.map_err(db_err)?;
                 log::info!("maintenance reindex {name} ({}/{})", i + 1, REINDEX_INDEXES.len());
             }
             Ok(())

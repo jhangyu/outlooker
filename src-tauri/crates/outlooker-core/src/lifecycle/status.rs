@@ -1,4 +1,4 @@
-use crate::db::{pg_err, RFC3339_UTC_FMT};
+use crate::db::{db_err, RFC3339_UTC_FMT};
 use crate::dto::app::{AppPhase, LibraryCounts};
 use crate::dto::error::AppError;
 use crate::dto::settings::{DbStatus, IndexStatus, MaintenanceState};
@@ -7,8 +7,8 @@ use crate::lifecycle::supervisor::Supervisor;
 impl Supervisor {
     pub async fn db_status(&self, maintenance: Option<MaintenanceState>) -> Result<DbStatus, AppError> {
         self.require_ready()?;
-        let c = self.inner.db.app_pool()?.get().await.map_err(|e| AppError::internal(e.to_string()))?;
-        let r1 = c.query_one("SELECT current_setting('server_version'), pg_database_size(current_database())", &[]).await.map_err(pg_err)?;
+        let c = self.inner.db.app_client().await?;
+        let r1 = c.query_one("SELECT current_setting('server_version'), pg_database_size(current_database())", &[]).await.map_err(db_err)?;
         let r2 = c
             .query_one(
                 "SELECT (SELECT count(*) FROM image_blobs), (SELECT count(*) FROM attachments), \
@@ -16,7 +16,7 @@ impl Supervisor {
                 &[],
             )
             .await
-            .map_err(pg_err)?;
+            .map_err(db_err)?;
         let idx = c
             .query(
                 "SELECT i.relname::text, t.relname::text, pg_relation_size(i.oid), x.indisvalid \
@@ -26,7 +26,7 @@ impl Supervisor {
                 &[],
             )
             .await
-            .map_err(pg_err)?;
+            .map_err(db_err)?;
         let r3 = c
             .query_one(
                 &format!(
@@ -38,7 +38,7 @@ impl Supervisor {
                 &[],
             )
             .await
-            .map_err(pg_err)?;
+            .map_err(db_err)?;
         Ok(DbStatus {
             phase: AppPhase::Ready,
             postgres_version: r1.get(0),

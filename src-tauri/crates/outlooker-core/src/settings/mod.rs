@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use crate::db::{pg_err, Db};
+use crate::db::{db_err, Db};
 use crate::dto::app::Language;
 use crate::dto::error::AppError;
 use crate::dto::settings::{Settings, SettingsPatch};
@@ -26,10 +26,6 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
     let mut f = std::fs::File::create(&tmp).map_err(|e| AppError::file_access(&tmp, &e.to_string()))?;
     f.write_all(bytes).and_then(|_| f.sync_all()).map_err(|e| AppError::file_access(&tmp, &e.to_string()))?;
     std::fs::rename(&tmp, path).map_err(|e| AppError::file_access(path, &e.to_string()))
-}
-
-async fn pool_client(db: &Db) -> Result<deadpool_postgres::Object, AppError> {
-    db.app_pool()?.get().await.map_err(|e| AppError::internal(format!("app pool: {e}")))
 }
 
 #[derive(Clone)]
@@ -69,8 +65,8 @@ impl SettingsStore {
     }
 
     pub async fn webp_quality(&self, db: &Db) -> Result<u8, AppError> {
-        let c = pool_client(db).await?;
-        let q: i16 = c.query_one("SELECT webp_quality FROM settings", &[]).await.map_err(pg_err)?.get(0);
+        let c = db.app_client().await?;
+        let q: i16 = c.query_one("SELECT webp_quality FROM settings", &[]).await.map_err(db_err)?.get(0);
         self.state.lock().unwrap().1 = q as u8;
         Ok(q as u8)
     }
@@ -90,8 +86,8 @@ impl SettingsStore {
             if !(1..=100).contains(&q) {
                 return Err(AppError::invalid("webpQuality", "outOfRange"));
             }
-            let c = pool_client(db).await?;
-            c.execute("UPDATE settings SET webp_quality = $1, updated_at = now()", &[&(q as i16)]).await.map_err(pg_err)?;
+            let c = db.app_client().await?;
+            c.execute("UPDATE settings SET webp_quality = $1, updated_at = now()", &[&(q as i16)]).await.map_err(db_err)?;
         }
         if let Some(language) = patch.language {
             let mut b = self.bootstrap();

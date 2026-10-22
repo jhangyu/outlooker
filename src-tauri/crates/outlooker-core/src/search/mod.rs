@@ -12,20 +12,12 @@ use std::time::Instant;
 
 use tokio_postgres::Client;
 
-use crate::db::{Db, RFC3339_UTC_FMT};
+use crate::db::{db_err, Db, RFC3339_UTC_FMT};
 use crate::dto::error::AppError;
 use crate::dto::search::{Address, FilterOptions, MailDetail, MailRow, SearchCount, SearchPage, SearchQuery, SearchRequest};
 
 pub const DEFAULT_PAGE_SIZE: u32 = 200;
 pub const MAX_PAGE_SIZE: u32 = 500;
-
-fn pool_err(e: deadpool_postgres::PoolError) -> AppError {
-    match e {
-        deadpool_postgres::PoolError::Closed => AppError::DbNotReady,
-        deadpool_postgres::PoolError::Backend(e) if e.as_db_error().is_none() => AppError::DbNotReady,
-        other => AppError::internal(format!("pool: {other}")),
-    }
-}
 
 #[derive(Clone)]
 pub struct SearchService {
@@ -38,7 +30,7 @@ impl SearchService {
     }
 
     async fn client(&self) -> Result<deadpool_postgres::Object, AppError> {
-        self.db.app_pool()?.get().await.map_err(pool_err)
+        self.db.app_client().await
     }
 
     pub async fn search(&self, req: SearchRequest) -> Result<SearchPage, AppError> {
@@ -88,14 +80,6 @@ pub async fn search_page(client: &mut Client, req: &SearchRequest, window: i64) 
     let rows = hydrate_rows(client, &keep).await?;
     let elapsed_ms = started.elapsed().as_millis().min(u32::MAX as u128) as u32;
     Ok((SearchPage { rows, next_cursor, short_query: c.short_query, elapsed_ms }, ids.phase_b_ran))
-}
-
-/// Database error of a read path: connection closed / I/O → `DbNotReady`, else `Internal{"<sqlstate>: <message>"}`.
-pub(crate) fn db_err(e: tokio_postgres::Error) -> AppError {
-    if e.is_closed() || (e.as_db_error().is_none() && std::error::Error::source(&e).is_some_and(|s| s.is::<std::io::Error>())) {
-        return AppError::DbNotReady;
-    }
-    crate::db::pg_err(e)
 }
 
 /// C13. MailRow for `ids` (hydrate SQL of spec Part 04 §7.4); keeps the order of `ids` (duplicates repeated),

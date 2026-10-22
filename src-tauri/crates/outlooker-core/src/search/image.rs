@@ -1,7 +1,8 @@
 //! `mailimg` scheme body (spec Part 04 §7.6).
 use tokio_postgres::Client;
 
-use super::{db_err, sql};
+use super::sql;
+use crate::db::db_err;
 use crate::dto::error::AppError;
 
 /// WebP bytes of `image_blobs.id`, `None` when unknown.

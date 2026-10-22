@@ -11,7 +11,7 @@ use tokio::sync::{Notify, broadcast, oneshot, watch};
 use tokio_postgres::error::SqlState;
 
 use crate::db::indexes::{drop_search_indexes, ensure_search_indexes};
-use crate::db::{Db, RFC3339_UTC_FMT, pg_err};
+use crate::db::{db_err, library_counts, Db, RFC3339_UTC_FMT};
 use crate::dto::app::{AppPhase, LibraryCounts};
 use crate::dto::error::AppError;
 use crate::dto::events::{ImportStatusChanged, LibraryChanged};
@@ -25,7 +25,7 @@ use crate::importer::normalize::{NormalizeCtx, normalize};
 use crate::importer::progress::{BYTE_BUDGET, ByteBudget, Throughput};
 use crate::importer::pst_reader::{self, ReaderMsg, ReaderParams};
 use crate::importer::types::{FolderIn, ItemError, RawItem};
-use crate::importer::writer::{AFTER_JOB_VACUUM, Checkpoint, Writer, WriterConfig, load_known_hashes, stage_db, upsert_folders};
+use crate::importer::writer::{AFTER_JOB_VACUUM, Checkpoint, Writer, WriterConfig, load_known_hashes, stage_db, truncate_to_micros, upsert_folders};
 use crate::importer::{ImportTuning, RecoveryReport, remove};
 use crate::paths::Paths;
 use crate::sink::{CoreEvent, EventSink};
@@ -145,22 +145,6 @@ impl Inner {
     }
 }
 
-fn pool_err(e: deadpool_postgres::PoolError) -> AppError {
-    match e {
-        deadpool_postgres::PoolError::Closed | deadpool_postgres::PoolError::Backend(_) => AppError::DbNotReady,
-        other => AppError::internal(format!("pool: {other}")),
-    }
-}
-
-async fn app(inner: &Inner) -> Result<deadpool_postgres::Object, AppError> {
-    inner.db.app_pool()?.get().await.map_err(pool_err)
-}
-
-/// DB error → AppError: no SQLSTATE (closed / I/O) → DbNotReady, else `pg_err`.
-fn db_err(e: tokio_postgres::Error) -> AppError {
-    if e.as_db_error().is_none() { AppError::DbNotReady } else { pg_err(e) }
-}
-
 // ------------------------------------------------------------------------------------------------ status
 
 /// Part 04 §2.1 table.
@@ -196,7 +180,7 @@ const LIST_SQL: &str = "SELECT s.id, s.path, s.display_name, s.file_size_bytes, 
  WHERE $2::bigint IS NULL OR s.id = $2";
 
 pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSource>, AppError> {
-    let c = app(inner).await?;
+    let c = inner.db.app_client().await?;
     let rows = c.query(LIST_SQL, &[&RFC3339_UTC_FMT, &only]).await.map_err(db_err)?;
     let running = inner.running();
     let mut out: Vec<(u8, i64, PstSource)> = rows
@@ -264,14 +248,9 @@ async fn emit_status(inner: &Inner, pst_id: i64) {
     }
 }
 
-async fn library_counts(inner: &Inner) -> Result<LibraryCounts, AppError> {
-    let c = app(inner).await?;
-    let r = c.query_one("SELECT (SELECT count(*) FROM messages), (SELECT count(*) FROM pst_sources)", &[]).await.map_err(db_err)?;
-    Ok(LibraryCounts { messages: r.get(0), psts: r.get(1) })
-}
-
 async fn emit_library(inner: &Inner) {
-    if let Ok(counts) = library_counts(inner).await {
+    let counts = async { library_counts(&*inner.db.app_client().await?).await };
+    if let Ok(counts) = counts.await {
         inner.sink.emit(CoreEvent::LibraryChanged(LibraryChanged { counts }));
     }
 }
@@ -294,13 +273,6 @@ fn progress_event(cp: &Checkpoint, tp: Option<&Throughput>) -> ImportProgress {
 
 // ------------------------------------------------------------------------------------------------ commands
 
-fn trunc_micros(t: SystemTime) -> SystemTime {
-    match t.duration_since(UNIX_EPOCH) {
-        Ok(d) => UNIX_EPOCH + Duration::from_micros(d.as_micros() as u64),
-        Err(e) => UNIX_EPOCH - Duration::from_micros(e.duration().as_micros() as u64),
-    }
-}
-
 /// Part 03 §7.2 path checks. Returns (size, mtime truncated to whole microseconds).
 pub fn check_file(path: &str) -> Result<(i64, SystemTime), AppError> {
     let p = Path::new(path);
@@ -318,7 +290,7 @@ pub fn check_file(path: &str) -> Result<(i64, SystemTime), AppError> {
         return Err(AppError::NotAPst { path: path.to_owned() });
     }
     let mtime = meta.modified().map_err(|_| fa("unreadable"))?;
-    Ok((meta.len() as i64, trunc_micros(mtime)))
+    Ok((meta.len() as i64, truncate_to_micros(mtime)))
 }
 
 fn display_name(path: &str) -> String {
@@ -330,7 +302,7 @@ fn display_name(path: &str) -> String {
 
 /// Source row + queued import job in one transaction. Err(AlreadyImported) when the identity exists.
 async fn insert_source(inner: &Inner, path: &str, size: i64, mtime: SystemTime) -> Result<i64, AppError> {
-    let mut c = app(inner).await?;
+    let mut c = inner.db.app_client().await?;
     let tx = c.transaction().await.map_err(db_err)?;
     let row = tx
         .query_opt(
@@ -395,7 +367,7 @@ async fn newest_job_for_update(tx: &tokio_postgres::Transaction<'_>, pst_id: i64
 }
 
 pub(crate) async fn cancel(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
-    let mut c = app(inner).await?;
+    let mut c = inner.db.app_client().await?;
     let tx = c.transaction().await.map_err(db_err)?;
     let Some((job_id, kind, state)) = newest_job_for_update(&tx, pst_id).await? else {
         return Err(AppError::not_found("pst", pst_id));
@@ -418,7 +390,7 @@ pub(crate) async fn cancel(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
 }
 
 pub(crate) async fn resume(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
-    let mut c = app(inner).await?;
+    let mut c = inner.db.app_client().await?;
     let tx = c.transaction().await.map_err(db_err)?;
     let Some((_, kind, state)) = newest_job_for_update(&tx, pst_id).await? else {
         return Err(AppError::not_found("pst", pst_id));
@@ -436,7 +408,7 @@ pub(crate) async fn resume(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
 }
 
 pub(crate) async fn remove(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
-    let mut c = app(inner).await?;
+    let mut c = inner.db.app_client().await?;
     let tx = c.transaction().await.map_err(db_err)?;
     let Some((job_id, kind, state)) = newest_job_for_update(&tx, pst_id).await? else {
         return Err(AppError::not_found("pst", pst_id));
@@ -477,7 +449,7 @@ pub(crate) async fn errors(inner: &Inner, req: ImportErrorsRequest) -> Result<Im
             (c.t, c.i)
         }
     };
-    let c = app(inner).await?;
+    let c = inner.db.app_client().await?;
     if c.query_opt("SELECT 1 FROM pst_sources WHERE id = $1", &[&req.pst_id]).await.map_err(db_err)?.is_none() {
         return Err(AppError::not_found("pst", req.pst_id));
     }
@@ -529,7 +501,7 @@ pub(crate) async fn errors(inner: &Inner, req: ImportErrorsRequest) -> Result<Im
 }
 
 pub(crate) async fn recover_after_crash(inner: &Inner) -> Result<RecoveryReport, AppError> {
-    let c = app(inner).await?;
+    let c = inner.db.app_client().await?;
     let rows = c
         .query(
             "UPDATE import_jobs SET state = CASE state WHEN 'running' THEN 'queued' ELSE 'cancelled' END, \
@@ -595,7 +567,7 @@ fn synthetic_items(_path: &str) -> Option<(Vec<FolderIn>, Vec<RawItem>)> {
 
 #[cfg(feature = "test-support")]
 pub(crate) async fn enqueue_synthetic(inner: &Inner, path: &str, folders: Vec<FolderIn>, items: Vec<RawItem>) -> Result<i64, AppError> {
-    let (size, mtime) = check_file(path).unwrap_or((1, trunc_micros(SystemTime::now())));
+    let (size, mtime) = check_file(path).unwrap_or((1, truncate_to_micros(SystemTime::now())));
     SYNTHETIC.lock().unwrap_or_else(|p| p.into_inner()).insert(path.to_owned(), (folders, items));
     let pst_id = insert_source(inner, path, size, mtime).await?;
     emit_status(inner, pst_id).await;
@@ -675,7 +647,7 @@ async fn worker(inner: Arc<Inner>) {
 }
 
 async fn next_job(inner: &Inner) -> Result<Next, AppError> {
-    let c = app(inner).await?;
+    let c = inner.db.app_client().await?;
     let row = c
         .query_opt("SELECT id, pst_id, kind FROM import_jobs WHERE state = 'queued' ORDER BY id LIMIT 1", &[])
         .await
@@ -689,7 +661,7 @@ async fn run_job(inner: &Arc<Inner>, job_id: i64, pst_id: i64, kind: &str) -> bo
     // registered before the row turns `running`, so a cancel that sees `running` finds the flag
     inner.set_running(Some(RunningJob { job_id, pst_id, cancel: cancel.clone() }));
     *inner.throughput.lock().unwrap_or_else(|p| p.into_inner()) = Throughput::new();
-    let taken = match app(inner).await {
+    let taken = match inner.db.app_client().await {
         Ok(c) => c
             .execute("UPDATE import_jobs SET state = 'running', started_at = now() WHERE id = $1 AND state = 'queued'", &[&job_id])
             .await
@@ -718,7 +690,7 @@ async fn run_job(inner: &Arc<Inner>, job_id: i64, pst_id: i64, kind: &str) -> bo
 
 async fn run_removal(inner: &Arc<Inner>, job_id: i64, pst_id: i64) {
     loop {
-        let result = match app(inner).await {
+        let result = match inner.db.app_client().await {
             Ok(c) => remove::run(&c, pst_id).await,
             Err(e) => Err(e),
         };
@@ -749,7 +721,7 @@ async fn run_removal(inner: &Arc<Inner>, job_id: i64, pst_id: i64) {
 
 /// Final job row state (+ the job_failed error row in the same transaction).
 async fn set_final(inner: &Inner, job_id: i64, pst_id: i64, state: &str, failure: Option<&JobFailure>) -> Result<(), AppError> {
-    let mut c = app(inner).await?;
+    let mut c = inner.db.app_client().await?;
     let tx = c.transaction().await.map_err(db_err)?;
     if let Some(f) = failure {
         let e = ItemError::new(f.stage, ImportErrorSeverity::JobFailed, "", 0, &f.message);
@@ -773,7 +745,7 @@ async fn set_final(inner: &Inner, job_id: i64, pst_id: i64, state: &str, failure
 /// phase to leave `Ready`, then for `Ready` again (also after `Failed`: app_retry resumes the job in this process).
 /// false = shutdown: the job row stays `running` and `recover_after_crash` re-queues it at the next start.
 async fn pause_wait(inner: &Inner) -> bool {
-    if let Ok(c) = app(inner).await
+    if let Ok(c) = inner.db.app_client().await
         && c.simple_query("SELECT 1").await.is_ok()
     {
         return true;
@@ -854,7 +826,7 @@ async fn run_import(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<J
 
 /// Step 9: Finalizing phase, indexes (always; idempotent), after-job VACUUM, marker removed.
 async fn finalize(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
-    let c = app(inner).await?;
+    let c = inner.db.app_client().await?;
     if Checkpoint::load(&c, pst_id).await?.is_some() {
         Checkpoint::set_phase(&c, pst_id, ImportPhase::Finalizing, None).await?;
         if let Some(cp) = Checkpoint::load(&c, pst_id).await? {
@@ -870,13 +842,13 @@ async fn finalize(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
 
 /// One run of the pipeline from the checkpoint (steps 1–8).
 async fn attempt(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<JobCancel>) -> Result<AttemptEnd, AppError> {
-    let mut c = app(inner).await?;
+    let mut c = inner.db.app_client().await?;
     let row = c.query_one("SELECT path, file_size_bytes, file_mtime FROM pst_sources WHERE id = $1", &[&pst_id]).await.map_err(db_err)?;
     let path: String = row.get(0);
     let synthetic = synthetic_items(&path);
     // (1) file identity
     let identity = match std::fs::metadata(&path) {
-        Ok(m) => Ok((m.len() as i64, trunc_micros(m.modified().unwrap_or(UNIX_EPOCH)))),
+        Ok(m) => Ok((m.len() as i64, truncate_to_micros(m.modified().unwrap_or(UNIX_EPOCH)))),
         Err(_) if synthetic.is_some() => Ok((row.get(1), row.get(2))),
         Err(e) => Err(e),
     };
@@ -937,8 +909,7 @@ async fn attempt(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<JobC
     let start = Checkpoint { phase: ImportPhase::Importing, items_total: Some(scanned.items_total), ..start };
     inner.sink.emit(CoreEvent::ImportProgress(progress_event(&start, None)));
     // (5) index policy (Part 04 §6.4)
-    let counts = c.query_one("SELECT (SELECT count(*) FROM messages), (SELECT count(*) FROM pst_sources)", &[]).await.map_err(db_err)?;
-    let (messages, psts): (i64, i64) = (counts.get(0), counts.get(1));
+    let LibraryCounts { messages, psts } = library_counts(&c).await?;
     let remaining = scanned.items_total - start.cursor_seq;
     if 2 * remaining >= messages {
         let admin = inner.db.connect_admin().await?;
@@ -1099,7 +1070,9 @@ mod tests {
     #[test]
     fn mtime_truncated_to_micros() {
         let t = UNIX_EPOCH + Duration::new(1_700_000_000, 123_456_789);
-        assert_eq!(trunc_micros(t), UNIX_EPOCH + Duration::new(1_700_000_000, 123_456_000));
+        assert_eq!(truncate_to_micros(t), UNIX_EPOCH + Duration::new(1_700_000_000, 123_456_000));
+        // Before 2000-01-01 PostgreSQL truncates toward its epoch, i.e. up in absolute time.
+        assert_eq!(truncate_to_micros(UNIX_EPOCH + Duration::new(1, 500)), UNIX_EPOCH + Duration::new(1, 1_000));
     }
 
     #[test]
