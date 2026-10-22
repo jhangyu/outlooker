@@ -2,6 +2,15 @@
 members = [".", "crates/pff", "crates/outlooker-core", "crates/outlooker-loadgen"]
 resolver = "3"
 
+[workspace.dependencies]
+tokio = "=1.54.0"
+serde_json = "=1.0.154"
+log = "=0.4.34"
+tokio-postgres = "=0.7.18"
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }
+rayon = "=1.12.0"
+tempfile = "=3.27.0"
+
 [package]
 name = "outlooker"
 version = "0.1.0"
@@ -21,10 +30,8 @@ tauri-plugin-dialog = "=2.8.3"
 tauri-plugin-log = "=2.10.1"
 tauri-plugin-single-instance = "=2.5.4"
 tauri-plugin-wdio-webdriver = { version = "=1.5.0", optional = true }
-serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.154"
-log = "=0.4.34"
-tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
+log = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
 outlooker-core = { path = "crates/outlooker-core" }
 
 [features]

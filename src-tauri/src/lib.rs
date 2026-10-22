@@ -15,7 +15,7 @@ const IDLE: u8 = 0;
 const RUNNING: u8 = 1;
 const DONE: u8 = 2;
 
-/// E2E seam (R2-14): the app data dir comes from `OUTLOOKER_APP_DATA_DIR` (absolute) only in `--features e2e` builds.
+/// E2E seam: the app data dir comes from `OUTLOOKER_APP_DATA_DIR` (absolute) only in `--features e2e` builds.
 #[cfg(feature = "e2e")]
 fn app_data_override() -> Option<PathBuf> {
     std::env::var_os("OUTLOOKER_APP_DATA_DIR").map(PathBuf::from).filter(|p| p.is_absolute())

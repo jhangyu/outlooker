@@ -165,14 +165,14 @@ fn write_private(path: &Path, content: &str) -> std::io::Result<()> {
     opts.open(path)?.write_all(content.as_bytes())
 }
 
-fn newest_server_log(log_dir: &Path) -> String {
-    let newest = std::fs::read_dir(log_dir)
+fn newest_server_log(log_dir: &Path) -> Option<std::path::PathBuf> {
+    std::fs::read_dir(log_dir)
         .into_iter()
         .flatten()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_name() != "startup.log")
-        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
-    newest.and_then(|e| std::fs::read_to_string(e.path()).ok()).unwrap_or_default()
+        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
+        .map(|e| e.path())
 }
 
 fn read_pid(pgdata: &Path) -> Option<u32> {
@@ -191,7 +191,7 @@ impl PgController {
         PgController { paths, forced_ports: Arc::new(Mutex::new(Vec::new())) }
     }
 
-    /// Test seam (named in the plan): the next `start` tries these ports first, in order.
+    /// Test seam: the next `start` tries these ports first, in order.
     pub fn with_ports(self, ports: Vec<u16>) -> PgController {
         *self.forced_ports.lock().unwrap() = ports;
         self
@@ -342,7 +342,7 @@ impl PgController {
                 String::from_utf8_lossy(&out.stdout),
                 String::from_utf8_lossy(&out.stderr),
                 tokio::fs::read_to_string(&startup_log).await.unwrap_or_default(),
-                newest_server_log(&log_dir)
+                newest_server_log(&log_dir).and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default()
             );
             if text.contains("could not bind") || text.contains("Address already in use") {
                 bind_attempts += 1;
@@ -397,11 +397,8 @@ impl PgController {
 
     /// Last non-empty line of the newest server log in `pgdata/log` (for `AppError.detail`).
     pub fn last_log_line(&self, pgdata: &Path) -> Option<String> {
-        let newest = std::fs::read_dir(pgdata.join("log"))
-            .ok()?
-            .filter_map(|e| e.ok())
-            .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())?;
-        Some(last_line(&std::fs::read_to_string(newest.path()).ok()?))
+        let newest = newest_server_log(&pgdata.join("log"))?;
+        Some(last_line(&std::fs::read_to_string(newest).ok()?))
     }
 }
 
@@ -420,6 +417,19 @@ mod tests {
         write_private(&f, "secret").unwrap();
         assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "secret");
+    }
+
+    #[test]
+    fn last_log_line_skips_startup_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        std::fs::create_dir(&log).unwrap();
+        std::fs::write(log.join("postgresql.log"), "old\nserver line\n").unwrap();
+        std::fs::write(log.join("startup.log"), "startup noise\n").unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+        std::fs::File::options().write(true).open(log.join("startup.log")).unwrap().set_modified(later).unwrap();
+        let c = PgController::new(Paths::new(dir.path().join("a"), dir.path().join("l"), dir.path().join("pg")));
+        assert_eq!(c.last_log_line(dir.path()).as_deref(), Some("server line"));
     }
 
     #[test]

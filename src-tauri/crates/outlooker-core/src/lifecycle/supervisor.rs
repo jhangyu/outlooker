@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-use crate::db::{pg_err, Db};
+use crate::db::{library_counts, Db};
 use crate::dto::app::{AppPhase, AppStatus, LibraryCounts};
 use crate::dto::error::AppError;
 use crate::gate::Gate;
@@ -95,12 +95,7 @@ impl Supervisor {
     }
 
     async fn counts(&self) -> Result<LibraryCounts, AppError> {
-        let c = self.inner.db.app_pool()?.get().await.map_err(|e| AppError::internal(e.to_string()))?;
-        let r = c
-            .query_one("SELECT (SELECT count(*) FROM messages), (SELECT count(*) FROM pst_sources)", &[])
-            .await
-            .map_err(pg_err)?;
-        Ok(LibraryCounts { messages: r.get(0), psts: r.get(1) })
+        library_counts(&*self.inner.db.app_client().await?).await
     }
 
     pub async fn status(&self) -> AppStatus {

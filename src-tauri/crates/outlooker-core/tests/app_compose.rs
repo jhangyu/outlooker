@@ -1,5 +1,5 @@
 #![cfg(feature = "test-support")]
-//! R2-13 composition tests on a real PostgreSQL (run `node scripts/fetch-postgres.mjs` first).
+//! App composition tests on a real PostgreSQL (run `node scripts/fetch-postgres.mjs` first).
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

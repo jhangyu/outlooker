@@ -1,4 +1,4 @@
-//! R2-12 Maintenance Service integration tests (spec Part 03 §8.3, Part 04 §9.1).
+//! Maintenance Service integration tests (spec Part 03 §8.3, Part 04 §9.1).
 #![cfg(feature = "test-support")]
 use std::sync::Arc;
 

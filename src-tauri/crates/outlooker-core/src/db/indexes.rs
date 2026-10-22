@@ -1,7 +1,7 @@
 use crate::dto::error::AppError;
 use crate::lifecycle::pg::total_ram_bytes;
 
-use super::pg_err;
+use super::db_err;
 
 /// Generation expression of the stored column `messages.body_tsv` (spec Part 04 §2, §3). The search compiler and
 /// `v_mail` use the column `body_tsv`; nothing recomputes this expression at query time.
@@ -31,7 +31,7 @@ pub async fn missing_or_invalid(admin: &tokio_postgres::Client) -> Result<Vec<&'
             &[&names],
         )
         .await
-        .map_err(pg_err)?;
+        .map_err(db_err)?;
     Ok(SEARCH_INDEXES
         .iter()
         .map(|i| i.name)
@@ -41,7 +41,7 @@ pub async fn missing_or_invalid(admin: &tokio_postgres::Client) -> Result<Vec<&'
 
 pub async fn drop_search_indexes(admin: &tokio_postgres::Client) -> Result<(), AppError> {
     for idx in &SEARCH_INDEXES {
-        admin.batch_execute(&format!("DROP INDEX IF EXISTS {}", idx.name)).await.map_err(pg_err)?;
+        admin.batch_execute(&format!("DROP INDEX IF EXISTS {}", idx.name)).await.map_err(db_err)?;
     }
     Ok(())
 }
@@ -54,12 +54,12 @@ pub async fn ensure_search_indexes(
     admin
         .batch_execute(&format!("SET maintenance_work_mem = '{mwm_mb}MB'; SET max_parallel_maintenance_workers = 2;"))
         .await
-        .map_err(pg_err)?;
+        .map_err(db_err)?;
     let todo = missing_or_invalid(admin).await?;
     for (done, idx) in SEARCH_INDEXES.iter().enumerate() {
         if todo.contains(&idx.name) {
-            admin.batch_execute(&format!("DROP INDEX IF EXISTS {}", idx.name)).await.map_err(pg_err)?;
-            admin.batch_execute(&format!("CREATE INDEX IF NOT EXISTS {}", idx.ddl)).await.map_err(pg_err)?;
+            admin.batch_execute(&format!("DROP INDEX IF EXISTS {}", idx.name)).await.map_err(db_err)?;
+            admin.batch_execute(&format!("CREATE INDEX IF NOT EXISTS {}", idx.ddl)).await.map_err(db_err)?;
         }
         progress(idx.name, done + 1, SEARCH_INDEXES.len());
     }

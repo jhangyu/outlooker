@@ -3,9 +3,8 @@ use std::collections::HashMap;
 
 use tokio_postgres::Client;
 
-use super::db_err;
 use super::sql;
-use crate::db::RFC3339_UTC_FMT;
+use crate::db::{db_err, RFC3339_UTC_FMT};
 use crate::dto::error::AppError;
 use crate::dto::search::{Address, AttachmentMeta, MailDetail, Occurrence};
 

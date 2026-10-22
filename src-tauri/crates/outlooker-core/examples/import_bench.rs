@@ -95,6 +95,6 @@ async fn main() {
     println!("total           {:.2} s  {:.2} MB/s", secs(start, end), size_mb / secs(start, end));
     clock.sample_rss();
     let peak_rss_bytes = clock.rss.lock().unwrap().2;
-    // last line: machine-read by the R2-10 perf test; keep the exact format
+    // last line: machine-read by the perf test; keep the exact format
     println!("import_bench messages_per_sec={} peak_rss_bytes={peak_rss_bytes}", items as f64 / secs(importing, finalizing));
 }

@@ -67,15 +67,14 @@ fn map_err(e: tokio_postgres::Error, timeout: u32) -> AppError {
     match e.as_db_error().map(|d| d.code().code()) {
         Some("57014") => AppError::QueryTimeout { timeout_ms: timeout },
         Some("22007") | Some("22008") => AppError::invalid("cursor", "invalid"),
-        _ => super::db_err(e),
+        _ => crate::db::db_err(e),
     }
 }
 
 async fn begin<'a>(client: &'a mut Client, c: &Compiled) -> Result<Transaction<'a>, AppError> {
     let t = timeout_ms(c);
     let tx = client.transaction().await.map_err(|e| map_err(e, t))?;
-    let set = if c.short_query { "SET LOCAL statement_timeout = '20s'" } else { "SET LOCAL statement_timeout = '10s'" };
-    tx.batch_execute(set).await.map_err(|e| map_err(e, t))?;
+    tx.batch_execute(&format!("SET LOCAL statement_timeout = {t}")).await.map_err(|e| map_err(e, t))?;
     Ok(tx)
 }
 
@@ -122,7 +121,7 @@ pub async fn page(client: &mut Client, c: &Compiled, after: Option<&CursorKey>, 
 pub async fn count(client: &mut Client, c: &Compiled) -> Result<SearchCount, AppError> {
     let t = TIMEOUT_MS;
     let tx = client.transaction().await.map_err(|e| map_err(e, t))?;
-    tx.batch_execute("SET LOCAL statement_timeout = '10s'").await.map_err(|e| map_err(e, t))?;
+    tx.batch_execute(&format!("SET LOCAL statement_timeout = {t}")).await.map_err(|e| map_err(e, t))?;
     if c.indexable {
         tx.batch_execute("SET LOCAL enable_seqscan = off; SET LOCAL enable_indexscan = off;").await.map_err(|e| map_err(e, t))?;
     }

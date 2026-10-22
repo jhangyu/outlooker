@@ -1,7 +1,7 @@
 //! Saved queries (spec Part 03 §6.1, Part 04 §7.6) on the outlooker_app pool.
 use tokio_postgres::error::SqlState;
 
-use crate::db::{RFC3339_UTC_FMT, pg_err};
+use crate::db::{db_err, RFC3339_UTC_FMT};
 use crate::dto::error::AppError;
 use crate::dto::sql::{SavedQuery, SavedQueryInput};
 
@@ -36,13 +36,13 @@ fn write_err(e: tokio_postgres::Error) -> AppError {
     if e.code() == Some(&SqlState::UNIQUE_VIOLATION) {
         AppError::invalid("name", "duplicate")
     } else {
-        pg_err(e)
+        db_err(e)
     }
 }
 
 pub async fn list(c: &tokio_postgres::Client) -> Result<Vec<SavedQuery>, AppError> {
     let sql = format!("SELECT {COLUMNS} FROM saved_queries ORDER BY name");
-    let rows = c.query(&sql, &[&RFC3339_UTC_FMT]).await.map_err(pg_err)?;
+    let rows = c.query(&sql, &[&RFC3339_UTC_FMT]).await.map_err(db_err)?;
     Ok(rows.iter().map(row_to_saved).collect())
 }
 
@@ -61,6 +61,6 @@ pub async fn update(c: &tokio_postgres::Client, id: i64, input: &SavedQueryInput
 }
 
 pub async fn delete(c: &tokio_postgres::Client, id: i64) -> Result<(), AppError> {
-    let n = c.execute("DELETE FROM saved_queries WHERE id = $1", &[&id]).await.map_err(pg_err)?;
+    let n = c.execute("DELETE FROM saved_queries WHERE id = $1", &[&id]).await.map_err(db_err)?;
     if n == 0 { Err(AppError::not_found("savedQuery", id)) } else { Ok(()) }
 }

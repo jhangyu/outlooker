@@ -155,7 +155,7 @@ mod tests {
         std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("missing golden file {}: {e}", p.display()))
     }
 
-    /// The forbidden patterns of the R1-05 acceptance, matched without a regex crate.
+    /// The forbidden patterns of the sanitizer acceptance, matched without a regex crate.
     pub(crate) fn hostile_violations(out: &str) -> Vec<String> {
         let lower = out.to_ascii_lowercase();
         let mut found = Vec::new();
