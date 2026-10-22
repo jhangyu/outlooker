@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
 import type { Address } from "../../api/bindings/Address";
-import { EmptyState, formatAppError, formatDateTime, toAppError } from "../common";
+import { EmptyState, ellipsis, formatAppError, formatDateTime, toAppError } from "../common";
 import { AttachmentCard } from "./AttachmentCard";
 import { MailPreview } from "./MailPreview";
 
@@ -19,12 +19,17 @@ const useStyles = makeStyles({
   meta: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalM },
   spacer: { flex: 1 },
   persona: { minWidth: 0 },
-  ellipsis: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  ellipsis: { ...ellipsis },
   date: { whiteSpace: "nowrap", flexShrink: 0, alignSelf: "flex-start", color: tokens.colorNeutralForeground3 },
   line: { display: "grid", gridTemplateColumns: "48px 1fr", gap: tokens.spacingHorizontalS, color: tokens.colorNeutralForeground2 },
   chips: { display: "flex", flexWrap: "wrap", gap: tokens.spacingHorizontalXS, alignItems: "center" },
   body: { flex: 1, minHeight: 0, overflow: "auto" },
-  text: { margin: 0, padding: tokens.spacingHorizontalL, whiteSpace: "pre-wrap", fontFamily: tokens.fontFamilyBase },
+  text: {
+    margin: 0, padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalXXL}`, maxWidth: "900px", lineHeight: "22px",
+    whiteSpace: "pre-wrap", fontFamily: tokens.fontFamilyBase,
+  },
+  atts: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS },
+  muted: { color: tokens.colorNeutralForeground3 },
   center: { display: "grid", placeItems: "center", height: "100%" },
 });
 
@@ -79,10 +84,13 @@ export function ReadingPane({ mailId }: { mailId: number | null }) {
             ))}
           </div>
           {m.attachments.length > 0 ? (
-            <div className={s.chips}>
-              {m.attachments.map((a) => (
-                <AttachmentCard key={a.id} attachment={a} />
-              ))}
+            <div className={s.atts}>
+              <Caption1 className={s.muted}>{t("preview.attachments")}</Caption1>
+              <div className={s.chips}>
+                {m.attachments.map((a) => (
+                  <AttachmentCard key={a.id} attachment={a} />
+                ))}
+              </div>
             </div>
           ) : null}
         </div>

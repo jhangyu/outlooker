@@ -2,7 +2,7 @@ import { Body1Strong, Button, Caption1, Card, Tooltip, makeStyles, tokens } from
 import { ArrowDownloadRegular } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 import type { AttachmentMeta } from "../../api/bindings/AttachmentMeta";
-import { formatBytes } from "../common";
+import { ellipsis, formatBytes } from "../common";
 
 const useStyles = makeStyles({
   card: { display: "flex", flexDirection: "row", alignItems: "center", gap: tokens.spacingHorizontalS, width: "260px" },
@@ -12,7 +12,7 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightSemibold,
   },
   text: { display: "flex", flexDirection: "column", minWidth: 0, flex: 1 },
-  name: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  name: { ...ellipsis },
 });
 
 /** Metadata only; download comes in a later phase (requirements: attachments are re-read from the PST later). */

@@ -1,9 +1,11 @@
 import {
   Badge, Body1, Button, Caption1, DataGrid, DataGridBody, DataGridCell, DataGridHeader, DataGridHeaderCell, DataGridRow,
   Body1Strong, ProgressBar, Subtitle2, TableCellLayout, createTableColumn, makeStyles, mergeClasses, tokens,
-  type BadgeProps, type TableColumnDefinition, type TableColumnId,
+  buttonClassNames, type BadgeProps, type CreateTableColumnOptions, type TableColumnDefinition, type TableColumnId,
 } from "@fluentui/react-components";
-import { AddRegular, DeleteRegular, DocumentRegular, ErrorCircleRegular, MailInboxRegular, WarningRegular } from "@fluentui/react-icons";
+import {
+  AddRegular, DeleteRegular, DismissRegular, DocumentRegular, ErrorCircleRegular, MailInboxRegular, PlayRegular, WarningRegular,
+} from "@fluentui/react-icons";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -13,7 +15,7 @@ import type { ImportStatus } from "../../api/bindings/ImportStatus";
 import type { PstSource } from "../../api/bindings/PstSource";
 import { useAppStatus } from "../../app/AppStatusContext";
 import {
-  EmptyState, formatAppError, formatBytes, formatDateTime, formatNumber, useAppToast,
+  EmptyState, ellipsis, formatAppError, formatBytes, formatDateTime, formatNumber, useAppToast,
 } from "../../components/common";
 import { RemoveDialog } from "./RemoveDialog";
 
@@ -23,6 +25,10 @@ const BADGE: Record<ImportStatus, BadgeProps["color"]> = {
   queued: "informative", running: "brand", cancelling: "warning", cancelled: "subtle",
   failed: "danger", completed: "success", removing: "warning",
 };
+type ColumnKey = "name" | "size" | "messages" | "new" | "date" | "status" | "remove";
+const NUMERIC: ReadonlySet<TableColumnId> = new Set<ColumnKey>(["size", "messages", "new"]);
+const column = (columnId: ColumnKey, def: Omit<CreateTableColumnOptions<PstSource>, "columnId">) =>
+  createTableColumn<PstSource>({ ...def, columnId });
 
 const useStyles = makeStyles({
   root: { display: "grid", gridTemplateRows: "auto 1fr", gridTemplateColumns: "1.6fr 1fr 1fr", height: "100%", minHeight: 0 },
@@ -42,19 +48,23 @@ const useStyles = makeStyles({
   pane: {
     display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, overflow: "hidden",
     backgroundColor: tokens.colorNeutralBackground1, borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
+    // The rail already draws the border left of the first pane (mockup `.pane + .pane`).
+    ":first-of-type": { borderLeft: "none" },
   },
   paneHead: {
     display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS, minHeight: "44px", boxSizing: "border-box",
     padding: `0 ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   paneTitle: { flexShrink: 0 },
-  paneFor: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: tokens.colorNeutralForeground3 },
+  paneFor: { ...ellipsis, color: tokens.colorNeutralForeground3 },
   scroll: { flex: 1, overflow: "auto", minHeight: 0 },
-  full: { gridColumn: "1 / -1" },
+  full: { gridColumn: "1 / -1", borderLeft: "none" },
   // Fixed column bases (sum 832px): the grid scrolls horizontally instead of squeezing every column to flex: 1 1 0.
   grid: { minWidth: "832px" },
   cell: { whiteSpace: "nowrap" },
   num: { justifyContent: "flex-end", fontVariantNumeric: "tabular-nums" },
+  // The sortable header label sits in a full-width flex button; right-align inside it too.
+  numButton: { justifyContent: "flex-end" },
   col_name: { flex: "1 0 220px", minWidth: 0 },
   col_size: { flex: "0 0 88px" },
   col_messages: { flex: "0 0 88px" },
@@ -66,7 +76,7 @@ const useStyles = makeStyles({
   badge: { flexShrink: 0, whiteSpace: "nowrap" },
   path: {
     fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3,
-    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block", minWidth: 0,
+    ...ellipsis, display: "block",
   },
   card: {
     display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS, padding: tokens.spacingHorizontalM,
@@ -74,7 +84,14 @@ const useStyles = makeStyles({
   },
   selected: { backgroundColor: tokens.colorBrandBackground2, boxShadow: `inset 3px 0 0 ${tokens.colorCompoundBrandStroke}` },
   row: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
-  name: { flex: 1, fontWeight: tokens.fontWeightSemibold, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  acts: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalXS },
+  danger: {
+    ":enabled": { color: tokens.colorStatusDangerForeground1 },
+    ":enabled:hover,:enabled:hover:active": {
+      color: tokens.colorStatusDangerForeground1, [`& .${buttonClassNames.icon}`]: { color: tokens.colorStatusDangerForeground1 },
+    },
+  },
+  name: { flex: 1, fontWeight: tokens.fontWeightSemibold, ...ellipsis },
   sub: {
     display: "flex", flexWrap: "wrap", gap: tokens.spacingHorizontalM, rowGap: "2px", color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200, "& > span": { whiteSpace: "nowrap" },
@@ -131,8 +148,7 @@ export function ImportScreen() {
   };
 
   const columns: TableColumnDefinition<PstSource>[] = [
-    createTableColumn<PstSource>({
-      columnId: "name",
+    column("name", {
       compare: (a, b) => a.displayName.localeCompare(b.displayName),
       renderHeaderCell: () => t("imported.name"),
       renderCell: (p) => (
@@ -141,32 +157,27 @@ export function ImportScreen() {
         </TableCellLayout>
       ),
     }),
-    createTableColumn<PstSource>({
-      columnId: "size",
+    column("size", {
       compare: (a, b) => a.fileSizeBytes - b.fileSizeBytes,
       renderHeaderCell: () => t("imported.size"),
       renderCell: (p) => formatBytes(p.fileSizeBytes, lng),
     }),
-    createTableColumn<PstSource>({
-      columnId: "messages",
+    column("messages", {
       compare: (a, b) => a.messageCount - b.messageCount,
       renderHeaderCell: () => t("imported.messages"),
       renderCell: (p) => formatNumber(p.messageCount, lng),
     }),
-    createTableColumn<PstSource>({
-      columnId: "new",
+    column("new", {
       compare: (a, b) => a.newMessageCount - b.newMessageCount,
       renderHeaderCell: () => t("imported.new"),
       renderCell: (p) => formatNumber(p.newMessageCount, lng),
     }),
-    createTableColumn<PstSource>({
-      columnId: "date",
+    column("date", {
       compare: (a, b) => (a.finishedAt ?? a.queuedAt).localeCompare(b.finishedAt ?? b.queuedAt),
       renderHeaderCell: () => t("imported.date"),
       renderCell: (p) => formatDateTime(p.finishedAt ?? p.queuedAt, lng),
     }),
-    createTableColumn<PstSource>({
-      columnId: "status",
+    column("status", {
       compare: (a, b) => a.status.localeCompare(b.status),
       renderHeaderCell: () => t("imported.status"),
       renderCell: (p) => (
@@ -180,12 +191,12 @@ export function ImportScreen() {
         </span>
       ),
     }),
-    createTableColumn<PstSource>({
-      columnId: "remove",
+    column("remove", {
       renderHeaderCell: () => "",
       renderCell: (p) => (
         <Button
           appearance="subtle"
+          className={s.danger}
           icon={<DeleteRegular />}
           aria-label={t("imported.remove", { name: p.displayName })}
           disabled={p.status === "removing"}
@@ -199,8 +210,11 @@ export function ImportScreen() {
     }),
   ];
 
-  const colClass = (id: TableColumnId) =>
-    mergeClasses(s.cell, s[`col_${String(id)}` as keyof typeof s], (id === "size" || id === "messages" || id === "new") && s.num);
+  const basis: Record<ColumnKey, string> = {
+    name: s.col_name, size: s.col_size, messages: s.col_messages, new: s.col_new, date: s.col_date, status: s.col_status, remove: s.col_remove,
+  };
+  // Every column is built by `column()`, so its id is a ColumnKey.
+  const colClass = (id: TableColumnId) => mergeClasses(s.cell, basis[id as ColumnKey], NUMERIC.has(id) && s.num);
 
   const stat = (value: string, label: string) => (
     <span className={s.stat}>
@@ -253,7 +267,9 @@ export function ImportScreen() {
                 <DataGridHeader>
                   <DataGridRow>
                     {({ renderHeaderCell, columnId }) => (
-                      <DataGridHeaderCell className={colClass(columnId)}>{renderHeaderCell()}</DataGridHeaderCell>
+                      <DataGridHeaderCell className={colClass(columnId)} button={{ className: NUMERIC.has(columnId) ? s.numButton : undefined }}>
+                        {renderHeaderCell()}
+                      </DataGridHeaderCell>
                     )}
                   </DataGridRow>
                 </DataGridHeader>
@@ -365,24 +381,24 @@ function QueueCard(props: {
           </span>
         ) : null}
       </div>
-      <div className={s.row} onClick={(e) => e.stopPropagation()}>
+      <div className={s.acts} onClick={(e) => e.stopPropagation()}>
         {pst.status === "running" || pst.status === "queued" || pst.status === "cancelling" ? (
-          <Button size="small" disabled={pst.status === "cancelling"} onClick={props.onCancel} data-testid="queue-cancel">
+          <Button size="small" icon={<DismissRegular />} disabled={pst.status === "cancelling"} onClick={props.onCancel} data-testid="queue-cancel">
             {t("queue.cancel")}
           </Button>
         ) : null}
         {pst.status === "cancelled" ? (
-          <Button size="small" appearance="primary" onClick={props.onResume} data-testid="queue-resume">
+          <Button size="small" appearance="primary" icon={<PlayRegular />} onClick={props.onResume} data-testid="queue-resume">
             {t("queue.resume")}
           </Button>
         ) : null}
         {pst.status === "failed" ? (
-          <Button size="small" appearance="primary" onClick={props.onResume} data-testid="queue-retry">
+          <Button size="small" appearance="primary" icon={<PlayRegular />} onClick={props.onResume} data-testid="queue-retry">
             {t("queue.retry")}
           </Button>
         ) : null}
         {pst.status === "cancelled" || pst.status === "failed" ? (
-          <Button size="small" appearance="subtle" icon={<DeleteRegular />} onClick={props.onRemove}>
+          <Button size="small" appearance="subtle" className={s.danger} icon={<DeleteRegular />} onClick={props.onRemove}>
             {t("queue.remove")}
           </Button>
         ) : null}

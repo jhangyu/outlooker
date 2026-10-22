@@ -83,7 +83,7 @@ describe("global UI rules", () => {
     expect(await screen.findByText("No PST imported yet")).toBeTruthy();
     imp.unmount();
     const set = renderWithProviders(<SettingsScreen />, { status: { counts: { messages: 0, psts: 0 } } });
-    expect(await screen.findByText("No mail imported yet")).toBeTruthy();
+    expect(await screen.findByText("Counts fill in after the first import.")).toBeTruthy();
     set.unmount();
     renderWithProviders(<OnboardingScreen />, { status: { phase: "needsSetup" } });
     expect(await screen.findByText("Pick your interface language")).toBeTruthy();

@@ -1,5 +1,5 @@
 import {
-  Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, MessageBar, MessageBarBody,
+  Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, MessageBar, MessageBarBody, makeStyles,
 } from "@fluentui/react-components";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -9,9 +9,16 @@ import type { AppError } from "../../api/bindings/AppError";
 import type { PstSource } from "../../api/bindings/PstSource";
 import { formatAppError, formatNumber, toAppError, useAppToast } from "../../components/common";
 
+const useStyles = makeStyles({
+  surface: { maxWidth: "520px" },
+  // A long unbroken PST name wraps instead of overflowing the dialog.
+  title: { overflowWrap: "anywhere" },
+});
+
 /** Only the PST's own message count is shown: the exact deleted / kept split is out of scope (user ruling). */
 export function RemoveDialog({ pst, onClose }: { pst: PstSource; onClose(): void }) {
   const { t, i18n } = useTranslation("import");
+  const s = useStyles();
   const qc = useQueryClient();
   const toast = useAppToast();
   const [error, setError] = useState<AppError | null>(null);
@@ -32,9 +39,9 @@ export function RemoveDialog({ pst, onClose }: { pst: PstSource; onClose(): void
   };
   return (
     <Dialog open modalType="modal" onOpenChange={(_, d) => !d.open && onClose()}>
-      <DialogSurface>
+      <DialogSurface className={s.surface}>
         <DialogBody>
-          <DialogTitle>{t("remove.title", { name: pst.displayName })}</DialogTitle>
+          <DialogTitle className={s.title}>{t("remove.title", { name: pst.displayName })}</DialogTitle>
           <DialogContent>
             <p>{t("remove.body", { n: formatNumber(pst.messageCount, i18n.language) })}</p>
             {error ? (

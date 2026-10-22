@@ -3,7 +3,7 @@ import {
   DataGridRow, Field, Input, Radio, RadioGroup, Slider, SpinButton, Spinner, Subtitle2, Tab, TabList, Title3,
   createTableColumn, makeStyles, mergeClasses, tokens, type TableColumnDefinition,
 } from "@fluentui/react-components";
-import { DatabaseRegular, FolderRegular, GlobeRegular, ImageRegular, MailInboxRegular, WrenchRegular } from "@fluentui/react-icons";
+import { DatabaseRegular, FolderRegular, GlobeRegular, ImageRegular, WrenchRegular } from "@fluentui/react-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type JSX, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -14,7 +14,7 @@ import type { Language } from "../../api/bindings/Language";
 import type { MaintenanceTask } from "../../api/bindings/MaintenanceTask";
 import { useAppStatus } from "../../app/AppStatusContext";
 import {
-  EmptyState, formatBytes, formatDateTime, formatNumber, useAppToast, useLanguageSwitch,
+  formatBytes, formatDateTime, formatNumber, useAppToast, useLanguageSwitch,
 } from "../../components/common";
 import { MoveDialog } from "./MoveDialog";
 
@@ -29,8 +29,11 @@ const useStyles = makeStyles({
   root: { display: "grid", gridTemplateColumns: "220px 1fr", height: "100%", minHeight: 0 },
   nav: {
     backgroundColor: tokens.colorNeutralBackground1, borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalS}`, display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalS}`, display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXXS,
   },
+  // Mockup `h2 { margin: 0 0 8px 8px }`: the title lines up with the tab labels.
+  navTitle: { marginLeft: tokens.spacingHorizontalS },
+  tabs: { marginTop: tokens.spacingVerticalS },
   body: {
     overflow: "auto", padding: tokens.spacingHorizontalL, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
     gridTemplateAreas: '"storage storage db" "language content db" "index index index"',
@@ -52,6 +55,8 @@ const useStyles = makeStyles({
   muted: { color: tokens.colorNeutralForeground3 },
   facts: { display: "grid", gridTemplateColumns: "max-content 1fr", gap: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalL}`, margin: 0 },
   dd: { margin: 0, fontVariantNumeric: "tabular-nums" },
+  num: { justifyContent: "flex-end", fontVariantNumeric: "tabular-nums" },
+  nowrap: { whiteSpace: "nowrap" },
   ends: { display: "flex", justifyContent: "space-between" },
 });
 
@@ -125,7 +130,7 @@ export function SettingsScreen() {
       columnId: "state",
       renderHeaderCell: () => t("index.state"),
       renderCell: (x) => (
-        <Badge appearance="tint" color={x.valid ? "success" : "warning"}>
+        <Badge appearance="tint" className={s.nowrap} color={x.valid ? "success" : "warning"}>
           {x.valid ? t("index.healthy") : t("index.rebuild")}
         </Badge>
       ),
@@ -135,8 +140,8 @@ export function SettingsScreen() {
   return (
     <div className={s.root}>
       <nav className={s.nav} aria-label={t("title")}>
-        <Title3 as="h1">{t("title")}</Title3>
-        <TabList vertical onTabSelect={(_, d) => cards.current[d.value as SectionId]?.scrollIntoView({ block: "start" })}>
+        <Title3 as="h1" className={s.navTitle}>{t("title")}</Title3>
+        <TabList vertical className={s.tabs} onTabSelect={(_, d) => cards.current[d.value as SectionId]?.scrollIntoView({ block: "start" })}>
           {SECTIONS.map((id) => (
             <Tab key={id} value={id}>
               {t(`section.${id}`)}
@@ -223,9 +228,7 @@ export function SettingsScreen() {
                 {fact(t("db.lastVacuum"), db.data.lastVacuumAt ? formatDateTime(db.data.lastVacuumAt, lng) : t("db.never"))}
                 {fact(t("db.lastAnalyze"), db.data.lastAnalyzeAt ? formatDateTime(db.data.lastAnalyzeAt, lng) : t("db.never"))}
               </dl>
-              {status.counts.messages === 0 ? (
-                <EmptyState icon={<MailInboxRegular />} title={t("db.emptyTitle")} body={t("db.emptyBody")} />
-              ) : null}
+              {status.counts.messages === 0 ? <Caption1 className={s.muted}>{t("db.emptyBody")}</Caption1> : null}
             </>
           ) : (
             <Body1 className={s.muted}>{db.isError ? t("db.unavailable") : ""}</Body1>
@@ -237,11 +240,19 @@ export function SettingsScreen() {
           <>
             <DataGrid items={db.data?.indexes ?? []} columns={columns} getRowId={(x) => x.name}>
               <DataGridHeader>
-                <DataGridRow>{({ renderHeaderCell }) => <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>}</DataGridRow>
+                <DataGridRow>
+                  {({ renderHeaderCell, columnId }) => (
+                    <DataGridHeaderCell className={columnId === "size" ? s.num : undefined} button={{ className: columnId === "size" ? s.num : undefined }}>
+                      {renderHeaderCell()}
+                    </DataGridHeaderCell>
+                  )}
+                </DataGridRow>
               </DataGridHeader>
               <DataGridBody<IndexStatus>>
                 {({ item, rowId }) => (
-                  <DataGridRow<IndexStatus> key={rowId}>{({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}</DataGridRow>
+                  <DataGridRow<IndexStatus> key={rowId}>
+                    {({ renderCell, columnId }) => <DataGridCell className={columnId === "size" ? s.num : undefined}>{renderCell(item)}</DataGridCell>}
+                  </DataGridRow>
                 )}
               </DataGridBody>
             </DataGrid>

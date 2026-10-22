@@ -12,7 +12,7 @@ import type { SavedQuery } from "../../api/bindings/SavedQuery";
 import type { SqlExecuteRequest } from "../../api/bindings/SqlExecuteRequest";
 import type { SqlResult } from "../../api/bindings/SqlResult";
 import { useAppStatus, useNavigation } from "../../app/AppStatusContext";
-import { EmptyState, formatAppError, formatNumber, toAppError, useAppToast } from "../../components/common";
+import { EmptyState, ellipsis, formatAppError, formatNumber, toAppError, useAppToast } from "../../components/common";
 import { MailList, ReadingPane } from "../../components/mail";
 import { SqlEditor } from "../../components/sql-editor";
 import { ResultTable } from "./ResultTable";
@@ -24,7 +24,11 @@ const noop = () => {};
 
 const useStyles = makeStyles({
   root: { display: "grid", gridTemplateColumns: "1fr 3fr 1fr 3fr", height: "100%", minHeight: 0 },
-  col: { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, borderRight: `1px solid ${tokens.colorNeutralStroke2}` },
+  // `:last-of-type`, not `:last-child`: an open dialog's portal anchor can follow the last column.
+  col: {
+    display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
+    ":last-of-type": { borderRight: "none" },
+  },
   toolbar: { borderBottom: `1px solid ${tokens.colorNeutralStroke2}`, gap: tokens.spacingHorizontalXS, overflow: "hidden" },
   tool: { minWidth: "auto" },
   badge: { flexShrink: 0, whiteSpace: "nowrap" },
@@ -35,18 +39,21 @@ const useStyles = makeStyles({
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`, alignItems: "center", backgroundColor: tokens.colorNeutralBackground2,
     color: tokens.colorNeutralForeground2, whiteSpace: "nowrap", overflow: "hidden",
   },
-  statusText: { overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 },
+  statusText: { ...ellipsis },
   head: {
     display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS, minHeight: "44px", boxSizing: "border-box",
     padding: `0 ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  title: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  title: { ...ellipsis },
   count: { flexShrink: 0, whiteSpace: "nowrap", color: tokens.colorNeutralForeground3 },
   muted: { display: "block", color: tokens.colorNeutralForeground3, padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}` },
   inset: { margin: tokens.spacingHorizontalM },
   fill: { flex: 1, minHeight: 0 },
-  detail: { display: "grid", gridTemplateColumns: "max-content 1fr", gap: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`, margin: 0, padding: tokens.spacingHorizontalM, overflow: "auto" },
-  key: { fontFamily: tokens.fontFamilyMonospace, color: tokens.colorNeutralForeground3 },
+  detail: {
+    display: "grid", gridTemplateColumns: "max-content 1fr", gap: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalL}`, margin: 0,
+    padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalXL}`, overflow: "auto",
+  },
+  key: { fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
   value: { margin: 0, overflowWrap: "anywhere", whiteSpace: "pre-wrap" },
   nul: { fontStyle: "italic", color: tokens.colorNeutralForeground4 },
 });
@@ -307,7 +314,7 @@ export function AdvancedSqlScreen() {
             <ToolbarButton className={s.tool} icon={<DeleteRegular />} onClick={() => setDialog("delete")}>{t("delete.action")}</ToolbarButton>
           ) : null}
           <span className={s.spacer} />
-          <Badge className={s.badge} appearance="tint" color="informative" icon={<LockClosedRegular />}>{t("readOnly")}</Badge>
+          <Badge className={s.badge} appearance="tint" color="warning" icon={<LockClosedRegular />}>{t("readOnly")}</Badge>
         </Toolbar>
         {errorText ? (
           <MessageBar intent="error">

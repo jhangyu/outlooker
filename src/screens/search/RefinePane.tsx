@@ -5,6 +5,7 @@ import { DocumentRegular, FolderRegular, MailInboxRegular } from "@fluentui/reac
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { FilterOptions } from "../../api/bindings/FilterOptions";
+import { ellipsis } from "../../components/common";
 import { buildFolderTree, type FolderTreeNode } from "../../components/dsl";
 import type { RefineState } from "./compose";
 
@@ -21,9 +22,9 @@ const useStyles = makeStyles({
   section: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM} ${tokens.spacingVerticalXS}`, color: tokens.colorNeutralForeground3,
   },
-  label: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 },
+  label: { ...ellipsis },
   check: { paddingLeft: tokens.spacingHorizontalM },
-  picked: { backgroundColor: tokens.colorBrandBackground2, fontWeight: tokens.fontWeightSemibold },
+  picked: { backgroundColor: tokens.colorNeutralBackground1Selected, fontWeight: tokens.fontWeightSemibold },
 });
 
 function FolderItems({ nodes, value, onPick }: { nodes: FolderTreeNode[]; value: RefineState; onPick(path: string): void }) {

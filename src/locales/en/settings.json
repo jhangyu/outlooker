@@ -7,7 +7,7 @@
   "db": {
     "status": "Status", "engine": "Engine", "engineValue": "PostgreSQL {{version}}", "messages": "Messages", "psts": "PST files",
     "images": "Inline images", "attachments": "Attachments", "size": "Database size", "lastVacuum": "Last VACUUM", "lastAnalyze": "Last ANALYZE",
-    "never": "Never", "emptyTitle": "No mail imported yet", "emptyBody": "Counts fill in after the first import.",
+    "never": "Never", "emptyBody": "Counts fill in after the first import.",
     "unavailable": "Database status is unavailable while the database is not running."
   },
   "index": {

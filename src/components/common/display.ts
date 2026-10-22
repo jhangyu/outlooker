@@ -1,3 +1,6 @@
+/** Single-line text that truncates with "…". Spread into a makeStyles block: `title: { ...ellipsis }`. */
+export const ellipsis = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 } as const;
+
 /** i18next's test pseudo-language "cimode" is not a BCP 47 tag; Intl would throw. */
 const loc = (lng: string) => (lng === "cimode" ? "en" : lng);
 const UNITS = ["B", "KB", "MB", "GB", "TB"] as const;

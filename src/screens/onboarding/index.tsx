@@ -32,10 +32,10 @@ const useStyles = makeStyles({
   },
   stepCurrent: { color: tokens.colorNeutralForeground1, fontWeight: tokens.fontWeightSemibold },
   num: {
-    width: "28px", height: "28px", borderRadius: tokens.borderRadiusCircular, display: "grid", placeItems: "center",
+    width: "28px", height: "28px", boxSizing: "border-box", borderRadius: tokens.borderRadiusCircular, display: "grid", placeItems: "center",
     border: `1px solid ${tokens.colorNeutralStroke1}`, fontSize: tokens.fontSizeBase200, backgroundColor: tokens.colorNeutralBackground1,
   },
-  numDone: { backgroundColor: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand, border: "none" },
+  numDone: { backgroundColor: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand, ...shorthands.borderColor("transparent") },
   numCurrent: { border: `2px solid ${tokens.colorBrandStroke1}`, color: tokens.colorBrandForeground1 },
   body: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXL, padding: "32px 48px", overflow: "auto" },
   lead: { color: tokens.colorNeutralForeground2, maxWidth: "760px" },
@@ -57,9 +57,14 @@ const useStyles = makeStyles({
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   spacer: { flex: 1 },
-  feat: { display: "grid", gridTemplateColumns: "40px 1fr", gap: `2px ${tokens.spacingHorizontalM}` },
+  brandRow: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
+  logo: {
+    width: "28px", height: "28px", borderRadius: tokens.borderRadiusMedium, display: "grid", placeItems: "center",
+    backgroundColor: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand, fontWeight: tokens.fontWeightBold,
+  },
+  feat: { display: "grid", gridTemplateColumns: "36px 1fr", gap: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}` },
   featIcon: {
-    gridRow: "span 2", width: "40px", height: "40px", borderRadius: tokens.borderRadiusLarge, display: "grid",
+    gridRow: "span 2", width: "36px", height: "36px", borderRadius: tokens.borderRadiusLarge, display: "grid",
     placeItems: "center", backgroundColor: tokens.colorBrandBackground2, color: tokens.colorBrandForeground1, fontSize: "20px",
   },
 });
@@ -196,13 +201,19 @@ export function OnboardingScreen() {
         {icon}
       </span>
       <strong>{title}</strong>
-      <Caption1>{body}</Caption1>
+      <Caption1 className={s.hint}>{body}</Caption1>
     </div>
   );
 
   return (
     <div className={s.root}>
       <aside className={mergeClasses(s.side, s.left)}>
+        <div className={s.brandRow}>
+          <span className={s.logo} aria-hidden>
+            O
+          </span>
+          <strong>{t("common:app.name")}</strong>
+        </div>
         <Title3 as="h1">{t("title")}</Title3>
         <ol className={s.steps}>
           {STEP_KEYS.map((key, i) => (
@@ -214,7 +225,7 @@ export function OnboardingScreen() {
             </li>
           ))}
         </ol>
-        <Caption1>{t("note")}</Caption1>
+        <Caption1 className={s.hint}>{t("note")}</Caption1>
       </aside>
       <main className={s.body}>
         {content}

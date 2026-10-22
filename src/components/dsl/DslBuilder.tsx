@@ -23,19 +23,23 @@ const useStyles = makeStyles({
   bar: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
   group: {
     display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS, padding: tokens.spacingHorizontalM,
-    borderLeft: `3px solid ${tokens.colorBrandStroke1}`,
+    // Card draws its outline on `::after`; recolor that one border instead of adding a second on the root.
+    "::after": { borderLeftWidth: "3px", borderLeftColor: tokens.colorBrandStroke1 },
   },
   topGroup: {
     minWidth: "520px", flex: 1, padding: tokens.spacingHorizontalS, boxShadow: tokens.shadow2,
-    backgroundColor: tokens.colorNeutralBackground1, border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderLeft: `3px solid ${tokens.colorBrandStroke1}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    "::after": {
+      borderTopColor: tokens.colorNeutralStroke2, borderRightColor: tokens.colorNeutralStroke2, borderBottomColor: tokens.colorNeutralStroke2,
+    },
   },
   groups: { display: "flex", flexWrap: "wrap", gap: tokens.spacingHorizontalS, alignItems: "stretch" },
   joinBadge: { alignSelf: "center" },
   head: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
   spacer: { flex: 1 },
   join: { color: tokens.colorNeutralForeground3, paddingLeft: tokens.spacingHorizontalS },
-  cond: { display: "grid", gridTemplateColumns: "150px 92px 1fr 28px", alignItems: "center", gap: tokens.spacingHorizontalS },
+  cond: { display: "grid", gridTemplateColumns: "150px 92px 1fr 28px", alignItems: "center", gap: tokens.spacingHorizontalXS },
+  op: { textAlign: "center", color: tokens.colorNeutralForeground3 },
   value: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalXS, minWidth: 0 },
   grow: { flex: 1, minWidth: 0 },
   field: { minWidth: 0, width: "100%" },
@@ -44,6 +48,12 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium, overflow: "hidden",
   },
   segBtn: { minWidth: "auto", border: "none", borderRadius: 0, padding: `0 ${tokens.spacingHorizontalS}` },
+  // Mockup `.toggle button[aria-pressed="true"]` is one flat brand color, without Fluent's hover and pressed shades.
+  segOn: {
+    backgroundColor: tokens.colorBrandBackground,
+    ":hover": { backgroundColor: tokens.colorBrandBackground },
+    ":hover:active,:active:focus-visible": { backgroundColor: tokens.colorBrandBackground },
+  },
   compact: { minWidth: "auto", flexShrink: 0 },
   nowrap: { whiteSpace: "nowrap", flexShrink: 0 },
   foot: { display: "flex", gap: tokens.spacingHorizontalS },
@@ -61,7 +71,7 @@ function OpToggle({ op, onChange }: { op: GroupOp; onChange(op: GroupOp): void }
   return (
     <span className={s.seg}>
       {(["and", "or"] as const).map((o) => (
-        <ToggleButton key={o} size="small" className={s.segBtn} checked={op === o} appearance={op === o ? "primary" : "secondary"}
+        <ToggleButton key={o} size="small" className={mergeClasses(s.segBtn, op === o && s.segOn)} checked={op === o} appearance={op === o ? "primary" : "secondary"}
           onClick={() => onChange(o)}>{t(`dsl.${o}`)}</ToggleButton>
       ))}
     </span>
@@ -153,7 +163,7 @@ function CondRow({ cond, ctx }: { cond: CondDraft; ctx: Ctx }) {
           <Option key={f} value={f}>{t(`dsl.field.${f}`)}</Option>
         ))}
       </Dropdown>
-      <Caption1>{t(`dsl.op.${OP[cond.field]}`)}</Caption1>
+      <Caption1 className={s.op}>{t(`dsl.op.${OP[cond.field]}`)}</Caption1>
       <ValueControl cond={cond} ctx={ctx} />
       <Button appearance="subtle" size="small" icon={<DismissRegular />} aria-label={t("dsl.remove")}
         onClick={() => ctx.set(cond.id, () => null)} />

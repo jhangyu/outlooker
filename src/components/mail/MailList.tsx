@@ -4,11 +4,12 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { MailRow } from "../../api/bindings/MailRow";
-import { formatDay } from "../common";
+import { ellipsis, formatDay } from "../common";
 
 export const ROW_HEIGHT = 32;
 /** Prototype `.mail-item.compact`: sender + date, subject, snippet on three lines. */
-const COMPACT_ROW_HEIGHT = 72;
+// 56 px of text lines + 2 × 8 px padding + 1 px bottom border (border-box).
+const COMPACT_ROW_HEIGHT = 73;
 export const PREFETCH_ROWS = 50;
 
 export type Entry = { kind: "month"; key: string; label: string } | { kind: "mail"; key: string; row: MailRow };
@@ -70,7 +71,7 @@ const useStyles = makeStyles({
     boxShadow: `inset 3px 0 0 ${tokens.colorCompoundBrandStroke}`,
     ":hover": { backgroundColor: tokens.colorBrandBackground2 },
   },
-  ellipsis: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 },
+  ellipsis: { ...ellipsis },
   sender: { fontWeight: tokens.fontWeightSemibold },
   subject: { color: tokens.colorBrandForeground2 },
   snippet: { color: tokens.colorNeutralForeground3 },
@@ -78,7 +79,10 @@ const useStyles = makeStyles({
   footer: { display: "flex", alignItems: "center", justifyContent: "center", height: `${ROW_HEIGHT}px`, color: tokens.colorNeutralForeground3 },
 });
 
-/** Prototype `#resList` `.mail-item`, one line per mail at 32 px (plan Decision "Fixed-height virtual rows"). */
+/**
+ * Prototype `#resList` `.mail-item`, one line per mail at 32 px (plan Decision "Fixed-height virtual rows").
+ * `compact` mail rows are three lines at COMPACT_ROW_HEIGHT; month headers stay 32 px.
+ */
 export function MailList(p: MailListProps) {
   const { t, i18n } = useTranslation("search");
   const s = useStyles();
@@ -92,7 +96,7 @@ export function MailList(p: MailListProps) {
         : buildEntries(p.rows, lng, undated),
     [p.rows, p.monthHeaders, lng, undated],
   );
-  const v = useVirtualizer({ count: entries.length, getScrollElement: () => ref.current, estimateSize: () => (p.compact ? COMPACT_ROW_HEIGHT : ROW_HEIGHT), overscan: 10 });
+  const v = useVirtualizer({ count: entries.length, getScrollElement: () => ref.current, estimateSize: (i) => (p.compact && entries[i]?.kind === "mail" ? COMPACT_ROW_HEIGHT : ROW_HEIGHT), overscan: 10 });
   const items = v.getVirtualItems();
   const lastIndex = items.length > 0 ? items[items.length - 1]!.index : -1;
   const { hasMore, loadingMore, capped, onEndReached } = p;

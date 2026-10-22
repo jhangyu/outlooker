@@ -33,6 +33,7 @@ const useStyles = makeStyles({
   },
   appName: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightSemibold },
   crumb: { opacity: 0.9 },
+  langLabel: { fontSize: tokens.fontSizeBase200, opacity: 0.95 },
   spacer: { flex: 1 },
   seg: {
     display: "inline-flex", border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStrokeOnBrand2}`,
@@ -167,6 +168,7 @@ function TitleBar() {
       <span className={s.crumb}>· {t(`nav.${screen}`)}</span>
       <span className={s.spacer} />
       {importing ? <Badge appearance="filled" color="informative">{importing}</Badge> : null}
+      <span className={s.langLabel}>{t("language.label")}</span>
       <div role="group" aria-label={t("language.label")} className={s.seg}>
         {(["zh-TW", "en"] as const).map((lng) => (
           <ToggleButton

@@ -7,7 +7,7 @@
   "db": {
     "status": "狀態", "engine": "引擎", "engineValue": "PostgreSQL {{version}}", "messages": "郵件", "psts": "PST 檔案",
     "images": "內嵌圖片", "attachments": "附件", "size": "資料庫大小", "lastVacuum": "上次 VACUUM", "lastAnalyze": "上次 ANALYZE",
-    "never": "從未", "emptyTitle": "尚未匯入任何郵件", "emptyBody": "第一次匯入後就會顯示統計數字。",
+    "never": "從未", "emptyBody": "第一次匯入後就會顯示統計數字。",
     "unavailable": "資料庫未執行時無法取得狀態。"
   },
   "index": {

@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { ColumnMeta } from "../../api/bindings/ColumnMeta";
+import { ellipsis } from "../../components/common";
 import { ROW_HEIGHT } from "../../components/mail";
 
 /** Part 03 §6.2: numeric cells are right-aligned and never parsed. */
@@ -21,7 +22,7 @@ const useStyles = makeStyles({
     ":hover": { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
   selected: { backgroundColor: tokens.colorBrandBackground2, ":hover": { backgroundColor: tokens.colorBrandBackground2 } },
-  cell: { padding: `0 ${tokens.spacingHorizontalS}`, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  cell: { padding: `0 ${tokens.spacingHorizontalS}`, ...ellipsis },
   num: { textAlign: "right", fontVariantNumeric: "tabular-nums" },
   nul: { fontStyle: "italic", color: tokens.colorNeutralForeground4 },
 });

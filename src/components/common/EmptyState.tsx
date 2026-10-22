@@ -30,6 +30,7 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground1,
     fontSize: "36px",
+    marginBottom: tokens.spacingVerticalS,
   },
   body: { color: tokens.colorNeutralForeground3, maxWidth: "420px" },
 });
