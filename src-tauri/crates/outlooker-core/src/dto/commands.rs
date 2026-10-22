@@ -1,4 +1,4 @@
-/// Every Tauri command (spec Part 03 §3 plus §4 `app_retry`). the Tauri builder registers exactly this list.
+/// Every Tauri command (spec Part 03 §3 plus §4 `app_retry`). The Tauri builder registers exactly this list.
 pub const COMMANDS: [&str; 24] = [
     "app_status", "app_initialize", "app_retry",
     "search_mail", "search_count", "filter_options", "mail_get",
