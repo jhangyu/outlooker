@@ -1,6 +1,6 @@
 import {
   Accordion, AccordionHeader, AccordionItem, AccordionPanel, Badge, Body1, Button, Caption1, MessageBar, MessageBarBody,
-  Spinner, Tab, TabList, Title2, Toaster, ToggleButton, makeStyles, mergeClasses, tabClassNames, tokens,
+  Spinner, Tab, TabList, Title2, Toaster, ToggleButton, makeStyles, mergeClasses, tabClassNames, tokens, useId,
 } from "@fluentui/react-components";
 import {
   ArrowDownload24Regular, Database24Regular, ErrorCircleRegular, Search24Regular, Settings24Regular,
@@ -149,6 +149,7 @@ function TitleBar() {
   const { t, i18n } = useTranslation();
   const { screen } = useNavigation();
   const setLanguage = useLanguageSwitch();
+  const langLabelId = useId("lang-label");
   const psts = useQuery({ queryKey: ["pstList"], queryFn: () => api.pstList() });
   const running = psts.data?.find((p) => p.status === "running");
   const total = running?.progress?.itemsTotal ?? null;
@@ -168,8 +169,8 @@ function TitleBar() {
       <span className={s.crumb}>· {t(`nav.${screen}`)}</span>
       <span className={s.spacer} />
       {importing ? <Badge appearance="filled" color="informative">{importing}</Badge> : null}
-      <span className={s.langLabel}>{t("language.label")}</span>
-      <div role="group" aria-label={t("language.label")} className={s.seg}>
+      <span id={langLabelId} className={s.langLabel}>{t("language.label")}</span>
+      <div role="group" aria-labelledby={langLabelId} className={s.seg}>
         {(["zh-TW", "en"] as const).map((lng) => (
           <ToggleButton
             key={lng}

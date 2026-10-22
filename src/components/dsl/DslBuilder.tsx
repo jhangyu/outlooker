@@ -24,10 +24,13 @@ const useStyles = makeStyles({
   group: {
     display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS, padding: tokens.spacingHorizontalM,
     // Card draws its outline on `::after`; recolor that one border instead of adding a second on the root.
+    // `::after` overlays the padding, so the padding adds the border widths back (mockup `.dsl-group` is border-box).
+    paddingLeft: `calc(${tokens.spacingHorizontalM} + 3px)`,
     "::after": { borderLeftWidth: "3px", borderLeftColor: tokens.colorBrandStroke1 },
   },
   topGroup: {
-    minWidth: "520px", flex: 1, padding: tokens.spacingHorizontalS, boxShadow: tokens.shadow2,
+    minWidth: "520px", flex: 1, padding: `calc(${tokens.spacingHorizontalS} + 1px)`,
+    paddingLeft: `calc(${tokens.spacingHorizontalS} + 3px)`, boxShadow: tokens.shadow2,
     backgroundColor: tokens.colorNeutralBackground1,
     "::after": {
       borderTopColor: tokens.colorNeutralStroke2, borderRightColor: tokens.colorNeutralStroke2, borderBottomColor: tokens.colorNeutralStroke2,

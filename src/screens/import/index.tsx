@@ -87,7 +87,7 @@ const useStyles = makeStyles({
   acts: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalXS },
   danger: {
     ":enabled": { color: tokens.colorStatusDangerForeground1 },
-    ":enabled:hover,:enabled:hover:active": {
+    ":enabled:hover,:enabled:hover:active,:enabled:active:focus-visible": {
       color: tokens.colorStatusDangerForeground1, [`& .${buttonClassNames.icon}`]: { color: tokens.colorStatusDangerForeground1 },
     },
   },
