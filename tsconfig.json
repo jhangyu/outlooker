@@ -13,6 +13,5 @@
     "skipLibCheck": true,
     "types": ["vite/client", "vitest/globals"]
   },
-  "include": ["src"],
-  "exclude": ["tests/e2e"]
+  "include": ["src"]
 }

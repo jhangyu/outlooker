@@ -1,10 +1,10 @@
 import path from "node:path";
-import { GROUP_APP_DATA, REPO_ROOT } from "./tests/e2e/prepare.mjs";
+import { GROUP_APP_DATA, TARGET_DIR } from "./tests/e2e/prepare.mjs";
 
-const group: string = process.env.OUTLOOKER_E2E_GROUP ?? "smoke";
+const group: string = process.env.OUTLOOKER_E2E_GROUP ?? "";
 const appData: string | undefined = (GROUP_APP_DATA as Record<string, string>)[group];
-if (!appData) throw new Error(`unknown OUTLOOKER_E2E_GROUP ${group}`);
-const binary = path.join(REPO_ROOT, "src-tauri", "target", "debug", process.platform === "win32" ? "outlooker.exe" : "outlooker");
+if (!appData) throw new Error(`unknown OUTLOOKER_E2E_GROUP "${group}"`);
+const binary = path.join(TARGET_DIR, "debug", process.platform === "win32" ? "outlooker.exe" : "outlooker");
 
 export const config = {
   runner: "local",
