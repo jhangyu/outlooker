@@ -4,6 +4,7 @@ use crate::dto::app::AppStatus;
 use crate::dto::events::{names, DataDirMoveProgress, ImportStatusChanged, LibraryChanged};
 use crate::dto::import::ImportProgress;
 use crate::dto::settings::MaintenanceState;
+use crate::dto::sync::SyncStatus;
 
 mod throttle;
 
@@ -21,6 +22,7 @@ pub enum CoreEvent {
     LibraryChanged(LibraryChanged),
     DataDirMoveProgress(DataDirMoveProgress),
     MaintenanceStatusChanged(MaintenanceState),
+    SyncStatusChanged(SyncStatus),
 }
 
 impl CoreEvent {
@@ -32,6 +34,7 @@ impl CoreEvent {
             CoreEvent::LibraryChanged(_) => names::LIBRARY_CHANGED,
             CoreEvent::DataDirMoveProgress(_) => names::DATA_DIR_MOVE_PROGRESS,
             CoreEvent::MaintenanceStatusChanged(_) => names::MAINTENANCE_STATUS_CHANGED,
+            CoreEvent::SyncStatusChanged(_) => names::SYNC_STATUS_CHANGED,
         }
     }
 
@@ -43,6 +46,7 @@ impl CoreEvent {
             CoreEvent::LibraryChanged(p) => serde_json::to_value(p),
             CoreEvent::DataDirMoveProgress(p) => serde_json::to_value(p),
             CoreEvent::MaintenanceStatusChanged(p) => serde_json::to_value(p),
+            CoreEvent::SyncStatusChanged(p) => serde_json::to_value(p),
         };
         v.expect("event payloads always serialize")
     }

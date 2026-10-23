@@ -16,6 +16,7 @@ use crate::search::SearchService;
 use crate::settings::SettingsStore;
 use crate::sink::EventSink;
 use crate::sql_console::SqlConsole;
+use crate::sync::Scheduler;
 
 pub struct AppDirs {
     pub app_local_data_dir: PathBuf,
@@ -41,6 +42,7 @@ pub struct Services {
     pub search: SearchService,
     pub sql: SqlConsole,
     pub maintenance: Maintenance,
+    pub scheduler: Scheduler,
 }
 
 /// Wires every service. No I/O except reading the bootstrap file; spawns nothing.
@@ -61,7 +63,8 @@ pub fn build(dirs: AppDirs, sink: Arc<dyn EventSink>, opts: BuildOptions) -> Res
     let search = SearchService::new(db.clone());
     let sql = SqlConsole::new(db.clone());
     let maintenance = Maintenance::new(db.clone(), gate.clone(), sink.clone());
-    Ok(Services { paths, db, gate, sink, settings, supervisor, importer, search, sql, maintenance })
+    let scheduler = Scheduler::new(db.clone(), importer.clone(), sink.clone(), supervisor.phase_watch());
+    Ok(Services { paths, db, gate, sink, settings, supervisor, importer, search, sql, maintenance, scheduler })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +72,7 @@ pub enum StartStep {
     Recovered,
     IndexesEnsured,
     WorkerStarted,
+    SchedulerStarted,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -100,6 +104,8 @@ pub async fn start_services(s: &Services) -> Result<StartReport, AppError> {
     }
     s.importer.start_worker();
     steps.push(StartStep::WorkerStarted);
+    s.scheduler.start();
+    steps.push(StartStep::SchedulerStarted);
     Ok(StartReport { steps, recovery })
 }
 
@@ -120,9 +126,10 @@ pub struct ShutdownReport {
     pub db_stopped: bool,
 }
 
-/// Part 02 §2.5: importer (job → Queued, ≤ 15 s), running SQL cancelled, then the database
-/// (pools closed, `pg_ctl stop -m fast -w -t 30`, immediate on timeout — inside the Supervisor). Never panics.
+/// Part 02 §2.5: sync scheduler first (nothing is enqueued during the drain), importer (job → Queued, ≤ 15 s),
+/// running SQL cancelled, then the database (pools closed, `pg_ctl stop -m fast -w -t 30`, immediate on timeout — inside the Supervisor). Never panics.
 pub async fn shutdown(s: &Services, limits: ShutdownLimits) -> ShutdownReport {
+    s.scheduler.stop().await;
     let import_drained = match s.importer.shutdown(limits.import_drain).await {
         Ok(()) => true,
         Err(e) => {
