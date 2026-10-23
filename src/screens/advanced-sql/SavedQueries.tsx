@@ -45,7 +45,7 @@ export function SavedQueries({ items, selectedId, onPick, onNew }: {
   const seam = useRef<HTMLDivElement>(null);
   const schemaHeight = split.sizes.schema;
   return (
-    <section className={s.root}>
+    <section ref={split.host("schema", "y")} className={s.root}>
       <div className={s.head}>
         <Body1Strong className={s.title}>{t("saved")}</Body1Strong>
         <Button appearance="subtle" icon={<AddRegular />} aria-label={t("new")} title={t("new")} data-testid="sql-new" onClick={onNew} />
@@ -63,7 +63,6 @@ export function SavedQueries({ items, selectedId, onPick, onNew }: {
       <div ref={seam} className={s.seam}>
         <Splitter
           orientation="horizontal" reverse {...split.props("schema")}
-          container={() => seam.current?.parentElement}
           measure={() => (seam.current?.nextElementSibling as HTMLElement | null)?.offsetHeight ?? 0}
           style={{ top: -3, left: 0, right: 0 }}
         />

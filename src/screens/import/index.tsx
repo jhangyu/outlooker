@@ -7,7 +7,7 @@ import {
   AddRegular, DeleteRegular, DismissRegular, DocumentRegular, ErrorCircleRegular, MailInboxRegular, PlayRegular, WarningRegular,
 } from "@fluentui/react-icons";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
 import { dbStatusQuery, pstListQuery } from "../../api/queries";
@@ -115,6 +115,11 @@ export function ImportScreen() {
   const s = useStyles();
   const split = useSplit("import", SPLITS);
   const root = useRef<HTMLDivElement>(null);
+  const hostCols = split.host("cols", "x");
+  const rootRef = useCallback((el: HTMLDivElement | null) => {
+    root.current = el;
+    return hostCols(el);
+  }, [hostCols]);
   const paneWidth = (i: number) => root.current?.querySelectorAll<HTMLElement>(":scope > section")[i]?.offsetWidth ?? 0;
   const { t, i18n } = useTranslation("import");
   const lng = i18n.language;
@@ -220,9 +225,9 @@ export function ImportScreen() {
 
   return (
     <div
-      ref={root}
+      ref={rootRef}
       className={s.root}
-      style={{ gridTemplateColumns: `${split.track("p1", "minmax(0, 1.6fr)")} ${split.track("p2", "minmax(0, 1fr)")} minmax(0, 1fr)` }}
+      style={{ gridTemplateColumns: `${split.track("p1", "1.6fr")} ${split.track("p2", "1fr")} ${split.rest("cols", "1fr")}` }}
     >
       <div className={s.cmdbar}>
         <Subtitle2 as="h2" className={s.title}>

@@ -1,5 +1,5 @@
 import { makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
-import { useLayoutEffect, useRef, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { useRef, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 const STEP = 16;
@@ -19,12 +19,8 @@ export type SplitterProps = {
   /** Size in px of the pane before the border; undefined while it follows its content. */
   value: number | undefined;
   min: number;
-  /** Current maximum (already bounded by the container), undefined until the container is measured. */
+  /** Current maximum (already bounded by the useSplit host), undefined until the host is measured. */
   max?: number;
-  /** Receives the container's content size along this axis, now and on every resize. */
-  onExtent?: (px: number) => void;
-  /** Element whose size bounds the split; default is the parent element. */
-  container?: () => HTMLElement | null | undefined;
   onChange: (px: number) => void;
   onReset: () => void;
   /** The sized pane is AFTER the border (right/bottom pane): dragging toward the start grows it. */
@@ -37,34 +33,15 @@ export type SplitterProps = {
 };
 
 /**
- * Invisible 6 px hit area. Place it as a child of the layout container (`position: relative`), centred on the border.
+ * Invisible 6 px hit area, input only. Place it in any `position: relative` element, centred on the border (it may sit
+ * inside the pane it sizes: the bound comes from the useSplit host, not from where the splitter is).
  * Drag (pointer capture, `reverse` for a pane after the border), arrows move 16 px, Home/End jump to min/max, double-click resets.
  */
-export function Splitter({ orientation, value, min, max, onExtent, container, onChange, onReset, reverse, measure, style, label }: SplitterProps) {
+export function Splitter({ orientation, value, min, max, onChange, onReset, reverse, measure, style, label }: SplitterProps) {
   const s = useStyles();
   const { t } = useTranslation("common");
   const vertical = orientation === "vertical";
-  const self = useRef<HTMLDivElement>(null);
   const drag = useRef<{ from: number; start: number } | null>(null);
-  const report = useRef(onExtent);
-  report.current = onExtent;
-  const pick = useRef(container);
-  pick.current = container;
-
-  useLayoutEffect(() => {
-    const host = pick.current?.() ?? self.current?.parentElement;
-    if (!host) return;
-    const read = () => {
-      const cs = getComputedStyle(host);
-      const pad = vertical ? parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) : parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-      report.current?.((vertical ? host.clientWidth : host.clientHeight) - (pad || 0));
-    };
-    read();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(read);
-    ro.observe(host);
-    return () => ro.disconnect();
-  }, [vertical]);
 
   const dir = reverse ? -1 : 1;
   const base = () => value ?? measure?.() ?? min;
@@ -91,7 +68,6 @@ export function Splitter({ orientation, value, min, max, onExtent, container, on
 
   return (
     <div
-      ref={self}
       role="separator"
       tabIndex={0}
       aria-label={label ?? t("action.resize")}

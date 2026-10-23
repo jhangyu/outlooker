@@ -32,8 +32,9 @@ const SPLITS: SplitDefaults = {
   nav: { size: 220, min: 160, max: 400 },
   c1: { min: 160, minOther: 320, group: "cols" },
   c2: { min: 160, minOther: 320, group: "cols" },
-  r1: { min: 80, max: 1200, group: "rows" },
-  r2: { min: 80, max: 1200, group: "rows" },
+  // The body scrolls vertically: rows have no container bound (spec §1), only the hard max.
+  r1: { min: 80, max: 1200, scroll: true },
+  r2: { min: 80, max: 1200, scroll: true },
 };
 // Centre a 6 px hit area in the grid gap after a grid area.
 const GAP_EDGE = `calc(${tokens.spacingHorizontalL} / -2 - 3px)`;
@@ -154,7 +155,7 @@ export function SettingsScreen() {
   ];
 
   return (
-    <div className={s.root} style={{ gridTemplateColumns: `${split.track("nav", "220px")} minmax(0, 1fr)` }}>
+    <div ref={split.host("nav", "x")} className={s.root} style={{ gridTemplateColumns: `${split.track("nav", "220px")} ${split.rest("nav", "1fr")}` }}>
       <nav className={s.nav} aria-label={t("title")}>
         <Title3 as="h1" className={s.navTitle}>{t("title")}</Title3>
         <TabList vertical className={s.tabs} onTabSelect={(_, d) => cards.current[d.value as SectionId]?.scrollIntoView({ block: "start" })}>
@@ -167,9 +168,10 @@ export function SettingsScreen() {
         <Splitter orientation="vertical" {...split.props("nav")} style={{ top: 0, bottom: 0, right: -3 }} />
       </nav>
       <div
+        ref={split.host("cols", "x")}
         className={s.body}
         style={{
-          gridTemplateColumns: `${split.track("c1", "minmax(0, 1fr)")} ${split.track("c2", "minmax(0, 1fr)")} minmax(0, 1fr)`,
+          gridTemplateColumns: `${split.track("c1", "1fr")} ${split.track("c2", "1fr")} ${split.rest("cols", "1fr")}`,
           gridTemplateRows: `${split.track("r1", "auto")} ${split.track("r2", "auto")} auto`,
         }}
       >

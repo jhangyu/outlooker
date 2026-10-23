@@ -4,7 +4,7 @@ import {
 } from "@fluentui/react-components";
 import { DatabaseRegular, DeleteRegular, LockClosedRegular, PlayRegular, SaveRegular, StopRegular, TableRegular } from "@fluentui/react-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
 import type { AppError } from "../../api/bindings/AppError";
@@ -120,6 +120,11 @@ export function AdvancedSqlScreen() {
   const s = useStyles();
   const split = useSplit("advanced-sql", SPLITS);
   const root = useRef<HTMLDivElement>(null);
+  const hostCols = split.host("cols", "x");
+  const rootRef = useCallback((el: HTMLDivElement | null) => {
+    root.current = el;
+    return hostCols(el);
+  }, [hostCols]);
   const paneWidth = (i: number) => root.current?.querySelectorAll<HTMLElement>(":scope > section")[i]?.offsetWidth ?? 0;
   const qc = useQueryClient();
   const toast = useAppToast();
@@ -310,9 +315,9 @@ export function AdvancedSqlScreen() {
 
   return (
     <div
-      ref={root}
+      ref={rootRef}
       className={s.root}
-      style={{ gridTemplateColumns: `${split.track("c1", "minmax(0, 1fr)")} ${split.track("c2", "minmax(0, 3fr)")} ${split.track("c3", "minmax(0, 1fr)")} minmax(0, 3fr)` }}
+      style={{ gridTemplateColumns: `${split.track("c1", "1fr")} ${split.track("c2", "3fr")} ${split.track("c3", "1fr")} ${split.rest("cols", "3fr")}` }}
     >
       {(["c1", "c2", "c3"] as const).map((id, i) => (
         <Splitter key={id} orientation="vertical" {...split.props(id)} measure={() => paneWidth(i)} style={{ gridColumn: i + 1, gridRow: 1, top: 0, bottom: 0, right: -3 }} />

@@ -14,9 +14,9 @@ const COMPACT_ROW_HEIGHT = 73;
 const PREFETCH_ROWS = 50;
 const STORE = "mail-list";
 // Subject is the 1fr remainder wherever it sits. Sender and date have stored widths (one `outlooker.splits.mail-list` map, order included).
-// Both share one group: each is limited by the room left after the other, 24 px avatar, 3 × 8 gaps and the subject minimum.
+// Both share one group: each is limited by the room left after the other, 24 px avatar and the subject minimum (the header gaps are subtracted by the useSplit host).
 const SUBJECT_MIN = 96;
-const FIXED = 24 + 3 * 8 + SUBJECT_MIN;
+const FIXED = 24 + SUBJECT_MIN;
 const COLUMN_SPLITS: SplitDefaults = {
   sender: { size: 110, min: 96, group: "cols" },
   date: { size: 80, min: 72, group: "cols", minOther: FIXED },
@@ -114,11 +114,10 @@ export function MailList(p: MailListProps) {
     const el = ref.current;
     if (el && el.scrollTop !== lastTop.current) el.scrollTop = lastTop.current;
   }, []);
-  const { track, props } = useSplit(STORE, COLUMN_SPLITS);
+  const { track, props, host } = useSplit(STORE, COLUMN_SPLITS);
   const storeKey = "outlooker.splits." + STORE;
   const [order, setOrder] = useState(() => readOrder(storeKey));
   const [announce, setAnnounce] = useState("");
-  const headRef = useRef<HTMLDivElement>(null);
   const cells = useRef<Partial<Record<ColId, HTMLElement | null>>>({});
   const refocus = useRef<ColId | null>(null);
   const press = useRef<{ id: ColId; x: number } | null>(null);
@@ -199,7 +198,7 @@ export function MailList(p: MailListProps) {
         onKeyDown={onCellKeyDown(id)} onPointerDown={onCellDown(id)} onPointerUp={onCellUp} onPointerCancel={() => (press.current = null)}>
         <Caption1Strong className={s.ellipsis}>{t(LABELS[id])}</Caption1Strong>
         {resizable && side ? (
-          <Splitter orientation="vertical" reverse={side === "left"} {...props(id)} container={() => headRef.current}
+          <Splitter orientation="vertical" reverse={side === "left"} {...props(id)}
             style={side === "left" ? { left: "-7px", top: 0, height: "100%" } : { right: "-7px", top: 0, height: "100%" }} />
         ) : null}
       </span>
@@ -219,7 +218,7 @@ export function MailList(p: MailListProps) {
   return (
     <div className={s.root}>
       {p.compact ? null : (
-        <div ref={headRef} className={s.head} style={grid} role="presentation" data-testid="mail-list-header">
+        <div ref={host("cols", "x")} className={s.head} style={grid} role="presentation" data-testid="mail-list-header">
           <span />
           {order.map(head)}
           <span className={s.sr} role="status" aria-live="polite">{announce}</span>

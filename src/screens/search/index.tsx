@@ -62,6 +62,8 @@ const useStyles = makeStyles({
   },
   popText: { maxWidth: "320px", display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS },
   summary: { color: tokens.colorNeutralForeground3, whiteSpace: "nowrap", flexShrink: 0 },
+  // Host of the dsl split: main minus the bar, so its height never depends on the dsl size.
+  stack: { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" },
   dslHost: { position: "relative", display: "flex", flexDirection: "column", flexShrink: 0 },
   dsl: {
     flex: 1, minHeight: 0, padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`, overflowY: "auto",
@@ -237,7 +239,7 @@ export function SearchScreen() {
   const boxTone = problem ? s.boxError : warning ? s.boxWarn : undefined;
 
   return (
-    <div className={s.root} style={{ gridTemplateColumns: `${split.track("refine", "260px")} minmax(0, 1fr)` }}>
+    <div ref={split.host("refine", "x")} className={s.root} style={{ gridTemplateColumns: `${split.track("refine", "260px")} ${split.rest("refine", "1fr")}` }}>
       <div className={s.refineHost}>
         <RefinePane value={inputs.refine} onChange={(refine) => setInputs((p) => ({ ...p, refine }))} options={filters.data} />
         <Splitter orientation="vertical" {...split.props("refine")} style={{ top: 0, bottom: 0, right: -3 }} />
@@ -256,30 +258,32 @@ export function SearchScreen() {
           </div>
           {builderLeaves > 0 ? <Caption1 className={s.summary}>{t("dsl.summary", { n: builderLeaves })}</Caption1> : null}
         </div>
-        {dslOpen ? (
-          <div ref={dslRef} className={s.dslHost} style={{ height: split.sizes.dsl, maxHeight: split.sizes.dsl === undefined ? "40%" : undefined }}>
-            <div className={s.dsl}>
-              <DslBuilder value={inputs.draft} onChange={(draft) => setInputs((p) => ({ ...p, draft }))}
-                options={filters.data ?? { psts: [], folders: [] }} leafBudget={leafBudget} />
+        <div ref={split.host("dsl", "y")} className={s.stack}>
+          {dslOpen ? (
+            <div ref={dslRef} className={s.dslHost} style={{ height: split.sizes.dsl, maxHeight: split.sizes.dsl === undefined ? "40%" : undefined }}>
+              <div className={s.dsl}>
+                <DslBuilder value={inputs.draft} onChange={(draft) => setInputs((p) => ({ ...p, draft }))}
+                  options={filters.data ?? { psts: [], folders: [] }} leafBudget={leafBudget} />
+              </div>
+              <Splitter orientation="horizontal" {...split.props("dsl")} measure={() => dslRef.current?.offsetHeight ?? 0}
+                style={{ left: 0, right: 0, bottom: -3 }} />
             </div>
-            <Splitter orientation="horizontal" {...split.props("dsl")} measure={() => dslRef.current?.offsetHeight ?? 0}
-              style={{ left: 0, right: 0, bottom: -3 }} />
+          ) : null}
+          {/* Prototype keeps the two-pane grid for every state; empty and zero states render inside the list pane. */}
+          <div ref={split.host("list", "x")} className={s.results} style={{ gridTemplateColumns: `${split.track("list", "34%")} ${split.rest("list", "1fr")}` }}>
+            <section ref={listRef} className={s.listPane}>
+              <div className={s.paneHead}>
+                <Body1Strong>{t("results")}</Body1Strong>
+                {countText ? <Caption1 className={s.count} data-testid="result-count">{countText}</Caption1> : null}
+              </div>
+              <div className={s.fill}>{list}</div>
+              {hasMail ? (
+                <Splitter orientation="vertical" {...split.props("list")} measure={() => listRef.current?.offsetWidth ?? 0}
+                  style={{ top: 0, bottom: 0, right: -3 }} />
+              ) : null}
+            </section>
+            {hasMail ? <ReadingPane mailId={selectedId} /> : <div />}
           </div>
-        ) : null}
-        {/* Prototype keeps the two-pane grid for every state; empty and zero states render inside the list pane. */}
-        <div className={s.results} style={{ gridTemplateColumns: `${split.track("list", "minmax(420px, 34%)")} minmax(0, 1fr)` }}>
-          <section ref={listRef} className={s.listPane}>
-            <div className={s.paneHead}>
-              <Body1Strong>{t("results")}</Body1Strong>
-              {countText ? <Caption1 className={s.count} data-testid="result-count">{countText}</Caption1> : null}
-            </div>
-            <div className={s.fill}>{list}</div>
-            {hasMail ? (
-              <Splitter orientation="vertical" {...split.props("list")} measure={() => listRef.current?.offsetWidth ?? 0}
-                style={{ top: 0, bottom: 0, right: -3 }} />
-            ) : null}
-          </section>
-          {hasMail ? <ReadingPane mailId={selectedId} /> : <div />}
         </div>
       </div>
     </div>
