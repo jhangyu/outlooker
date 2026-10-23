@@ -1,3 +1,10 @@
 [env]
 TS_RS_EXPORT_DIR = { value = "../src/api/bindings", relative = true }
 TS_RS_LARGE_INT = "number"
+CARGO_TEST_RUNNER_JS = { value = "../scripts/cargo-test-runner.mjs", relative = true }
+# 4 libtest threads: faster than the 28-thread default on the shared PostgreSQL cluster and within SysV shm limits.
+RUST_TEST_THREADS = "4"
+
+# Per-test time cap and the shared test PostgreSQL boot (CLAUDE.md "Test policy"); other binaries pass through unchanged.
+[target.'cfg(all())']
+runner = ["node", "-e", "import(require('node:url').pathToFileURL(process.env.CARGO_TEST_RUNNER_JS))"]
