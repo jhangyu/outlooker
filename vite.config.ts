@@ -10,5 +10,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ["src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    // Per-test cap, setup hooks included (CLAUDE.md "Test policy"). Never raise it.
+    testTimeout: 1000,
+    hookTimeout: 1000,
   },
 });
