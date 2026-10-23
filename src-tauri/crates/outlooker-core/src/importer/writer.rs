@@ -18,7 +18,7 @@ use crate::dto::error::AppError;
 use crate::dto::import::ImportPhase;
 use crate::importer::types::{FolderIn, NormalizedItem, Outcome};
 use crate::importer::webp::KnownHashes;
-use crate::lifecycle::move_dir::free_space;
+use crate::sys::free_space;
 
 /// Batch limits and the disk guard threshold (spec Part 04 §6.2, §5.1). Tests override them.
 #[derive(Debug, Clone, PartialEq, Eq)]

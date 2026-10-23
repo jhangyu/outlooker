@@ -3,8 +3,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sysinfo::Disks;
-
 use crate::dto::error::AppError;
 use crate::dto::events::{DataDirMovePhase, DataDirMoveProgress};
 use crate::gate::Activity;
@@ -12,6 +10,7 @@ use crate::lifecycle::pg::{PgController, StopMode};
 use crate::lifecycle::supervisor::Supervisor;
 use crate::paths::Paths;
 use crate::sink::{CoreEvent, EventSink};
+use crate::sys::free_space;
 
 fn tree_stats(dir: &Path) -> std::io::Result<(u64, u64)> {
     let (mut files, mut bytes) = (0, 0);
@@ -44,24 +43,6 @@ fn copy_tree(src: &Path, dst: &Path, copied: &mut u64, on_progress: &mut dyn FnM
         }
     }
     Ok(())
-}
-
-/// Free bytes on the volume that will hold `path` (nearest existing ancestor, longest mount-point match).
-pub fn free_space(path: &Path) -> Result<u64, AppError> {
-    let mut probe = path.to_path_buf();
-    while !probe.exists() {
-        if !probe.pop() {
-            return Err(AppError::file_access(path, "noExistingAncestor"));
-        }
-    }
-    let probe = probe.canonicalize().map_err(|e| AppError::file_access(path, &e.to_string()))?;
-    let disks = Disks::new_with_refreshed_list();
-    disks
-        .iter()
-        .filter(|d| probe.starts_with(d.mount_point()))
-        .max_by_key(|d| d.mount_point().as_os_str().len())
-        .map(|d| d.available_space())
-        .ok_or_else(|| AppError::file_access(path, "unknownVolume"))
 }
 
 /// Canonical form of a path that may not exist yet: canonical nearest existing ancestor + the remaining components.

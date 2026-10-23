@@ -1,6 +1,8 @@
 use std::net::TcpListener;
 
-use outlooker_core::lifecycle::pg::{auto_conf, connect, total_ram_bytes, PgController, PgStatus, StopMode, ADMIN_ROLE, CJK_SELF_CHECK};
+use outlooker_core::db::{connect, ADMIN_ROLE, CJK_SELF_CHECK};
+use outlooker_core::lifecycle::pg::{auto_conf, PgController, PgStatus, StopMode};
+use outlooker_core::sys::total_ram_bytes;
 use outlooker_core::paths::{dev_pg_dir, Paths};
 
 const PW: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";

@@ -12,5 +12,6 @@ pub mod search;
 pub mod settings;
 pub mod sink;
 pub mod sql_console;
+pub mod sys;
 #[cfg(feature = "test-support")]
 pub mod test_support;

@@ -1,5 +1,5 @@
 use crate::dto::error::AppError;
-use crate::lifecycle::pg::total_ram_bytes;
+use crate::sys::total_ram_bytes;
 
 use super::db_err;
 
