@@ -3,24 +3,12 @@ import {
   type TableColumnId, type TableColumnSizingOptions,
 } from "@fluentui/react-components";
 import { useCallback, useMemo, type KeyboardEvent, type ReactNode } from "react";
+import { readNumbers, writeNumber } from "./splits";
 
 export type ColumnDefaults = Record<string, { width: number; minWidth?: number }>;
 
 const PREFIX = "outlooker.columnWidths.";
 const DEFAULT_MIN_WIDTH = 48;
-
-function readStored(surfaceKey: string): Record<string, number> {
-  const out: Record<string, number> = {};
-  try {
-    const raw: unknown = JSON.parse(localStorage.getItem(PREFIX + surfaceKey) ?? "null");
-    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-      for (const [k, v] of Object.entries(raw)) if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
-    }
-  } catch {
-    // Malformed JSON or unavailable storage: fall back to defaults.
-  }
-  return out;
-}
 
 /**
  * Persistence + Fluent sizing params. Spread onto <DataGrid>, or feed to useGridColumnSizing.
@@ -29,7 +17,7 @@ function readStored(surfaceKey: string): Record<string, number> {
  */
 export function useColumnWidths(surfaceKey: string, defaults: ColumnDefaults) {
   const columnSizingOptions = useMemo<TableColumnSizingOptions>(() => {
-    const stored = readStored(surfaceKey);
+    const stored = readNumbers(PREFIX + surfaceKey);
     return Object.fromEntries(
       Object.entries(defaults).map(([id, d]) => [id, { defaultWidth: stored[id] ?? d.width, minWidth: d.minWidth ?? DEFAULT_MIN_WIDTH }]),
     );
@@ -37,14 +25,7 @@ export function useColumnWidths(surfaceKey: string, defaults: ColumnDefaults) {
 
   const onColumnResize = useCallback(
     (_e: unknown, d: { columnId: TableColumnId; width: number }) => {
-      // ponytail: synchronous write per resize frame (<1 KB), never loses the last width. Unknown ids are never pruned.
-      try {
-        const map = readStored(surfaceKey);
-        map[String(d.columnId)] = Math.round(d.width);
-        localStorage.setItem(PREFIX + surfaceKey, JSON.stringify(map));
-      } catch {
-        // Storage unavailable: widths stay session-only.
-      }
+      writeNumber(PREFIX + surfaceKey, String(d.columnId), d.width);
     },
     [surfaceKey],
   );

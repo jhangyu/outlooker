@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { useColumnWidths, type ColumnDefaults } from "./columnWidths";
+import { readNumbers, writeNumber } from "./splits";
 
 const DEFAULTS: ColumnDefaults = { a: { width: 100 }, b: { width: 120 } };
 const KEY = "outlooker.columnWidths.t";
@@ -23,6 +24,12 @@ describe("useColumnWidths", () => {
     localStorage.setItem(KEY, JSON.stringify({ a: 300, gone: 77 }));
     act(() => second.result.current.onColumnResize(undefined, { columnId: "b", width: 150 }));
     expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ a: 300, gone: 77, b: 150 });
+  });
+
+  it("shared helper deletes one id and keeps the rest", () => {
+    localStorage.setItem(KEY, JSON.stringify({ a: 1, b: 2 }));
+    writeNumber(KEY, "a", undefined);
+    expect(readNumbers(KEY)).toEqual({ b: 2 });
   });
 
   it("falls back to defaults on malformed storage", () => {
