@@ -8,12 +8,8 @@ use outlooker_core::importer::types::{AttachmentOut, NormalizedItem};
 use outlooker_core::importer::webp::KnownHashes;
 use outlooker_core::importer::writer::{prepare_session, Checkpoint, Writer, WriterConfig, WriterHandle, WriterLimits};
 use outlooker_core::test_support::import_fixtures::{complete_job, item, mail, new_source, seed_mails};
-use outlooker_core::test_support::TestCluster;
+use outlooker_core::test_support::{count, TestCluster};
 use tokio::sync::mpsc;
-
-async fn count(c: &tokio_postgres::Client, sql: &str) -> i64 {
-    c.query_one(sql, &[]).await.unwrap().get(0)
-}
 
 /// New source + checkpoint + writer with `limits`; commits are forwarded on the returned channel.
 async fn start_writer(tc: &TestCluster, path: &str, limits: WriterLimits) -> (WriterHandle, mpsc::UnboundedReceiver<Checkpoint>, i64, i64) {

@@ -80,15 +80,15 @@ impl Supervisor {
     }
 
     pub(crate) fn paths(&self) -> Paths {
-        self.inner.paths.lock().unwrap().clone()
+        self.inner.paths.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
     pub(crate) fn set_paths(&self, paths: Paths) {
-        *self.inner.paths.lock().unwrap() = paths;
+        *self.inner.paths.lock().unwrap_or_else(|p| p.into_inner()) = paths;
     }
 
     pub(crate) async fn set_phase(&self, phase: AppPhase, error: Option<AppError>) {
-        *self.inner.error.lock().unwrap() = error;
+        *self.inner.error.lock().unwrap_or_else(|p| p.into_inner()) = error;
         self.inner.phase_tx.send_replace(phase);
         let status = self.status().await;
         self.inner.sink.emit(CoreEvent::AppStatusChanged(status));
@@ -103,7 +103,7 @@ impl Supervisor {
         let boot = self.inner.settings.bootstrap();
         let data_dir = boot.data_dir.clone().unwrap_or_else(|| self.paths().default_data_root().display().to_string());
         let counts = if phase == AppPhase::Ready { self.counts().await.unwrap_or_default() } else { LibraryCounts::default() };
-        AppStatus { phase, data_dir, language: boot.language, counts, error: self.inner.error.lock().unwrap().clone() }
+        AppStatus { phase, data_dir, language: boot.language, counts, error: self.inner.error.lock().unwrap_or_else(|p| p.into_inner()).clone() }
     }
 
     /// App start (spec Part 02 §2.2 steps 2–7).
@@ -125,7 +125,7 @@ impl Supervisor {
         if self.phase() != AppPhase::Failed {
             return Err(AppError::invalid("phase", "notFailed"));
         }
-        self.inner.restarts.lock().unwrap().clear();
+        self.inner.restarts.lock().unwrap_or_else(|p| p.into_inner()).clear();
         if self.paths().pgdata().exists() {
             self.set_phase(AppPhase::StartingDb, None).await;
             let me = self.clone();

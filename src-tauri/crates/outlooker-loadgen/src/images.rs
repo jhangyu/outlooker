@@ -49,18 +49,18 @@ impl ImagePool {
     /// The inline-image row for image `index` at `ordinal`; `None` when `webp::convert` drops it (Tiny / Rejected).
     pub fn inline(&self, index: u32, ordinal: i32, known: &KnownHashes) -> Option<InlineImageOut> {
         let content_id = Some(format!("img{index}@loadgen.example"));
-        let cached = self.hashes.lock().unwrap().get(&index).copied();
+        let cached = self.hashes.lock().unwrap_or_else(|p| p.into_inner()).get(&index).copied();
         if let Some(h) = cached.filter(|h| known.contains(h)) {
             return Some(InlineImageOut { ordinal, content_id, source_hash: h, blob: None });
         }
         let (bytes, _) = self.source(index);
         match convert(&ImageIn { bytes }, WEBP_QUALITY, known) {
             ImageOut::Encoded { source_hash, image } => {
-                self.hashes.lock().unwrap().insert(index, source_hash);
+                self.hashes.lock().unwrap_or_else(|p| p.into_inner()).insert(index, source_hash);
                 Some(InlineImageOut { ordinal, content_id, source_hash, blob: Some(image) })
             }
             ImageOut::Known { source_hash } => {
-                self.hashes.lock().unwrap().insert(index, source_hash);
+                self.hashes.lock().unwrap_or_else(|p| p.into_inner()).insert(index, source_hash);
                 Some(InlineImageOut { ordinal, content_id, source_hash, blob: None })
             }
             ImageOut::Tiny | ImageOut::Rejected { .. } => None,

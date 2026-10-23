@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -13,19 +13,6 @@ use crate::dto::settings::{Settings, SettingsPatch};
 pub struct Bootstrap {
     pub data_dir: Option<String>,
     pub language: Language,
-}
-
-/// Write to `<path>.tmp`, fsync, rename: a reader sees the old or the new file, never a partial one.
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
-    use std::io::Write;
-    let dir = path.parent().ok_or_else(|| AppError::internal("path has no parent"))?;
-    std::fs::create_dir_all(dir).map_err(|e| AppError::file_access(dir, &e.to_string()))?;
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let tmp = PathBuf::from(tmp);
-    let mut f = std::fs::File::create(&tmp).map_err(|e| AppError::file_access(&tmp, &e.to_string()))?;
-    f.write_all(bytes).and_then(|_| f.sync_all()).map_err(|e| AppError::file_access(&tmp, &e.to_string()))?;
-    std::fs::rename(&tmp, path).map_err(|e| AppError::file_access(path, &e.to_string()))
 }
 
 #[derive(Clone)]
@@ -45,12 +32,12 @@ impl SettingsStore {
     }
 
     pub fn bootstrap(&self) -> Bootstrap {
-        self.state.lock().unwrap().0.clone()
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).0.clone()
     }
 
     fn save(&self, boot: Bootstrap) -> Result<(), AppError> {
-        write_atomic(&self.file, &serde_json::to_vec_pretty(&boot).expect("bootstrap serializes"))?;
-        self.state.lock().unwrap().0 = boot;
+        crate::fsutil::write_atomic(&self.file, &serde_json::to_vec_pretty(&boot).expect("bootstrap serializes"), false)?;
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).0 = boot;
         Ok(())
     }
 
@@ -67,14 +54,14 @@ impl SettingsStore {
     pub async fn webp_quality(&self, db: &Db) -> Result<u8, AppError> {
         let c = db.app_client().await?;
         let q: i16 = c.query_one("SELECT webp_quality FROM settings", &[]).await.map_err(db_err)?.get(0);
-        self.state.lock().unwrap().1 = q as u8;
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).1 = q as u8;
         Ok(q as u8)
     }
 
     pub async fn get(&self, db: &Db) -> Result<Settings, AppError> {
         let quality = match self.webp_quality(db).await {
             Ok(q) => q,
-            Err(AppError::DbNotReady) => self.state.lock().unwrap().1,
+            Err(AppError::DbNotReady) => self.state.lock().unwrap_or_else(|p| p.into_inner()).1,
             Err(e) => return Err(e),
         };
         let b = self.bootstrap();

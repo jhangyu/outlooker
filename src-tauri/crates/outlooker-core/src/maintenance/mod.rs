@@ -11,26 +11,11 @@ use crate::dto::settings::MaintenanceTask;
 use crate::gate::{Activity, Gate};
 use crate::sink::{CoreEvent, EventSink};
 
-/// Every index created by Part 04 §3, in this order (REINDEX order of the `reindex` task).
-pub const REINDEX_INDEXES: [&str; 17] = [
-    "import_jobs_one_active_per_pst",
-    "import_jobs_one_running",
-    "import_jobs_pst_newest",
-    "import_jobs_queue",
-    "import_errors_page",
-    "occurrences_message",
-    "occurrences_folder",
-    "recipients_address",
-    "inline_images_blob",
-    "messages_sender_address",
-    "messages_first_pst",
-    "messages_sort",
-    "messages_body_trgm",
-    "messages_subject_trgm",
-    "messages_sender_trgm",
-    "messages_recipients_trgm",
-    "messages_body_fts",
-];
+/// Valid non-constraint indexes of schema `public` (constraint indexes are rebuilt with their table), quoted by the server.
+pub const REINDEX_LIST_SQL: &str = "SELECT quote_ident(c.relname) \
+     FROM pg_index x JOIN pg_class c ON c.oid = x.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+     WHERE n.nspname = 'public' AND x.indisvalid AND NOT EXISTS (SELECT 1 FROM pg_constraint k WHERE k.conindid = x.indexrelid) \
+     ORDER BY c.relname";
 
 /// Invalid leftovers of failed concurrent rebuilds, already quoted by the server.
 const CCNEW_LEFTOVERS: &str = "SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relname) \
@@ -71,9 +56,10 @@ async fn run_task(admin: &tokio_postgres::Client, task: MaintenanceTask) -> Resu
                 admin.batch_execute(&format!("DROP INDEX CONCURRENTLY {name}")).await.map_err(db_err)?;
                 log::info!("maintenance dropped leftover index {name}");
             }
-            for (i, name) in REINDEX_INDEXES.iter().enumerate() {
+            let names: Vec<String> = admin.query(REINDEX_LIST_SQL, &[]).await.map_err(db_err)?.iter().map(|r| r.get(0)).collect();
+            for (i, name) in names.iter().enumerate() {
                 admin.batch_execute(&format!("REINDEX INDEX CONCURRENTLY {name}")).await.map_err(db_err)?;
-                log::info!("maintenance reindex {name} ({}/{})", i + 1, REINDEX_INDEXES.len());
+                log::info!("maintenance reindex {name} ({}/{})", i + 1, names.len());
             }
             Ok(())
         }

@@ -150,21 +150,6 @@ fn pid_owner(pid: u32, our_postgres: &Path) -> PidOwner {
     }
 }
 
-/// Create `path` owner-only (0600 on Unix) before any secret is written.
-/// A leftover file is removed first: the mode only applies on creation.
-fn write_private(path: &Path, content: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    match std::fs::remove_file(path) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
-        _ => {}
-    }
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
-    opts.open(path)?.write_all(content.as_bytes())
-}
-
 fn newest_server_log(log_dir: &Path) -> Option<std::path::PathBuf> {
     std::fs::read_dir(log_dir)
         .into_iter()
@@ -193,7 +178,7 @@ impl PgController {
 
     /// Test seam: the next `start` tries these ports first, in order.
     pub fn with_ports(self, ports: Vec<u16>) -> PgController {
-        *self.forced_ports.lock().unwrap() = ports;
+        *self.forced_ports.lock().unwrap_or_else(|p| p.into_inner()) = ports;
         self
     }
 
@@ -223,7 +208,7 @@ impl PgController {
     }
 
     fn next_port(&self) -> Result<u16, AppError> {
-        if let Some(p) = self.forced_ports.lock().unwrap().pop() {
+        if let Some(p) = self.forced_ports.lock().unwrap_or_else(|p| p.into_inner()).pop() {
             return Ok(p);
         }
         let l = TcpListener::bind("127.0.0.1:0").map_err(|e| io_err("bind 127.0.0.1:0", e))?;
@@ -269,9 +254,9 @@ impl PgController {
         let parent = pgdata.parent().ok_or_else(|| AppError::internal("pgdata has no parent"))?;
         tokio::fs::create_dir_all(parent).await.map_err(|e| io_err("create data root", e))?;
         let pwfile = parent.join(".initdb-pw");
-        if let Err(e) = write_private(&pwfile, pw) {
+        if let Err(e) = crate::fsutil::write_atomic(&pwfile, pw.as_bytes(), true) {
             let _ = std::fs::remove_file(&pwfile);
-            return Err(io_err("write pwfile", e).into());
+            return Err(e.into());
         }
         let args: Vec<OsString> = vec![
             "-D".into(), pgdata.into(), "-U".into(), ADMIN_ROLE.into(),
@@ -405,19 +390,6 @@ impl PgController {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(unix)]
-    #[test]
-    fn pwfile_is_owner_only() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let f = dir.path().join("pw");
-        std::fs::write(&f, "old").unwrap(); // leftover from a crashed run
-        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
-        write_private(&f, "secret").unwrap();
-        assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), "secret");
-    }
 
     #[test]
     fn last_log_line_skips_startup_log() {
