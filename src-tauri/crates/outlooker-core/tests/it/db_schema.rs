@@ -28,7 +28,7 @@ async fn constraints_reject_bad_rows() {
     let tc = TestCluster::start().await;
     let a = tc.admin().await;
     a.batch_execute(
-        "INSERT INTO pst_sources (path, display_name, file_size_bytes, file_mtime) VALUES ('/a.pst','a',1,now()), ('/b.pst','b',1,now());
+        "INSERT INTO pst_sources (path, display_name, file_size_bytes) VALUES ('/a.pst','a',1), ('/b.pst','b',1);
          INSERT INTO folders (pst_id, pst_folder_id, name, path) VALUES (1, 1, 'Inbox', 'Inbox'), (2, 1, 'Inbox', 'Inbox');
          INSERT INTO import_jobs (pst_id, kind, state, started_at) VALUES (1, 'import', 'running', now());
          INSERT INTO messages (dedupe_key, dedupe_kind, body_source, body_text) VALUES (decode(repeat('ab', 32), 'hex'), 'content_hash', 'text', 'x');",

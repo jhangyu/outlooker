@@ -47,6 +47,7 @@ pub fn normalize(raw: RawItem, ctx: &NormalizeCtx) -> NormalizedItem {
 fn normalize_inner(raw: RawItem, ctx: &NormalizeCtx) -> (Outcome, Vec<ItemError>) {
     match raw.content {
         RawContent::NonMail => (Outcome::NonMail, Vec::new()),
+        RawContent::Known => (Outcome::Known, Vec::new()),
         RawContent::Unreadable { stage, message } => (
             Outcome::Skipped,
             vec![ItemError::new(stage, ImportErrorSeverity::ItemSkipped, &raw.folder_path, raw.pst_item_id, &message)],

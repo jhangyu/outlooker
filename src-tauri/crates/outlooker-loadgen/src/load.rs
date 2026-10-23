@@ -2,7 +2,7 @@
 use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime};
 
 use outlooker_core::db::{db_err, Db};
 use outlooker_core::db::indexes::{drop_search_indexes, ensure_search_indexes};
@@ -38,11 +38,10 @@ async fn create_source(db: &Db, s: u32) -> Result<(i64, i64), AppError> {
     let mut app = db.connect_app().await?;
     let path = source_path(s);
     let name = format!("source-{s:02}.pst");
-    let mtime = UNIX_EPOCH + Duration::from_secs(1_767_225_600 + s as u64);
     let pst_id: i64 = app
         .query_one(
-            "INSERT INTO pst_sources (path, display_name, file_size_bytes, file_mtime) VALUES ($1, $2, 1, $3) RETURNING id",
-            &[&path, &name, &mtime],
+            "INSERT INTO pst_sources (path, display_name, file_size_bytes) VALUES ($1, $2, 1) RETURNING id",
+            &[&path, &name],
         )
         .await
         .map_err(db_err)?

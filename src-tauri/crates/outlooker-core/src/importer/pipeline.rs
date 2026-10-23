@@ -1,15 +1,16 @@
 //! One import attempt (spec Part 02 §4 steps 1–8): reader thread, rayon normalize pool, writer task, from the
 //! checkpoint to the end of input, a cancel, a DB pause or the crash seam. Every `ImportTuning` test seam is read
 //! here (`hold_reader_after`, `crash_after_batches`, `on_batch`).
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 use tokio::sync::{Notify, mpsc, oneshot};
-use tokio_postgres::{Client, Row};
+use tokio_postgres::Client;
 
 use crate::db::indexes::drop_search_indexes;
 use crate::db::{db_err, library_counts};
@@ -18,11 +19,12 @@ use crate::dto::error::AppError;
 use crate::dto::events::LibraryChanged;
 use crate::dto::import::{ImportErrorStage, ImportPhase, ImportProgress};
 use crate::importer::normalize::{NormalizeCtx, normalize};
+use crate::importer::probe::{Probe, probe};
 use crate::importer::progress::Throughput;
 use crate::importer::pst_reader::{self, ReaderMsg, ReaderParams, ScanResult};
 use crate::importer::queue::{CancelReason, Inner, JobCancel, synthetic_items};
 use crate::importer::types::{FolderIn, NormalizedItem, RawItem};
-use crate::importer::writer::{Checkpoint, OnCommit, WriterConfig, WriterHandle, load_known_hashes, truncate_to_micros, upsert_folders};
+use crate::importer::writer::{Checkpoint, OnCommit, WriterConfig, WriterHandle, load_known_hashes, upsert_folders};
 use crate::sink::CoreEvent;
 
 pub(super) fn progress_event(cp: &Checkpoint, tp: Option<&Throughput>) -> ImportProgress {
@@ -54,6 +56,9 @@ pub(super) enum AttemptEnd {
     Paused,
     /// Test seam crash_after_batches.
     Crashed,
+    /// Another program holds the PST (probe before the checkpoint, or libpff open failed and the probe now says
+    /// locked): nothing was read, the checkpoint is untouched.
+    Locked,
     Failed(JobFailure),
 }
 
@@ -69,33 +74,44 @@ type LateFailure = Arc<Mutex<Option<JobFailure>>>;
 /// One run of the pipeline from the checkpoint (steps 1–8).
 pub(super) async fn attempt(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<JobCancel>) -> Result<AttemptEnd, AppError> {
     let mut c = inner.db.app_client().await?;
-    let row = c.query_one("SELECT path, file_size_bytes, file_mtime FROM pst_sources WHERE id = $1", &[&pst_id]).await.map_err(db_err)?;
-    let path: String = row.get(0);
+    let path: String = c.query_one("SELECT path FROM pst_sources WHERE id = $1", &[&pst_id]).await.map_err(db_err)?.get(0);
     let synthetic = synthetic_items(&path);
-    // (1) file identity
-    let (size, mtime) = match file_identity(&path, &row, synthetic.is_some()) {
-        Ok(v) => v,
-        Err(f) => return Ok(AttemptEnd::Failed(f)),
+    // (1) file identity; a lock that appeared while the job was queued must not reset the checkpoint
+    let (size, mtime) = match probe(&path) {
+        Probe::Ready { size, mtime } => (size, mtime),
+        Probe::Locked => return Ok(AttemptEnd::Locked),
+        Probe::Unavailable(e) => return Ok(AttemptEnd::Failed(JobFailure { stage: ImportErrorStage::Open, message: e.to_string() })),
     };
+    c.execute("UPDATE pst_sources SET file_size_bytes = $2 WHERE id = $1", &[&pst_id, &size]).await.map_err(db_err)?;
     // (2) checkpoint
     let (start, reset) = Checkpoint::begin(&c, pst_id, job_id, size, mtime).await?;
     if reset {
         log::info!("pst {pst_id}: file size or mtime changed, import restarts from the beginning");
     }
+    // items an earlier sync of this source stored are skipped by id (append-only: occurrences are never deleted)
+    let known: HashSet<i64> =
+        c.query("SELECT pst_item_id FROM message_occurrences WHERE pst_id = $1", &[&pst_id]).await.map_err(db_err)?.iter().map(|r| r.get(0)).collect();
+    let known_count = known.len() as i64;
     // (3) poison item, (4) reader
-    let (rx, reader) = spawn_reader(inner, job_id, &path, &start, reset, synthetic, cancel)?;
+    let (rx, reader) = spawn_reader(inner, &path, &start, reset, synthetic, Arc::new(known), cancel)?;
     let (rx, scanned) = first_message(rx, cancel).await?;
     let scanned = match scanned {
         Ok(s) => s,
         Err(f) => {
             join_thread(reader).await;
+            // libpff's open error is a bare string: re-probe to tell a lock from a broken file
+            if f.stage == ImportErrorStage::Open && probe(&path) == Probe::Locked {
+                return Ok(AttemptEnd::Locked);
+            }
             return Ok(AttemptEnd::Failed(f));
         }
     };
     let start = record_scan(&mut c, pst_id, job_id, &scanned, start).await?;
     inner.sink.emit(CoreEvent::ImportProgress(progress_event(&start, None)));
-    // (5) index policy (Part 04 §6.4)
-    let counts = index_policy(inner, &c, pst_id, scanned.items_total - start.cursor_seq).await?;
+    // (5) index policy (Part 04 §6.4). Known items cost no index work; on a resume they overlap the cursor, so the
+    // larger of the two is subtracted.
+    let remaining = (scanned.items_total - start.cursor_seq.max(known_count)).max(0);
+    let counts = index_policy(inner, &c, pst_id, remaining).await?;
     // (6) writer
     let quality: i16 = c.query_one("SELECT webp_quality FROM settings", &[]).await.map_err(db_err)?.get(0);
     let known = Arc::new(load_known_hashes(&c).await?);
@@ -133,25 +149,17 @@ pub(super) async fn attempt(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel
     Ok(end_of_input(finished, late, cancel.reason()))
 }
 
-/// Size and mtime of the PST now; a synthetic source without a file keeps the identity stored at enqueue.
-fn file_identity(path: &str, row: &Row, synthetic: bool) -> Result<(i64, SystemTime), JobFailure> {
-    match std::fs::metadata(path) {
-        Ok(m) => Ok((m.len() as i64, truncate_to_micros(m.modified().unwrap_or(UNIX_EPOCH)))),
-        Err(_) if synthetic => Ok((row.get(1), row.get(2))),
-        Err(e) => Err(JobFailure { stage: ImportErrorStage::Open, message: format!("cannot open PST file: {e}") }),
-    }
-}
-
 /// Steps 3–4: the pending poison record and the reader thread (synthetic items when the test source exists).
 fn spawn_reader(
     inner: &Inner,
-    job_id: i64,
     path: &str,
     start: &Checkpoint,
     reset: bool,
     synthetic: Option<(Vec<FolderIn>, Vec<RawItem>)>,
+    known: Arc<HashSet<i64>>,
     cancel: &JobCancel,
 ) -> Result<(Receiver<ReaderMsg>, JoinHandle<()>), AppError> {
+    let job_id = start.job_id;
     // the marker of this job is the pending record; another job's marker is ignored (Part 02 §6.3 rule 1)
     let inflight = inner.inflight()?;
     // A reset checkpoint (file changed) renumbers the items: the marker's seq may name another item, so drop it.
@@ -166,6 +174,7 @@ fn spawn_reader(
         hold_after: inner.tuning.hold_reader_after.filter(|_| !inner.hold_used.swap(true, Ordering::SeqCst)),
         budget: cancel.budget.clone(),
         job_id,
+        known,
     };
     Ok(match synthetic {
         #[cfg(feature = "test-support")]

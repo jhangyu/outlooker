@@ -8,10 +8,11 @@ CREATE TABLE pst_sources (
     id               bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     path             text COLLATE "C" NOT NULL CHECK (length(path) BETWEEN 1 AND 4096),
     display_name     text        NOT NULL CHECK (length(display_name) BETWEEN 1 AND 512),
-    file_size_bytes  bigint      NOT NULL CHECK (file_size_bytes > 0),
-    file_mtime       timestamptz NOT NULL,
+    file_size_bytes  bigint      NOT NULL CHECK (file_size_bytes > 0),  -- size at the last sync attempt (display)
+    sync_enabled     boolean     NOT NULL DEFAULT true,                 -- false: scheduler and "sync all" skip it
+    last_checked_at  timestamptz,                                       -- last sync step that looked at the path
     created_at       timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT pst_sources_same_file_once UNIQUE (path, file_size_bytes, file_mtime)  -- AppError::AlreadyImported
+    CONSTRAINT pst_sources_path_once UNIQUE (path)  -- AppError::AlreadyImported (path already registered)
 );
 
 CREATE TABLE folders (
@@ -124,12 +125,12 @@ CREATE TABLE import_jobs (
     id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,     -- queue order
     pst_id       bigint NOT NULL REFERENCES pst_sources(id) ON DELETE CASCADE,
     kind         text   NOT NULL CHECK (kind IN ('import', 'remove')),
-    state        text   NOT NULL CHECK (state IN ('queued', 'running', 'cancelling', 'cancelled', 'failed', 'completed')),
+    state        text   NOT NULL CHECK (state IN ('queued', 'running', 'cancelling', 'cancelled', 'failed', 'completed', 'locked')),
     created_at   timestamptz NOT NULL DEFAULT now(),
     started_at   timestamptz,
     finished_at  timestamptz,
-    CHECK (kind = 'import' OR state NOT IN ('cancelling', 'cancelled')),           -- removals are not cancellable
-    CHECK ((state IN ('cancelled', 'failed', 'completed')) = (finished_at IS NOT NULL)),
+    CHECK (kind = 'import' OR state NOT IN ('cancelling', 'cancelled', 'locked')), -- removals are not cancellable
+    CHECK ((state IN ('cancelled', 'failed', 'completed', 'locked')) = (finished_at IS NOT NULL)),  -- locked: last seen locked
     CHECK (state NOT IN ('running', 'cancelling') OR started_at IS NOT NULL)
 );
 
@@ -176,6 +177,11 @@ CREATE TABLE saved_queries (
 CREATE TABLE settings (                                       -- exactly one row
     singleton     boolean  PRIMARY KEY DEFAULT true CHECK (singleton),
     webp_quality  smallint NOT NULL DEFAULT 80 CHECK (webp_quality BETWEEN 1 AND 100),
+    sync_mode              text     NOT NULL DEFAULT 'interval' CHECK (sync_mode IN ('off', 'interval', 'daily')),
+    sync_interval_minutes  integer  NOT NULL DEFAULT 60  CHECK (sync_interval_minutes BETWEEN 5 AND 10080),
+    sync_daily_minute      smallint NOT NULL DEFAULT 540 CHECK (sync_daily_minute BETWEEN 0 AND 1439),  -- local minute of day
+    sync_weekdays          smallint NOT NULL DEFAULT 127 CHECK (sync_weekdays BETWEEN 1 AND 127),       -- bit 0 = Monday
+    sync_last_run_at       timestamptz,                                                                 -- last scheduled run
     updated_at    timestamptz NOT NULL DEFAULT now()
 );
 INSERT INTO settings DEFAULT VALUES;

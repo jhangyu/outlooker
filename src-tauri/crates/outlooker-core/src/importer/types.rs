@@ -28,6 +28,8 @@ pub enum RawContent {
     Mail(Box<RawMail>),
     NonMail,
     Unreadable { stage: ImportErrorStage, message: String },
+    /// The PST item id already has an occurrence under this source (an earlier sync stored it): not read.
+    Known,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -195,7 +197,8 @@ pub struct NormalizedMail {
 }
 
 #[derive(Debug, Clone)]
-pub enum Outcome { Mail(Box<NormalizedMail>), NonMail, Skipped }
+/// `Known`: stored by an earlier sync of this source, counted as a duplicate, no rows written.
+pub enum Outcome { Mail(Box<NormalizedMail>), NonMail, Skipped, Known }
 
 #[derive(Debug, Clone)]
 pub struct NormalizedItem {

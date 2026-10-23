@@ -33,12 +33,21 @@ pub struct PstSource {
     pub display_name: String,
     pub file_size_bytes: i64,
     pub status: ImportStatus,
-    pub progress: Option<ImportProgress>,
+    pub progress: Option<Box<ImportProgress>>, // boxed: keeps EnqueueResult and CoreEvent variants small
     pub message_count: i64,
     pub new_message_count: i64,
     pub error_count: i64,
+    /// Newest job: created (for `locked`: locked since) and finished (for `locked`: last seen locked).
     pub queued_at: String,
     pub finished_at: Option<String>,
+    /// false: automatic sync and "sync all" skip this path.
+    pub sync_enabled: bool,
+    /// Last time a sync step looked at the path (also "unchanged" and "locked").
+    pub last_checked_at: Option<String>,
+    /// finished_at of the newest completed import job.
+    pub last_synced_at: Option<String>,
+    /// Message of the newest job's `job_failed` row; set only when status is `failed`.
+    pub failure_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -52,6 +61,8 @@ pub enum ImportStatus {
     Failed,
     Completed,
     Removing,
+    /// Another program (Outlook) holds the PST; retried on the next sync.
+    Locked,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
