@@ -50,7 +50,7 @@
   "empty": { "title": "還沒有可搜尋的郵件", "body": "匯入 PST 檔後即可開始搜尋。" },
   "idle": { "title": "搜尋您的郵件", "body": "輸入字詞、姓名或地址，或新增條件。" },
   "zero": { "title": "沒有符合的郵件", "body": "試著減少字詞或移除條件。", "clear": "清除搜尋與條件" },
-  "list": { "undated": "無日期", "label": "搜尋結果" },
+  "list": { "col": { "from": "寄件者", "subject": "主旨", "date": "日期" }, "undated": "無日期", "label": "搜尋結果" },
   "preview": {
     "pickTitle": "請選擇一封郵件",
     "pickBody": "郵件內容會顯示在這裡。",

@@ -4,13 +4,15 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useLayoutEffect, useMemo, useRef, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { MailRow } from "../../api/bindings/MailRow";
-import { ellipsis, formatDay, formatMonth } from "../common";
+import { ellipsis, formatDay, formatMonth, useGridColumnSizing } from "../common";
 
 export const ROW_HEIGHT = 32;
 /** Prototype `.mail-item.compact`: sender + date, subject, snippet on three lines. */
 // 56 px of text lines + 2 × 8 px padding + 1 px bottom border (border-box).
 const COMPACT_ROW_HEIGHT = 73;
 const PREFETCH_ROWS = 50;
+// Only the sender boundary is resizable: subject is 1fr, date/meta is auto (grid plan §4 option A).
+const COLUMN_DEFAULTS = { sender: { width: 200, minWidth: 96 } };
 
 export type Entry = { kind: "month"; key: string; label: string } | { kind: "mail"; key: string; row: MailRow };
 
@@ -45,7 +47,15 @@ export function buildEntries(rows: MailRow[], lng: string, undatedLabel: string)
 }
 
 const useStyles = makeStyles({
-  scroll: { height: "100%", overflowY: "auto", position: "relative", outlineStyle: "none" },
+  root: { display: "flex", flexDirection: "column", height: "100%" },
+  head: {
+    display: "grid", alignItems: "center", gap: tokens.spacingHorizontalS, height: "24px", flexShrink: 0,
+    padding: `0 ${tokens.spacingHorizontalM}`, overflow: "hidden", scrollbarGutter: "stable",
+    backgroundColor: tokens.colorNeutralBackground2, color: tokens.colorNeutralForeground2,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  headCell: { position: "relative", minWidth: 0, outlineStyle: "none" },
+  scroll: { flex: 1, minHeight: 0, overflowY: "auto", position: "relative", outlineStyle: "none", scrollbarGutter: "stable" },
   block: { position: "relative", width: "100%" },
   item: { position: "absolute", top: 0, left: 0, width: "100%", height: `${ROW_HEIGHT}px`, boxSizing: "border-box" },
   month: {
@@ -54,7 +64,7 @@ const useStyles = makeStyles({
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   row: {
-    display: "grid", gridTemplateColumns: "24px minmax(120px, 22%) 1fr auto", alignItems: "center",
+    display: "grid", alignItems: "center",
     gap: tokens.spacingHorizontalS, padding: `0 ${tokens.spacingHorizontalM}`, cursor: "pointer",
     borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
     ":hover": { backgroundColor: tokens.colorNeutralBackground1Hover },
@@ -92,6 +102,8 @@ export function MailList(p: MailListProps) {
     const el = ref.current;
     if (el && el.scrollTop !== lastTop.current) el.scrollTop = lastTop.current;
   }, []);
+  const { widths, headerProps } = useGridColumnSizing("mail-list", COLUMN_DEFAULTS);
+  const grid = { gridTemplateColumns: `24px ${widths.sender}px 1fr auto` };
   const lng = i18n.language;
   const undated = t("list.undated");
   const entries = useMemo<Entry[]>(
@@ -124,7 +136,20 @@ export function MailList(p: MailListProps) {
     v.scrollToIndex(idx);
   };
 
+  const sender = headerProps("sender");
   return (
+    <div className={s.root}>
+      {p.compact ? null : (
+        <div className={s.head} style={grid} role="presentation" data-testid="mail-list-header">
+          <span />
+          <span className={s.headCell} tabIndex={0} onKeyDown={sender.onKeyDown}>
+            <Caption1Strong className={s.ellipsis}>{t("list.col.from")}</Caption1Strong>
+            {sender.aside}
+          </span>
+          <Caption1Strong>{t("list.col.subject")}</Caption1Strong>
+          <Caption1Strong>{t("list.col.date")}</Caption1Strong>
+        </div>
+      )}
     <div ref={ref} className={s.scroll} role="listbox" aria-label={p.ariaLabel} tabIndex={0} onKeyDown={onKeyDown} onScroll={(e) => (lastTop.current = e.currentTarget.scrollTop)} data-testid="mail-list">
       <div className={s.block} style={{ height: `${v.getTotalSize()}px` }}>
         {items.map((it) => {
@@ -160,7 +185,7 @@ export function MailList(p: MailListProps) {
           }
           return (
             <div key={en.key} role="option" aria-selected={selected} data-testid="mail-row" data-mail-id={row.id}
-              className={mergeClasses(s.item, s.row, selected && s.selected)} style={style} onClick={() => p.onSelect(row.id)}>
+              className={mergeClasses(s.item, s.row, selected && s.selected)} style={{ ...style, ...grid }} onClick={() => p.onSelect(row.id)}>
               <Avatar size={24} name={name} aria-hidden />
               <span className={mergeClasses(s.ellipsis, s.sender)}>{name}</span>
               <span className={s.ellipsis}>
@@ -182,6 +207,7 @@ export function MailList(p: MailListProps) {
           {t("resultCap")}
         </div>
       ) : null}
+    </div>
     </div>
   );
 }

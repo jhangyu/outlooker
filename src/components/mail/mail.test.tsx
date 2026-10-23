@@ -26,6 +26,16 @@ describe("mail components", () => {
   });
   afterEach(() => restore());
 
+  it("applies the stored sender width to header and rows, and hides the header in compact mode", () => {
+    localStorage.setItem("outlooker.columnWidths.mail-list", JSON.stringify({ sender: 300 }));
+    const r = renderWithProviders(<MailList {...listProps} rows={ROWS} />);
+    expect(screen.getByTestId("mail-list-header").style.gridTemplateColumns).toContain("300px");
+    expect(screen.getAllByTestId("mail-row")[0]!.style.gridTemplateColumns).toContain("300px");
+    r.unmount();
+    renderWithProviders(<MailList {...listProps} rows={ROWS} compact />);
+    expect(screen.queryByTestId("mail-list-header")).toBeNull();
+  });
+
   it('preview iframe has sandbox="" and no allow- token', () => {
     render(<MailPreview html="<p>Hi</p>" title="Hello" />);
     const frame = screen.getByTestId("mail-preview");

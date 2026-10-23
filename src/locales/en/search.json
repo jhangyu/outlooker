@@ -50,7 +50,7 @@
   "empty": { "title": "No mail to search yet", "body": "Import a PST file to start searching." },
   "idle": { "title": "Search your mail", "body": "Type a word, a name or an address, or add conditions." },
   "zero": { "title": "No messages match", "body": "Try fewer words or remove a condition.", "clear": "Clear search and conditions" },
-  "list": { "undated": "No date", "label": "Search results" },
+  "list": { "col": { "from": "From", "subject": "Subject", "date": "Date" }, "undated": "No date", "label": "Search results" },
   "preview": {
     "pickTitle": "Select a message",
     "pickBody": "Its content shows here.",
