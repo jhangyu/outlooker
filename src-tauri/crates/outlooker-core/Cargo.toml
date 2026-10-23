@@ -24,6 +24,7 @@ rayon = { workspace = true }
 blake3 = "=1.8.7"
 getrandom = "=0.4.3"
 sysinfo = "=0.39.6"
+fs4 = "=1.1.0"
 base64 = "=0.23.1"
 tempfile = { workspace = true, optional = true }
 
