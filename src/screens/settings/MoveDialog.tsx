@@ -6,8 +6,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
+import { moveProgressQuery } from "../../api/queries";
 import type { AppError } from "../../api/bindings/AppError";
-import type { DataDirMoveProgress } from "../../api/bindings/DataDirMoveProgress";
 import { formatAppError, formatBytes, toAppError, useAppToast } from "../../components/common";
 import { setMoveSession, useMoveSession } from "./moveSession";
 
@@ -17,7 +17,7 @@ const useStyles = makeStyles({
 });
 
 /**
- * Progress arrives as `data-dir:move-progress`; boot writes it into the ["moveProgress"] query (Part 03 §8.2).
+ * Progress arrives as `data-dir:move-progress`; boot writes it into the moveProgress query (Part 03 §8.2).
  * "Started" is the frame-level move session, so AppFrame keeps this dialog mounted while the phase leaves ready.
  */
 export function MoveDialog({ target, onClose }: { target: string; onClose(): void }) {
@@ -28,12 +28,7 @@ export function MoveDialog({ target, onClose }: { target: string; onClose(): voi
   const toast = useAppToast();
   const started = useMoveSession() !== null;
   const [error, setError] = useState<AppError | null>(null);
-  const progress = useQuery<DataDirMoveProgress | null>({
-    queryKey: ["moveProgress"],
-    queryFn: () => null,
-    enabled: false,
-    initialData: null,
-  });
+  const progress = useQuery(moveProgressQuery);
   const p = started ? progress.data : null;
 
   const close = useCallback(() => {
@@ -50,7 +45,7 @@ export function MoveDialog({ target, onClose }: { target: string; onClose(): voi
   }, [p?.phase, toast, t, qc, close]);
 
   const confirm = async () => {
-    qc.setQueryData(["moveProgress"], null);
+    qc.setQueryData(moveProgressQuery.queryKey, null);
     setError(null);
     // Set before the call: the phase may leave ready before data_dir_move returns.
     setMoveSession(qc, { target });

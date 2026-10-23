@@ -8,12 +8,11 @@ import {
 import { useState, type JSX } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
-import { pickFolder, pickPstFiles } from "../../api/dialog";
+import { pickFolder } from "../../api/dialog";
 import type { AppError } from "../../api/bindings/AppError";
 import type { Language } from "../../api/bindings/Language";
 import { useAppStatus, useNavigation } from "../../app/AppStatusContext";
-import logo from "../../assets/outlooker-logo.svg";
-import { formatAppError, toAppError, useAppToast, useLanguageSwitch } from "../../components/common";
+import { formatAppError, toAppError, useEnqueuePst, useLanguageSwitch } from "../../components/common";
 
 type Step = 0 | 1 | 2 | 3;
 const STEP_KEYS = ["language", "location", "database", "import"] as const;
@@ -61,9 +60,8 @@ const useStyles = makeStyles({
   brandRow: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
   logo: {
     width: "28px", height: "28px", borderRadius: tokens.borderRadiusMedium, display: "grid", placeItems: "center",
-    backgroundColor: tokens.colorNeutralBackground1,
+    backgroundColor: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand, fontWeight: tokens.fontWeightBold,
   },
-  logoImg: { width: "24px", height: "24px" },
   feat: { display: "grid", gridTemplateColumns: "36px 1fr", gap: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}` },
   featIcon: {
     gridRow: "span 2", width: "36px", height: "36px", borderRadius: tokens.borderRadiusLarge, display: "grid",
@@ -76,7 +74,6 @@ export function OnboardingScreen() {
   const { t, i18n } = useTranslation("onboarding");
   const status = useAppStatus();
   const { go } = useNavigation();
-  const toast = useAppToast();
   const setLanguage = useLanguageSwitch();
   const [step, setStep] = useState<Step>(status.phase === "needsSetup" ? 0 : 2);
   const [dirChoice, setDirChoice] = useState<"default" | "other">("default");
@@ -110,17 +107,9 @@ export function OnboardingScreen() {
       setDirChoice("other");
     }
   };
+  const enqueue = useEnqueuePst();
   const pickPst = async () => {
-    const paths = await pickPstFiles();
-    if (paths.length === 0) return;
-    try {
-      const results = await api.importEnqueue(paths);
-      for (const r of results)
-        if (r.result === "rejected") toast.notify(t("import:enqueue.rejected", { path: r.path, reason: formatAppError(r.error, t) }), "error");
-      go("import");
-    } catch (e) {
-      toast.error(e);
-    }
+    if (await enqueue()) go("import");
   };
 
   const choice = (testId: string, selected: boolean, onClick: () => void, title: string, hint: string, extra?: JSX.Element) => (
@@ -211,8 +200,8 @@ export function OnboardingScreen() {
     <div className={s.root}>
       <aside className={mergeClasses(s.side, s.left)}>
         <div className={s.brandRow}>
-          <span className={s.logo}>
-            <img src={logo} alt="" className={s.logoImg} />
+          <span className={s.logo} aria-hidden>
+            O
           </span>
           <strong>{t("common:app.name")}</strong>
         </div>

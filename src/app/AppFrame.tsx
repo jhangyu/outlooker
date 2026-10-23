@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Activity, useState, type JSX } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api/commands";
-import logo from "../assets/outlooker-logo.svg";
+import { pstListQuery } from "../api/queries";
 import type { AppError } from "../api/bindings/AppError";
 import type { AppPhase } from "../api/bindings/AppPhase";
 import { formatAppError, toAppError, useLanguageSwitch } from "../components/common";
@@ -30,9 +30,8 @@ const useStyles = makeStyles({
   brand: { width: "68px", display: "grid", placeItems: "center" },
   logo: {
     width: "28px", height: "28px", borderRadius: tokens.borderRadiusMedium, display: "grid", placeItems: "center",
-    backgroundColor: tokens.colorNeutralBackground1,
+    backgroundColor: tokens.colorNeutralBackground1, color: tokens.colorBrandForeground1, fontWeight: tokens.fontWeightBold,
   },
-  logoImg: { width: "24px", height: "24px" },
   appName: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightSemibold },
   crumb: { opacity: 0.9 },
   langLabel: { fontSize: tokens.fontSizeBase200, opacity: 0.95 },
@@ -153,7 +152,7 @@ function TitleBar() {
   const { screen } = useNavigation();
   const setLanguage = useLanguageSwitch();
   const langLabelId = useId("lang-label");
-  const psts = useQuery({ queryKey: ["pstList"], queryFn: () => api.pstList() });
+  const psts = useQuery(pstListQuery);
   const running = psts.data?.find((p) => p.status === "running");
   const total = running?.progress?.itemsTotal ?? null;
   const importing = running
@@ -164,8 +163,8 @@ function TitleBar() {
   return (
     <header className={s.titleBar} data-testid="title-bar">
       <div className={s.brand}>
-        <div className={s.logo}>
-          <img src={logo} alt="" className={s.logoImg} />
+        <div className={s.logo} aria-hidden>
+          O
         </div>
       </div>
       <span className={s.appName}>{t("app.name")}</span>

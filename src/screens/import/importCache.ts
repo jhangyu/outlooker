@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { pstListQuery } from "../../api/queries";
 import type { ImportProgress } from "../../api/bindings/ImportProgress";
 import type { ImportStatusChanged } from "../../api/bindings/ImportStatusChanged";
 import type { PstSource } from "../../api/bindings/PstSource";
@@ -18,6 +19,6 @@ export function applyProgress(list: PstSource[], progress: ImportProgress): PstS
 }
 
 export function applyToCache(qc: QueryClient, f: (list: PstSource[]) => PstSource[]): void {
-  const current = qc.getQueryData<PstSource[]>(["pstList"]);
-  if (current) qc.setQueryData(["pstList"], f(current));
+  const current = qc.getQueryData<PstSource[]>(pstListQuery.queryKey);
+  if (current) qc.setQueryData(pstListQuery.queryKey, f(current));
 }

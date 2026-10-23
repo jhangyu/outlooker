@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "../api/commands";
+import { dbStatusQuery, moveProgressQuery } from "../api/queries";
 import { onEvent } from "../api/events";
 import type { AppStatus } from "../api/bindings/AppStatus";
 import type { LibraryCounts } from "../api/bindings/LibraryCounts";
@@ -24,8 +25,8 @@ export async function boot(qc: QueryClient, sink: BootSink): Promise<BootResult>
     onEvent("import:progress", (p) => applyToCache(qc, (l) => applyProgress(l, p))),
     onEvent("import:status-changed", (e) => applyToCache(qc, (l) => applyStatusChanged(l, e))),
     onEvent("library:changed", (e) => sink.counts(e.counts)),
-    onEvent("data-dir:move-progress", (p) => qc.setQueryData(["moveProgress"], p)),
-    onEvent("maintenance:status-changed", () => void qc.invalidateQueries({ queryKey: ["dbStatus"] })),
+    onEvent("data-dir:move-progress", (p) => qc.setQueryData(moveProgressQuery.queryKey, p)),
+    onEvent("maintenance:status-changed", () => void qc.invalidateQueries({ queryKey: dbStatusQuery.queryKey })),
   ]);
   const unlisten = () => unlisteners.forEach((u) => u());
   try {

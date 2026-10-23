@@ -1,10 +1,5 @@
 import type { TFunction } from "i18next";
 import type { AppError } from "../../api/bindings/AppError";
-import { isAppError } from "../../api/call";
-
-export function toAppError(e: unknown): AppError {
-  return isAppError(e) ? e : { kind: "internal", detail: String(e) };
-}
 
 /** Maps AppError.kind to a localized sentence (Part 03 §1 Localization). SqlError.message is shown verbatim. */
 export function formatAppError(err: AppError, t: TFunction): string {
