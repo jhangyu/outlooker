@@ -7,14 +7,14 @@ use std::time::{Duration, Instant};
 use outlooker_core::app::{self, AppDirs, BuildOptions, Services, ShutdownLimits, ShutdownReport, StartStep};
 use outlooker_core::db::indexes::missing_or_invalid;
 use outlooker_core::db::Db;
-use outlooker_core::dto::app::{AppPhase, InitializeRequest, Language};
+use outlooker_core::dto::app::Language;
 use outlooker_core::dto::import::{EnqueueResult, ImportPhase, ImportStatus};
 use outlooker_core::importer::{ImportTuning, RecoveryReport};
-use outlooker_core::lifecycle::pg::{PgController, PgStatus};
 use outlooker_core::lifecycle::SupervisorConfig;
-use outlooker_core::paths::{dev_pg_dir, Paths};
-use outlooker_core::sink::{CoreEvent, EventSink, NullSink, RecordingSink};
+use outlooker_core::paths::dev_pg_dir;
+use outlooker_core::sink::{CoreEvent, EventSink, RecordingSink};
 use outlooker_core::test_support::import_fixtures::new_source;
+use outlooker_core::test_support::TestCluster;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
@@ -84,28 +84,14 @@ fn opts(import_tuning: ImportTuning) -> BuildOptions {
     BuildOptions { supervisor, import_tuning }
 }
 
-async fn wait_phase(s: &Services, want: AppPhase) {
-    let mut w = s.supervisor.phase_watch();
-    let r = timeout(LONG, w.wait_for(|p| *p == want || *p == AppPhase::Failed)).await;
-    let reached = *r.expect("phase timeout").expect("supervisor dropped");
-    assert_eq!(reached, want, "supervisor failed: {:?}", s.supervisor.status().await);
-}
-
-/// Onboarding through the Supervisor only (no worker): returns Ready services on `<root>/data`.
-async fn first_run(root: &Path) -> Services {
-    let s = app::build(dirs(root), Arc::new(NullSink), opts(ImportTuning::default())).unwrap();
-    s.supervisor.boot().await.unwrap();
-    let req = InitializeRequest { data_dir: data_root(root).display().to_string(), language: Language::En };
-    s.supervisor.initialize(req).await.unwrap();
-    wait_phase(&s, AppPhase::Ready).await;
+/// Services wired onto the test's database of the shared cluster (the Supervisor never starts or stops PostgreSQL):
+/// the data root carries the marker and the bootstrap settings point at it.
+fn app_on(tc: &TestCluster, sink: Arc<dyn EventSink>, tuning: ImportTuning) -> Services {
+    std::fs::write(tc.paths.data_root().join("outlooker-data.json"), b"{}").unwrap();
+    let s = app::build(dirs(tc.dir.path()), sink, opts(tuning)).unwrap();
+    s.settings.set_bootstrap(Some(data_root(tc.dir.path()).display().to_string()), Language::En).unwrap();
+    s.supervisor.attach_test_db(tc.db_conn());
     s
-}
-
-/// What a killed process leaves behind: the importer never ran its shutdown, so job rows keep their state.
-/// The cluster is stopped through the Supervisor (phase `StoppingDb`), so the old health monitor stays idle and
-/// cannot restart PostgreSQL under the next `Services`.
-async fn stop_like_a_kill(s: Services) {
-    s.supervisor.shutdown_db().await.unwrap();
 }
 
 async fn job_state(admin: &tokio_postgres::Client, pst_id: i64) -> String {
@@ -120,12 +106,10 @@ async fn job_state(admin: &tokio_postgres::Client, pst_id: i64) -> String {
 async fn shutdown_during_import_requeues_job() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tests/fixtures/external/outlook.pst");
     assert!(fixture.exists(), "missing fixture {}", fixture.display());
-    let tmp = tempfile::tempdir().unwrap();
-    stop_like_a_kill(first_run(tmp.path()).await).await;
-
+    let tc = TestCluster::start().await;
     let (sink, mut events) = TestSink::new();
     let tuning = ImportTuning { hold_reader_after: Some(0), ..ImportTuning::default() };
-    let s = app::build(dirs(tmp.path()), sink, opts(tuning)).unwrap();
+    let s = app_on(&tc, sink, tuning);
     let report = timeout(LONG, app::start_services(&s)).await.expect("start timeout").unwrap();
     assert_eq!(report.steps, STEPS);
     let mut job_events = s.importer.job_events();
@@ -151,14 +135,9 @@ async fn shutdown_during_import_requeues_job() {
     assert_eq!(report, ShutdownReport { import_drained: true, db_stopped: true });
     assert!(elapsed < Duration::from_secs(45), "shutdown took {elapsed:?} (budget 15 s + 30 s)");
     assert_eq!(job_events.try_recv().unwrap(), (pst_id, ImportStatus::Queued), "Queued, not Cancelled");
-    let paths = Paths::new(tmp.path().join("app"), tmp.path().join("logs"), dev_pg_dir()).with_data_root(data_root(tmp.path()));
-    assert_eq!(PgController::new(paths.clone()).status(&paths.pgdata()).await.unwrap(), PgStatus::Stopped);
 
-    // Reopen the library without starting the worker: the job row and its checkpoint were committed.
-    let s2 = app::build(dirs(tmp.path()), Arc::new(NullSink), opts(ImportTuning::default())).unwrap();
-    s2.supervisor.boot().await.unwrap();
-    wait_phase(&s2, AppPhase::Ready).await;
-    let admin = s2.db.connect_admin().await.unwrap();
+    // The job row and its checkpoint were committed (the real PostgreSQL stop is covered by the cluster_lifecycle tests).
+    let admin = tc.admin().await;
     assert_eq!(job_state(&admin, pst_id).await, "queued");
     let checkpoints: i64 = admin
         .query_one("SELECT count(*) FROM import_checkpoints WHERE pst_id = $1", &[&pst_id])
@@ -166,17 +145,14 @@ async fn shutdown_during_import_requeues_job() {
         .unwrap()
         .get(0);
     assert_eq!(checkpoints, 1, "checkpoint row committed");
-    drop(admin);
-    s2.supervisor.shutdown_db().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn start_after_kill_recovers_jobs_then_heals_then_starts_worker() {
-    let tmp = tempfile::tempdir().unwrap();
-    let s1 = first_run(tmp.path()).await;
-    let admin = s1.db.connect_admin().await.unwrap();
+    let tc = TestCluster::start().await;
+    let admin = tc.admin().await;
     // The requeued job points at a missing file, so the worker's first event for it is `failed` (no index drop).
-    let gone = tmp.path().join("gone");
+    let gone = tc.dir.path().join("gone");
     // A real kill leaves at most one active job; the test needs two, so lift the one-active-job index for this setup.
     admin.batch_execute("DROP INDEX import_jobs_one_running").await.unwrap();
     let (running_pst, _) = new_source(&admin, &gone.join("running.pst").display().to_string()).await;
@@ -185,10 +161,9 @@ async fn start_after_kill_recovers_jobs_then_heals_then_starts_worker() {
     admin.batch_execute("DROP INDEX messages_body_trgm").await.unwrap();
     assert_eq!(missing_or_invalid(&admin).await.unwrap(), vec!["messages_body_trgm"]);
     drop(admin);
-    stop_like_a_kill(s1).await;
 
     let (sink, mut events) = TestSink::new();
-    let s2 = app::build(dirs(tmp.path()), sink.clone(), opts(ImportTuning::default())).unwrap();
+    let s2 = app_on(&tc, sink.clone(), ImportTuning::default());
     sink.watch(running_pst, s2.db.clone());
     let report = timeout(LONG, app::start_services(&s2)).await.expect("start timeout").unwrap();
     assert_eq!(report.steps, STEPS);
@@ -209,40 +184,18 @@ async fn start_after_kill_recovers_jobs_then_heals_then_starts_worker() {
     assert!(!probes.is_empty(), "no worker event for the requeued PST; events: {:?}", sink.rec.names());
     assert!(probes.iter().all(|(_, valid)| *valid), "worker touched the job before the indexes were healed: {probes:?}");
 
-    let admin = s2.db.connect_admin().await.unwrap();
+    let admin = tc.admin().await;
     assert_eq!(job_state(&admin, cancelling_pst).await, "cancelled");
-    assert!(missing_or_invalid(&admin).await.unwrap().is_empty());
-    drop(admin);
-    app::shutdown(&s2, ShutdownLimits::default()).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn missing_index_is_rebuilt_before_worker() {
-    let tmp = tempfile::tempdir().unwrap();
-    let s1 = first_run(tmp.path()).await;
-    let admin = s1.db.connect_admin().await.unwrap();
-    admin.batch_execute("DROP INDEX messages_subject_trgm").await.unwrap();
-    assert_eq!(missing_or_invalid(&admin).await.unwrap(), vec!["messages_subject_trgm"]);
-    drop(admin);
-    stop_like_a_kill(s1).await;
-
-    let (sink, _events) = TestSink::new();
-    let s2 = app::build(dirs(tmp.path()), sink, opts(ImportTuning::default())).unwrap();
-    let report = timeout(LONG, app::start_services(&s2)).await.expect("start timeout").unwrap();
-    // IndexesEnsured is pushed only when the heal succeeded, and always before WorkerStarted.
-    assert_eq!(report.steps, STEPS);
-    assert_eq!(report.recovery, RecoveryReport::default());
-    let admin = s2.db.connect_admin().await.unwrap();
     assert!(missing_or_invalid(&admin).await.unwrap().is_empty());
     let valid: bool = admin
         .query_one(
-            "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'messages_subject_trgm'",
+            "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'messages_body_trgm'",
             &[],
         )
         .await
         .unwrap()
         .get(0);
-    assert!(valid);
+    assert!(valid, "the dropped index was rebuilt");
     drop(admin);
     app::shutdown(&s2, ShutdownLimits::default()).await;
 }
