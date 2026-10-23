@@ -150,9 +150,9 @@ async fn restart_budget_exhaustion_fails() {
     assert!(r.sup.status().await.error.is_some());
 }
 
-/// X3: moving the library works, and a failed move restores the old root without data loss.
+/// X3b: a failed move restores the old root without data loss.
 #[tokio::test]
-async fn move_data_dir_succeeds() {
+async fn move_verify_failure_rolls_back() {
     let mut r = seeded_rig(fast_probe());
     r.sup.boot().await.unwrap();
     wait_phase(&r.sup, AppPhase::Ready).await;
@@ -167,8 +167,16 @@ async fn move_data_dir_succeeds() {
     assert!(!fresh.exists(), "partial copy removed");
     assert_eq!(tree_bytes(&r.root.join("auth")), before, "old root untouched");
     assert_eq!(r.settings.bootstrap().data_dir.as_deref(), Some(r.root.display().to_string().as_str()));
+    r.sup.shutdown_db().await.unwrap();
+}
 
-    // A real move.
+/// X3a: moving the library works.
+#[tokio::test]
+async fn move_data_dir_succeeds() {
+    let mut r = seeded_rig(fast_probe());
+    r.sup.boot().await.unwrap();
+    wait_phase(&r.sup, AppPhase::Ready).await;
+
     let target = r.root.with_file_name("moved");
     r.sup.move_data_dir(target.display().to_string()).await.unwrap();
     assert_eq!(next_move_end(&mut r.events).await, DataDirMovePhase::Done);
