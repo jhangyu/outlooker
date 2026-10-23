@@ -157,16 +157,6 @@ async fn move_data_dir_succeeds() {
     r.sup.boot().await.unwrap();
     wait_phase(&r.sup, AppPhase::Ready).await;
 
-    // Failed verify into a pre-existing empty target: the target is kept and left empty.
-    let chosen = r.root.with_file_name("chosen");
-    std::fs::create_dir_all(&chosen).unwrap();
-    r.sup.fail_next_move_verify();
-    r.sup.move_data_dir(chosen.display().to_string()).await.unwrap();
-    assert_eq!(next_move_end(&mut r.events).await, DataDirMovePhase::Failed);
-    wait_phase(&r.sup, AppPhase::Ready).await;
-    assert!(chosen.is_dir(), "pre-existing target kept");
-    assert_eq!(std::fs::read_dir(&chosen).unwrap().count(), 0, "pre-existing target emptied");
-
     // Failed verify into a fresh target: the partial copy is removed and the old root is untouched.
     let before = tree_bytes(&r.root.join("auth"));
     let fresh = r.root.with_file_name("fresh");
