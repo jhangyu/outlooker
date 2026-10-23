@@ -2,10 +2,12 @@
 pub mod dedupe;
 pub mod inflight;
 pub mod normalize;
+mod pipeline;
 pub mod progress;
 pub mod pst_reader;
 pub mod queue;
 pub mod remove;
+mod runner;
 pub mod types;
 pub mod webp;
 pub mod writer;
