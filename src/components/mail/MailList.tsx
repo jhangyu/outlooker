@@ -1,7 +1,7 @@
 import { Avatar, Caption1Strong, CounterBadge, Spinner, makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { AttachRegular } from "@fluentui/react-icons";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useLayoutEffect, useMemo, useRef, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { MailRow } from "../../api/bindings/MailRow";
 import { ellipsis, formatDay, formatMonth, useGridColumnSizing } from "../common";
@@ -11,9 +11,26 @@ export const ROW_HEIGHT = 32;
 // 56 px of text lines + 2 × 8 px padding + 1 px bottom border (border-box).
 const COMPACT_ROW_HEIGHT = 73;
 const PREFETCH_ROWS = 50;
-// Sender and subject are resizable; date/meta takes the remaining width (1fr, DATE_MIN_WIDTH floor).
-const COLUMN_DEFAULTS = { sender: { width: 200, minWidth: 96 }, subject: { width: 400, minWidth: 120 } };
-const DATE_MIN_WIDTH = 96;
+// Sender and date have stored widths, subject is the 1fr remainder so extra pane width goes to the subject.
+// A 420 px pane (the minimum) fits: 24 avatar + 110 + 96 subject floor + 88 + 3 × 8 gaps + 24 padding + ~15 scrollbar.
+// Sender gets Fluent's right-edge handle (sender|subject). Date is dragged from its left edge (subject|date),
+// which Fluent cannot do (inverted delta), so ponytail: hand-rolled pointer handler that read-merge-writes the
+// same `mail-list` storage entry. Move into columnWidths.ts if a second surface needs a left-edge handle.
+const COLUMN_DEFAULTS = { sender: { width: 110, minWidth: 96 }, date: { width: 88, minWidth: 72 } };
+const DATE_MIN = 72;
+const DATE_MAX = 320;
+const DATE_STEP = 16;
+const STORAGE_KEY = "outlooker.columnWidths.mail-list";
+
+function storeDateWidth(width: number) {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
+    const map = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...map, date: width }));
+  } catch {
+    // Storage unavailable: width stays session-only.
+  }
+}
 
 export type Entry = { kind: "month"; key: string; label: string } | { kind: "mail"; key: string; row: MailRow };
 
@@ -49,6 +66,11 @@ export function buildEntries(rows: MailRow[], lng: string, undatedLabel: string)
 
 const useStyles = makeStyles({
   root: { display: "flex", flexDirection: "column", height: "100%" },
+  dateHandle: {
+    position: "absolute", top: 0, bottom: 0, left: "-6px", width: "8px", cursor: "col-resize", touchAction: "none",
+    ":hover": { boxShadow: `inset -2px 0 0 ${tokens.colorNeutralStroke1Hover}` },
+    ":focus-visible": { boxShadow: `inset -2px 0 0 ${tokens.colorCompoundBrandStroke}`, outlineStyle: "none" },
+  },
   head: {
     display: "grid", alignItems: "center", gap: tokens.spacingHorizontalS, height: "24px", flexShrink: 0,
     padding: `0 ${tokens.spacingHorizontalM}`, overflow: "hidden", scrollbarGutter: "stable",
@@ -104,7 +126,28 @@ export function MailList(p: MailListProps) {
     if (el && el.scrollTop !== lastTop.current) el.scrollTop = lastTop.current;
   }, []);
   const { widths, headerProps } = useGridColumnSizing("mail-list", COLUMN_DEFAULTS);
-  const grid = { gridTemplateColumns: `24px ${widths.sender}px ${widths.subject}px minmax(${DATE_MIN_WIDTH}px, 1fr)` };
+  const [dateWidth, setDateWidth] = useState(() => widths.date!);
+  const grid = { gridTemplateColumns: `24px ${widths.sender}px minmax(96px, 1fr) ${dateWidth}px` };
+  const resizeDate = (w: number) => {
+    const next = Math.round(Math.min(Math.max(w, DATE_MIN), DATE_MAX));
+    setDateWidth(next);
+    storeDateWidth(next);
+  };
+  const dragDate = (e: PointerEvent<HTMLSpanElement>) => {
+    const el = e.currentTarget;
+    const x0 = e.clientX;
+    const w0 = dateWidth;
+    el.setPointerCapture(e.pointerId);
+    const move = (m: globalThis.PointerEvent) => resizeDate(w0 + x0 - m.clientX);
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  };
   const lng = i18n.language;
   const undated = t("list.undated");
   const entries = useMemo<Entry[]>(
@@ -138,7 +181,6 @@ export function MailList(p: MailListProps) {
   };
 
   const sender = headerProps("sender");
-  const subject = headerProps("subject");
   return (
     <div className={s.root}>
       {p.compact ? null : (
@@ -148,11 +190,20 @@ export function MailList(p: MailListProps) {
             <Caption1Strong className={s.ellipsis}>{t("list.col.from")}</Caption1Strong>
             {sender.aside}
           </span>
-          <span className={s.headCell} tabIndex={0} onKeyDown={subject.onKeyDown}>
-            <Caption1Strong className={s.ellipsis}>{t("list.col.subject")}</Caption1Strong>
-            {subject.aside}
+          <Caption1Strong className={s.ellipsis}>{t("list.col.subject")}</Caption1Strong>
+          <span className={s.headCell}>
+            <Caption1Strong className={s.ellipsis}>{t("list.col.date")}</Caption1Strong>
+            <span
+              className={s.dateHandle} role="separator" aria-orientation="vertical" tabIndex={0}
+              aria-valuenow={dateWidth} aria-valuemin={DATE_MIN} aria-valuemax={DATE_MAX} aria-label={t("list.col.date")}
+              onPointerDown={dragDate} onDoubleClick={() => resizeDate(COLUMN_DEFAULTS.date.width)}
+              onKeyDown={(e) => {
+                if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+                e.preventDefault();
+                resizeDate(dateWidth + (e.key === "ArrowLeft" ? DATE_STEP : -DATE_STEP));
+              }}
+            />
           </span>
-          <Caption1Strong>{t("list.col.date")}</Caption1Strong>
         </div>
       )}
     <div ref={ref} className={s.scroll} role="listbox" aria-label={p.ariaLabel} tabIndex={0} onKeyDown={onKeyDown} onScroll={(e) => (lastTop.current = e.currentTarget.scrollTop)} data-testid="mail-list">
