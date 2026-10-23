@@ -9,6 +9,7 @@ Branch `techdebt/r3-ui`, base `bf65fcd`. Plan: `round-3-ui-plan.md`.
 | 1fd0e20 | plan |
 | e43ddd8 | U7, U4, U12, U21, D11 revert |
 | 2bcd878 | U2, U3, U5, U8, U9 comment, U15, U19, U20, A7 (ui half) |
+| b43924d | reviewer interim fixes: searchMail/searchCount `gcTime: Infinity` + searchCount seq eviction (U1 kept past 5 min hidden), Python 3.12+ note, single `../common` import in MailList |
 
 ## Gate (r3-ui-test-haiku at 2bcd878, 2026-10-23T03:31:51Z–03:32:49Z, `tmp/gate-r3.log` + `tmp/g4-*.log`, untracked)
 
@@ -19,9 +20,14 @@ Branch `techdebt/r3-ui`, base `bf65fcd`. Plan: `round-3-ui-plan.md`.
 - `vendor-libpff.py`: `--help` RC=0. No argument → RC=2. No `.sh` references remain. package-lock.json is unchanged since bf65fcd.
 - Red-first: the U2 eviction test failed without the effect ("expected 2 to be 1") and passed with it (impl-2 report).
 
+## Re-gate at b43924d (`tmp/gate-r3b.log`, untracked)
+
+- build RC=0, `npm test` RC=0 17 files / 73 tests, e2e tsc RC=0. All greps unchanged plus: `gcTime: Infinity` 1 in pages.ts and 1 in search/index.tsx; `common/display` in MailList 0; `3.12` in vendor-libpff.py 1.
+- The new test "keeps the current search pages while no screen observes them" was red without `gcTime: Infinity` ("expected undefined to be defined") and green with it.
+
 ## Known limitations
 
-- `vendor-libpff.py` uses `tarfile.extractall(filter="data")`. This needs Python ≥ 3.12, or a 3.8–3.11 security release that backports the filter. The `gh run download` path was not run because it needs the network and a live run id. The local-tarball path was run against a temp `--dest`: ORIGIN had 6 keys in order, and `diff -r` was empty.
+- `vendor-libpff.py` uses `tarfile.extractall(filter="data")`. This needs Python ≥ 3.12, as the docstring and spec now state (stock macOS python3 3.9.6 fails with a TypeError before it touches the vendored tree). The `gh run download` path was not run because it needs the network and a live run id. The local-tarball path was run against a temp `--dest`: ORIGIN had 6 keys in order, and `diff -r` was empty.
 - `src-tauri/crates/pff/build.rs:27` still has to name `vendor-libpff.py`. That file belongs to the core squad.
 - Round 1 limitations are unchanged: the scroll restore in the real webview is checked by hand only. The undo history in Advanced SQL resets when you switch screens.
 
@@ -30,7 +36,7 @@ Branch `techdebt/r3-ui`, base `bf65fcd`. Plan: `round-3-ui-plan.md`.
 | item | status | commit / reason |
 |---|---|---|
 | U1 keep screen state | fixed r1 | cdde7dc, 73e2d15, 9bd59bf, a9b32da |
-| U2 query memory | fixed r3 (superseded `searchMail` entries evicted, `mailGet` gcTime 30 s) | 2bcd878. The `searchCount` part is not worth fixing: each entry is one number. `gcTime: 0` was refuted because it breaks U1 (hidden Activity screens unsubscribe). |
+| U2 query memory | fixed r3 (superseded `searchMail`/`searchCount` entries evicted and the current entry kept with `gcTime: Infinity`, `mailGet` gcTime 30 s) | 2bcd878, b43924d. `gcTime: 0` was refuted because it breaks U1 (hidden Activity screens unsubscribe). |
 | U3 Intl formatter cache | fixed r3 | 2bcd878 |
 | U4 enqueue hook | fixed r3 | e43ddd8 |
 | U5 leaf budget constants | fixed r3 | 2bcd878. `COUNT_CAP`/`MAX_ROWS` mirror Rust caps: not worth fixing. A shared source would need a contract change. |
