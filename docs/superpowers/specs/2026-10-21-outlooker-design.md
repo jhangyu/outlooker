@@ -434,7 +434,7 @@ Repo layout (one Cargo workspace + one Vite app):
 ├─ scripts/
 │  ├─ fetch-postgres.mjs        (01 §3)
 │  ├─ build.py                  One-command desktop build
-│  ├─ vendor-libpff.sh          Refresh the vendored libpff tree
+│  ├─ vendor-libpff.py          Refresh the vendored libpff tree (Python 3.12+)
 │  └─ fixtures/make-pst.ps1     Outlook automation PST generator (Windows phase)
 └─ tests/
    ├─ e2e/                      WebdriverIO specs (01 §9)

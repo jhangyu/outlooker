@@ -2,8 +2,10 @@ import { Toast, ToastTitle, useToastController } from "@fluentui/react-component
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
+import { pickPstFiles } from "../../api/dialog";
 import type { Language } from "../../api/bindings/Language";
-import { formatAppError, toAppError } from "./formatAppError";
+import { toAppError } from "../../api/call";
+import { formatAppError } from "./formatAppError";
 
 export function useAppToast() {
   const { dispatchToast } = useToastController("app");
@@ -34,4 +36,23 @@ export function useLanguageSwitch(): (lng: Language) => Promise<void> {
     },
     [i18n, toast],
   );
+}
+
+/** Pick PST files and enqueue them, toasting each rejected row. Resolves true when the enqueue call succeeded. */
+export function useEnqueuePst(): () => Promise<boolean> {
+  const { t } = useTranslation();
+  const toast = useAppToast();
+  return useCallback(async () => {
+    const paths = await pickPstFiles();
+    if (paths.length === 0) return false;
+    try {
+      const results = await api.importEnqueue(paths);
+      for (const r of results)
+        if (r.result === "rejected") toast.notify(t("import:enqueue.rejected", { path: r.path, reason: formatAppError(r.error, t) }), "error");
+      return true;
+    } catch (e) {
+      toast.error(e);
+      return false;
+    }
+  }, [t, toast]);
 }

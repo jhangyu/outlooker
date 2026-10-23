@@ -10,12 +10,12 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
-import { pickPstFiles } from "../../api/dialog";
+import { dbStatusQuery, pstListQuery } from "../../api/queries";
 import type { ImportStatus } from "../../api/bindings/ImportStatus";
 import type { PstSource } from "../../api/bindings/PstSource";
 import { useAppStatus } from "../../app/AppStatusContext";
 import {
-  EmptyState, ellipsis, formatAppError, formatBytes, formatDateTime, formatNumber, useAppToast,
+  EmptyState, ellipsis, formatBytes, formatDateTime, formatNumber, useAppToast, useEnqueuePst,
 } from "../../components/common";
 import { RemoveDialog } from "./RemoveDialog";
 
@@ -119,21 +119,17 @@ export function ImportScreen() {
   const status = useAppStatus();
   const qc = useQueryClient();
   const toast = useAppToast();
-  const psts = useQuery({ queryKey: ["pstList"], queryFn: () => api.pstList() });
-  const db = useQuery({ queryKey: ["dbStatus"], queryFn: () => api.dbStatus(), refetchInterval: 10_000 });
+  const psts = useQuery(pstListQuery);
+  const db = useQuery(dbStatusQuery);
   const [selected, setSelected] = useState<number | null>(null);
   const [removing, setRemoving] = useState<PstSource | null>(null);
   const list = psts.data ?? [];
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ["pstList"] });
+  const enqueue = useEnqueuePst();
+  const refresh = () => qc.invalidateQueries({ queryKey: pstListQuery.queryKey });
   const addFiles = async () => {
-    const paths = await pickPstFiles();
-    if (paths.length === 0) return;
     try {
-      const results = await api.importEnqueue(paths);
-      for (const r of results)
-        if (r.result === "rejected") toast.notify(t("enqueue.rejected", { path: r.path, reason: formatAppError(r.error, t) }), "error");
-      await refresh();
+      if (await enqueue()) await refresh();
     } catch (e) {
       toast.error(e);
     }

@@ -11,17 +11,7 @@ export function stubViewport(height: number): () => void {
   const saved = (["clientHeight", "clientWidth"] as const).map((k) => [k, Object.getOwnPropertyDescriptor(proto, k)] as const);
   Object.defineProperty(proto, "clientHeight", { configurable: true, get: () => height });
   Object.defineProperty(proto, "clientWidth", { configurable: true, get: () => 1000 });
-  // Fluent MessageBar constructs a ResizeObserver, which jsdom lacks (src/test/setup.ts is not R1-07's file).
-  const hadRO = "ResizeObserver" in globalThis;
-  if (!hadRO) {
-    Object.defineProperty(globalThis, "ResizeObserver", {
-      configurable: true,
-      writable: true,
-      value: class { observe() {} unobserve() {} disconnect() {} },
-    });
-  }
   return () => {
-    if (!hadRO) Reflect.deleteProperty(globalThis, "ResizeObserver");
     for (const [k, d] of saved) {
       if (d) Object.defineProperty(proto, k, d);
       else Reflect.deleteProperty(proto, k);

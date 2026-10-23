@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
+import { pstListQuery } from "../../api/queries";
 import type { AppError } from "../../api/bindings/AppError";
 import type { PstSource } from "../../api/bindings/PstSource";
 import { formatAppError, formatNumber, toAppError, useAppToast } from "../../components/common";
@@ -28,7 +29,7 @@ export function RemoveDialog({ pst, onClose }: { pst: PstSource; onClose(): void
     setError(null);
     try {
       await api.pstRemove(pst.id);
-      await qc.invalidateQueries({ queryKey: ["pstList"] });
+      await qc.invalidateQueries({ queryKey: pstListQuery.queryKey });
       toast.notify(t("remove.done", { name: pst.displayName }));
       onClose();
     } catch (e) {

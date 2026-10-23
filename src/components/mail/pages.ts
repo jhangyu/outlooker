@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { api } from "../../api/commands";
 import type { AppError } from "../../api/bindings/AppError";
 import type { MailRow } from "../../api/bindings/MailRow";
@@ -42,7 +42,12 @@ export function useMailPages(query: SearchQuery | null, seq: number): MailPages 
     getNextPageParam: (last, pages) => nextPageParam(last, pages),
     enabled: query !== null,
     staleTime: Infinity, // changes only through seq or reset()
+    gcTime: Infinity, // a hidden screen has no observer, and the effect below keeps one entry
   });
+  // Each new composed query gets a new seq; drop the superseded entries so their pages do not pile up.
+  useEffect(() => {
+    qc.removeQueries({ queryKey: ["searchMail"], predicate: (x) => x.queryKey[1] !== seq });
+  }, [qc, seq]);
   const pages = q.data?.pages;
   const derived = useMemo(() => {
     const list = pages ?? [];

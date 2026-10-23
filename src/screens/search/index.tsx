@@ -9,9 +9,9 @@ import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
 import { useAppStatus, useNavigation } from "../../app/AppStatusContext";
 import { EmptyState, formatAppError, formatNumber } from "../../components/common";
-import { DslBuilder, countLeaves, newGroup, toConditionGroup, type GroupDraft } from "../../components/dsl";
+import { DslBuilder, MAX_LEAVES, countLeaves, newGroup, toConditionGroup, type GroupDraft } from "../../components/dsl";
 import { MailList, ReadingPane, useMailPages } from "../../components/mail";
-import { EMPTY_REFINE, composeQuery, refineNodes, splitTerms, type RefineState } from "./compose";
+import { EMPTY_REFINE, LEAVES_PER_TERM, composeQuery, refineNodes, splitTerms, type RefineState } from "./compose";
 import { RefinePane } from "./RefinePane";
 
 const DEBOUNCE_MS = 300;
@@ -99,7 +99,11 @@ export function SearchScreen() {
     queryFn: () => api.searchCount(query!),
     enabled: query !== null,
     staleTime: Infinity, // changes only through seq or refresh()
+    gcTime: Infinity, // a hidden screen has no observer, and the effect below keeps one entry
   });
+  useEffect(() => {
+    qc.removeQueries({ queryKey: ["searchCount"], predicate: (x) => x.queryKey[1] !== seq });
+  }, [qc, seq]);
   const filters = useQuery({ queryKey: ["filterOptions", status.counts.messages, status.counts.psts], queryFn: () => api.filterOptions(), placeholderData: keepPreviousData });
 
   const [picked, setPicked] = useState<{ seq: number; id: number } | null>(null);
@@ -108,7 +112,7 @@ export function SearchScreen() {
 
   const terms = splitTerms(inputs.text).length;
   const builderLeaves = countLeaves(inputs.draft);
-  const leafBudget = 50 - 4 * terms - refineNodes(inputs.refine, new Date()).length;
+  const leafBudget = MAX_LEAVES - LEAVES_PER_TERM * terms - refineNodes(inputs.refine, new Date()).length;
 
   const clearAll = () => {
     const cleared = { text: "", refine: EMPTY_REFINE, draft: newGroup("and", []) };

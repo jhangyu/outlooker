@@ -5,6 +5,7 @@ import { I18nextProvider, useTranslation } from "react-i18next";
 import type { AppError } from "../api/bindings/AppError";
 import type { AppStatus } from "../api/bindings/AppStatus";
 import type { LibraryCounts } from "../api/bindings/LibraryCounts";
+import { pstListQuery } from "../api/queries";
 import { toAppError } from "../components/common";
 import { AppStatusProvider, type AppStatusApi } from "./AppStatusContext";
 import { AppFrame, FailedScreen } from "./AppFrame";
@@ -38,7 +39,7 @@ function Boot() {
         if (cancelled) return r.unlisten();
         let status = pending.current.status ?? r.status;
         if (pending.current.counts) status = { ...status, counts: pending.current.counts };
-        if (r.psts) qc.setQueryData(["pstList"], r.psts);
+        if (r.psts) qc.setQueryData(pstListQuery.queryKey, r.psts);
         await inst.changeLanguage(status.language);
         setState({ kind: "ready", status });
       },
