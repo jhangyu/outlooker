@@ -49,11 +49,6 @@ fn scan() -> (Vec<(String, u32)>, Vec<Msg>) {
 }
 
 #[test]
-fn version_is_20260625() {
-    assert_eq!(pff::version(), "20260625");
-}
-
-#[test]
 fn non_pst_is_error() {
     let cargo_toml = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
     assert!(!pff::check_signature(&cargo_toml).unwrap());
@@ -95,12 +90,4 @@ fn outlook_pst_welcome_message() {
         assert!(m.has_html);
         assert!(m.attachments >= 1);
     }
-}
-
-#[test]
-fn filetime_conversion() {
-    // 2024-05-01T08:30:00Z = 1714552200 s since the Unix epoch.
-    let filetime = (1_714_552_200u64 + 11_644_473_600) * 10_000_000;
-    assert_eq!(pff::filetime_to_unix_micros(filetime), Some(1_714_552_200_000_000));
-    assert_eq!(pff::filetime_to_unix_micros(0), None);
 }

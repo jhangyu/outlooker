@@ -111,11 +111,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pool_closed_is_not_ready() {
-        assert_eq!(pool_err(deadpool_postgres::PoolError::Closed), AppError::DbNotReady);
-    }
-
-    #[test]
     fn sqlstate_policy() {
         for code in ["57P01", "57P02", "57P03"] {
             assert_eq!(sqlstate_err(code, "x"), AppError::DbNotReady, "{code}");

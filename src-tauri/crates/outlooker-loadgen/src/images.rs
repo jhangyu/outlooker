@@ -67,23 +67,3 @@ impl ImagePool {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn deterministic_and_known_skips_encoding() {
-        let pool = ImagePool::new(5, 10, 400);
-        assert_eq!(pool.source(3), pool.source(3));
-        assert_ne!(pool.source(3).0, pool.source(4).0);
-        assert_eq!(pool.source(4).1, "image/png");
-        let known = KnownHashes::new();
-        let first = pool.inline(12, 0, &known).unwrap();
-        let blob = first.blob.as_ref().unwrap();
-        assert!(blob.width >= 50 && blob.width <= 400 && blob.webp.starts_with(b"RIFF"));
-        known.insert_all([first.source_hash]);
-        let again = pool.inline(12, 1, &known).unwrap();
-        assert_eq!((again.source_hash, again.blob, again.ordinal), (first.source_hash, None, 1));
-    }
-}

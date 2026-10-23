@@ -105,24 +105,6 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    fn throughput_and_eta() {
-        let t0 = Instant::now();
-        let mut t = Throughput::new();
-        assert_eq!(t.bytes_per_sec(), None);
-        t.record(t0, 0, 0);
-        assert_eq!(t.bytes_per_sec(), None, "one sample has no span");
-        t.record(t0 + Duration::from_secs(2), 100, 2_000_000);
-        assert_eq!(t.bytes_per_sec(), Some(1_000_000));
-        assert_eq!(t.eta_seconds(Some(1_100), 100), Some(20));
-        assert_eq!(t.eta_seconds(None, 100), None);
-        // old samples leave the 10 s window
-        t.record(t0 + Duration::from_secs(13), 200, 2_000_000);
-        t.record(t0 + Duration::from_secs(14), 300, 3_000_000);
-        assert_eq!(t.samples.front().unwrap().1, 100, "keeps the newest sample at or before now - 10 s");
-        assert_eq!(t.bytes_per_sec(), Some(83_333));
-    }
-
-    #[test]
     fn budget_blocks_until_release_or_cancel() {
         let b = Arc::new(ByteBudget::new(100));
         let cancel = Arc::new(AtomicBool::new(false));

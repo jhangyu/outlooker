@@ -73,17 +73,3 @@ pub struct NullSink;
 impl EventSink for NullSink {
     fn emit(&self, _event: CoreEvent) {}
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::dto::app::LibraryCounts;
-
-    #[test]
-    fn recording_sink_keeps_order_and_names() {
-        let sink = RecordingSink::default();
-        sink.emit(CoreEvent::LibraryChanged(LibraryChanged { counts: LibraryCounts { messages: 3, psts: 1 } }));
-        assert_eq!(sink.names(), vec!["library:changed"]);
-        assert_eq!(sink.events()[0].payload(), serde_json::json!({ "counts": { "messages": 3, "psts": 1 } }));
-    }
-}

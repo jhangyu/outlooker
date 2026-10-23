@@ -83,5 +83,6 @@ mod tests {
         assert_eq!((unnamed.file_name.as_str(), unnamed.mime_type.as_str(), unnamed.attach_method), ("attachment-7", "application/octet-stream", 0));
         let long = attachment_out(&RawAttachment { long_filename: Some(format!("{}.txt", "n".repeat(2000))), ..Default::default() });
         assert_eq!(long.file_name.chars().count(), 1024);
+        assert_eq!(long.mime_type, "application/octet-stream"); // cut to 1,024 chars before the MIME guess: the extension is gone
     }
 }

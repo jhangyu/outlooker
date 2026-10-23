@@ -156,17 +156,10 @@ mod tests {
     }
 
     #[test]
-    fn import_phase_db_round_trip() {
+    fn db_text_round_trips() {
         round_trip(ImportPhase::ALL, ImportPhase::as_db, ImportPhase::from_db);
-    }
-
-    #[test]
-    fn import_error_stage_db_round_trip() {
         round_trip(ImportErrorStage::ALL, ImportErrorStage::as_db, ImportErrorStage::from_db);
-    }
-
-    #[test]
-    fn import_error_severity_db_round_trip() {
         round_trip(ImportErrorSeverity::ALL, ImportErrorSeverity::as_db, ImportErrorSeverity::from_db);
+        round_trip(crate::dto::search::RecipientKind::ALL, crate::dto::search::RecipientKind::as_db, crate::dto::search::RecipientKind::from_db);
     }
 }

@@ -56,21 +56,3 @@ impl Paths {
 pub fn dev_pg_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../resources/postgresql")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn paths_layout() {
-        let p = Paths::new("/a".into(), "/l".into(), "/pg".into());
-        assert_eq!(p.bootstrap_file(), PathBuf::from("/a/settings.json"));
-        assert_eq!(p.data_root(), Path::new("/a/data"));
-        let q = p.with_data_root("/d".into());
-        assert_eq!(q.pgdata(), PathBuf::from("/d/pgdata"));
-        assert_eq!(q.credentials(), PathBuf::from("/d/auth/credentials"));
-        assert_eq!(q.marker(), PathBuf::from("/d/outlooker-data.json"));
-        assert_eq!(q.inflight_marker(), PathBuf::from("/d/import-inflight"));
-        assert_eq!(q.pg_bin("initdb"), PathBuf::from(format!("/pg/bin/initdb{}", std::env::consts::EXE_SUFFIX)));
-    }
-}

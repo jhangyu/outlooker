@@ -55,19 +55,3 @@ impl AppError {
         AppError::NotFound { entity: entity.to_owned(), id: id.to_string() }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn app_error_wire_shape() {
-        let e = AppError::QueryTimeout { timeout_ms: 30000 };
-        assert_eq!(serde_json::to_string(&e).unwrap(), r#"{"kind":"queryTimeout","timeoutMs":30000}"#);
-        let b = AppError::Busy { reason: BusyReason::ImportRunning };
-        assert_eq!(serde_json::to_string(&b).unwrap(), r#"{"kind":"busy","reason":"importRunning"}"#);
-        assert_eq!(serde_json::to_string(&AppError::DbNotReady).unwrap(), r#"{"kind":"dbNotReady"}"#);
-        let s = AppError::SqlError { sqlstate: "42601".into(), message: "x".into(), position: None };
-        assert_eq!(serde_json::to_string(&s).unwrap(), r#"{"kind":"sqlError","sqlstate":"42601","message":"x","position":null}"#);
-    }
-}

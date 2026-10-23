@@ -110,13 +110,8 @@ mod tests {
         let waiter = tokio::spawn(async move { g2.released().await });
         drop(guard);
         tokio::time::timeout(std::time::Duration::from_secs(5), waiter).await.unwrap().unwrap();
-    }
-
-    #[test]
-    fn guard_drop_releases() {
-        let gate = Gate::new();
-        drop(gate.try_enter(Activity::Maintenance).unwrap());
         assert_eq!(gate.current(), None);
         assert!(gate.try_enter(Activity::Import).is_ok());
     }
+
 }

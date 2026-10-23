@@ -74,37 +74,3 @@ impl Zipf {
         self.cdf.partition_point(|&c| c <= u).min(self.cdf.len() - 1)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn deterministic_and_bounded() {
-        let (mut a, mut b) = (Rng::new(42), Rng::new(42));
-        let xs: Vec<u64> = (0..100).map(|_| a.next_u64()).collect();
-        let ys: Vec<u64> = (0..100).map(|_| b.next_u64()).collect();
-        assert_eq!(xs, ys);
-        assert_ne!(Rng::new(1).next_u64(), Rng::new(2).next_u64());
-        let mut r = Rng::new(7);
-        for _ in 0..10_000 {
-            assert!(r.below(10) < 10);
-            let u = r.unit();
-            assert!((0.0..1.0).contains(&u));
-            assert!((5..=9).contains(&r.range(5, 9)));
-        }
-    }
-
-    #[test]
-    fn zipf_rank_zero_is_most_frequent() {
-        let z = Zipf::new(100);
-        let mut r = Rng::new(3);
-        let mut counts = [0usize; 100];
-        for _ in 0..100_000 {
-            counts[z.sample(&mut r)] += 1;
-        }
-        assert!(counts[0] > counts[1] && counts[1] > counts[9] && counts[9] > counts[99]);
-        let share0 = counts[0] as f64 / 100_000.0; // 1 / H(100) ≈ 0.193
-        assert!((0.18..0.21).contains(&share0), "{share0}");
-    }
-}

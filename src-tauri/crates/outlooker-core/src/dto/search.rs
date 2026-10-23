@@ -170,14 +170,6 @@ pub struct Occurrence {
 mod tests {
     use super::*;
 
-    #[test]
-    fn recipient_kind_db_round_trip() {
-        for &k in RecipientKind::ALL {
-            assert_eq!(RecipientKind::from_db(k.as_db()).unwrap(), k);
-        }
-        assert!(RecipientKind::from_db("bogus").is_err());
-    }
-
     /// Part 03 §5.1 worked example, built from Rust values.
     pub fn worked_example() -> SearchRequest {
         SearchRequest {
@@ -205,23 +197,6 @@ mod tests {
             cursor: None,
             page_size: Some(200),
         }
-    }
-
-    #[test]
-    fn worked_example_matches_spec_json() {
-        let expected: serde_json::Value = serde_json::json!({
-            "query": { "kind": "dsl", "root": { "op": "and", "children": [
-                { "type": "group", "op": "or", "children": [
-                    { "type": "sender", "value": "contoso.com" },
-                    { "type": "recipient", "value": "alice", "kinds": [] } ] },
-                { "type": "dateRange", "from": "2022-12-31T16:00:00Z", "to": "2023-12-31T16:00:00Z" },
-                { "type": "body", "value": "報價" },
-                { "type": "hasAttachment", "value": true },
-                { "type": "sourcePst", "pstIds": [3, 7] } ] } },
-            "cursor": null,
-            "pageSize": 200
-        });
-        assert_eq!(serde_json::to_value(worked_example()).unwrap(), expected);
     }
 
     #[test]

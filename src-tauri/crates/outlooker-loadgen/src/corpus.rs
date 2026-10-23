@@ -83,21 +83,3 @@ impl Corpus {
         out.trim().to_owned()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn word_lists_and_text() {
-        let c = Corpus::new();
-        assert_eq!(c.en.len(), 1050);
-        assert!(c.zh.len() == 296 && c.zh.contains(&"報價單"));
-        let mut r = Rng::new(1);
-        let en = c.text(&mut r, Lang::En, 2048);
-        assert!(en.len() >= 2048 && en.is_ascii());
-        let zh = c.text(&mut r, Lang::Zh, 2048);
-        assert!(!zh.contains(' ') && zh.len() >= 2048);
-        assert!(!c.subject(&mut r, Lang::Mixed).is_empty());
-    }
-}

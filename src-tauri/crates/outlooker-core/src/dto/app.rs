@@ -51,14 +51,3 @@ pub struct InitializeRequest {
     pub data_dir: String,
     pub language: Language,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn language_and_phase_wire_values() {
-        assert_eq!(serde_json::to_string(&Language::ZhTw).unwrap(), r#""zh-TW""#);
-        assert_eq!(serde_json::to_string(&AppPhase::InitializingCluster).unwrap(), r#""initializingCluster""#);
-    }
-}

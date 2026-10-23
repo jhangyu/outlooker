@@ -574,20 +574,12 @@ mod tests {
         for (kind, state, want) in cases {
             assert_eq!(status_of(kind, state), want, "{kind:?}/{state:?}");
         }
-    }
-
-    #[test]
-    fn job_kind_db_round_trip() {
         for &k in JobKind::ALL {
             assert_eq!(JobKind::from_db(k.as_db()).unwrap(), k);
         }
         assert!(JobKind::from_db("bogus").is_err());
-    }
-
-    #[test]
-    fn job_state_db_round_trip() {
-        for &s in JobState::ALL {
-            assert_eq!(JobState::from_db(s.as_db()).unwrap(), s);
+        for &st in JobState::ALL {
+            assert_eq!(JobState::from_db(st.as_db()).unwrap(), st);
         }
         assert!(JobState::from_db("bogus").is_err());
     }

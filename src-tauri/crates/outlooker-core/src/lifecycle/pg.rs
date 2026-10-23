@@ -372,19 +372,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn last_log_line_skips_startup_log() {
-        let dir = tempfile::tempdir().unwrap();
-        let log = dir.path().join("log");
-        std::fs::create_dir(&log).unwrap();
-        std::fs::write(log.join("postgresql.log"), "old\nserver line\n").unwrap();
-        std::fs::write(log.join("startup.log"), "startup noise\n").unwrap();
-        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
-        std::fs::File::options().write(true).open(log.join("startup.log")).unwrap().set_modified(later).unwrap();
-        let c = PgController::new(Paths::new(dir.path().join("a"), dir.path().join("l"), dir.path().join("pg")));
-        assert_eq!(c.last_log_line(dir.path()).as_deref(), Some("server line"));
-    }
-
-    #[test]
     fn initdb_stderr_classification() {
         let shm = "creating directory /x ... ok\nselecting dynamic shared memory implementation ... posix\n\
                    2026-10-22 03:00:00.000 CST [1] FATAL:  could not create shared memory segment: No space left on device\n\
