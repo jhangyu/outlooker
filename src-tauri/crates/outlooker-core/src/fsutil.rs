@@ -27,6 +27,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8], private: bool) -> Result<(), AppE
     let _ = private;
     let mut f = opts.open(&tmp).map_err(|e| AppError::file_access(&tmp, &e.to_string()))?;
     let written = f.write_all(bytes).and_then(|_| f.sync_all()).map_err(|e| AppError::file_access(&tmp, &e.to_string()));
+    drop(f); // Windows cannot rename or delete an open file
     let done = written.and_then(|_| std::fs::rename(&tmp, path).map_err(|e| AppError::file_access(path, &e.to_string())));
     if done.is_err() {
         let _ = std::fs::remove_file(&tmp); // never leave a (possibly secret) tmp file behind
