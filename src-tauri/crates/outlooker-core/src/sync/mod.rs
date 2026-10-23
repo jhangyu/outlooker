@@ -13,7 +13,7 @@ use crate::db::{db_err, Db};
 use crate::dto::app::AppPhase;
 use crate::dto::error::AppError;
 use crate::dto::sync::{SyncSchedule, SyncStatus};
-use crate::importer::ImportManager;
+use crate::importer::{ImportManager, SyncTarget};
 use crate::sink::{CoreEvent, EventSink};
 use schedule::{due_at, local_offset};
 
@@ -202,17 +202,4 @@ async fn store_last_run(db: &Db, at: OffsetDateTime) -> Result<(), AppError> {
         .await
         .map(drop)
         .map_err(db_err)
-}
-
-// MERGE-STUB (deliverable A owns the real ones in importer/): delete this block at merge and import
-// `crate::importer::SyncTarget`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyncTarget {
-    All,
-    One(i64),
-}
-impl ImportManager {
-    pub async fn sync(&self, _target: SyncTarget) -> Result<(), AppError> {
-        Ok(())
-    }
 }
