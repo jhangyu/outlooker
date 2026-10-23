@@ -37,7 +37,7 @@ async fn subjects(svc: &SearchService, req: SearchRequest) -> (Vec<String>, bool
     (page.rows.into_iter().map(|r| r.subject).collect(), page.short_query)
 }
 
-async fn reference(tc: &TestCluster, subject_like: &str, limit: i64) -> Vec<i64> {
+async fn sql_ids(tc: &TestCluster, subject_like: &str, limit: i64) -> Vec<i64> {
     let a = tc.admin().await;
     a.query("SELECT id FROM messages WHERE subject LIKE $1 ORDER BY sort_at DESC, id DESC LIMIT $2", &[&subject_like, &limit])
         .await
@@ -244,7 +244,7 @@ async fn two_phase_dense_phase_a_only() {
     let mut client = tc.app().await;
     let (ids, _, phase_b) = page_ids(&mut client, &dsl(vec![N::Subject { value: "dense".into() }], 10), 20).await;
     assert!(!phase_b);
-    assert_eq!(ids, reference(&tc, "%dense%", 10).await);
+    assert_eq!(ids, sql_ids(&tc, "%dense%", 10).await);
 }
 
 #[tokio::test]
@@ -253,7 +253,7 @@ async fn two_phase_sparse_runs_phase_b() {
     let mut client = tc.app().await;
     let (ids, _, phase_b) = page_ids(&mut client, &dsl(vec![N::Subject { value: "sparse".into() }], 5), 20).await;
     assert!(phase_b);
-    assert_eq!(ids, reference(&tc, "%sparse%", 5).await);
+    assert_eq!(ids, sql_ids(&tc, "%sparse%", 5).await);
 }
 
 #[tokio::test]
@@ -267,7 +267,7 @@ async fn two_phase_pages_no_gap_no_overlap() {
         all.extend(ids);
         req.cursor = next;
     }
-    assert_eq!(all, reference(&tc, "%sparse%", 9).await);
+    assert_eq!(all, sql_ids(&tc, "%sparse%", 9).await);
     let (last, next, _) = page_ids(&mut client, &req, 20).await;
     assert_eq!((last.len(), next), (1, None)); // 10 matches in total
 }
@@ -276,7 +276,7 @@ async fn two_phase_pages_no_gap_no_overlap() {
 async fn null_sent_at_last_and_paged() {
     let tc = TestCluster::from_seed("window", seed_window_set).await;
     let mut client = tc.app().await;
-    let expected = reference(&tc, "%dense%", 100).await;
+    let expected = sql_ids(&tc, "%dense%", 100).await;
     let mut req = dsl(vec![N::Subject { value: "dense".into() }], 7);
     let mut rows = Vec::new();
     loop {

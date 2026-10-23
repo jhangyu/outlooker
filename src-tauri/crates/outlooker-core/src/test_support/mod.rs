@@ -163,7 +163,7 @@ impl TestCluster {
         let postgres = connect(run.port, ADMIN_ROLE, &run.creds.admin, "postgres").await.expect("admin connect");
         let mut tries = 0;
         loop {
-            match postgres.batch_execute(&format!("CREATE DATABASE {dbname} TEMPLATE {template} STRATEGY WAL_LOG")).await {
+            match postgres.batch_execute(&format!("CREATE DATABASE {dbname} TEMPLATE {template} STRATEGY FILE_COPY")).await {
                 Ok(()) => break,
                 // a just-closed seed connection may still be exiting
                 Err(e) if e.code().is_some_and(|c| c.code() == "55006") && tries < 100 => {
