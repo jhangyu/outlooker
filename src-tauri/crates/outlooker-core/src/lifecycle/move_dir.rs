@@ -177,3 +177,33 @@ impl Supervisor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::undo_target;
+
+    /// A failed move empties a folder the user already had and restores its mode, but removes one it created.
+    #[test]
+    fn undo_target_empties_pre_existing_and_removes_created() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("t");
+        std::fs::create_dir_all(target.join("sub/deep")).unwrap();
+        std::fs::write(target.join("sub/deep/f"), b"x").unwrap();
+        std::fs::write(target.join("g"), b"y").unwrap();
+
+        // readonly is the portable mode bit: the dir is writable now, so only a restore can make it readonly
+        let mut mode = std::fs::metadata(&target).unwrap().permissions();
+        mode.set_readonly(true);
+        undo_target(&target, Some(mode)).unwrap();
+        assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0);
+        let mut perms = std::fs::metadata(&target).unwrap().permissions();
+        assert!(perms.readonly());
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        std::fs::set_permissions(&target, perms).unwrap();
+
+        std::fs::write(target.join("g"), b"y").unwrap();
+        undo_target(&target, None).unwrap();
+        assert!(!target.exists());
+    }
+}
