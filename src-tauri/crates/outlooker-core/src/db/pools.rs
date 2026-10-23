@@ -5,11 +5,11 @@ use deadpool_postgres::{Manager, ManagerConfig, Object, Pool, RecyclingMethod};
 use tokio_postgres::NoTls;
 
 use super::credentials::Credentials;
-use super::{base_config, connect, connect_admin, pool_err, DB_NAME};
+use super::{base_config, connect, pool_err, ADMIN_ROLE};
 use crate::dto::error::AppError;
 
-fn pool(port: u16, user: &str, password: &str, max: usize) -> Result<Pool, AppError> {
-    let mgr = Manager::from_config(base_config(port, user, password, DB_NAME), NoTls, ManagerConfig { recycling_method: RecyclingMethod::Fast });
+fn pool(port: u16, user: &str, password: &str, dbname: &str, max: usize) -> Result<Pool, AppError> {
+    let mgr = Manager::from_config(base_config(port, user, password, dbname), NoTls, ManagerConfig { recycling_method: RecyclingMethod::Fast });
     Pool::builder(mgr).max_size(max).build().map_err(|e| AppError::internal(format!("pool {user}: {e}")))
 }
 
@@ -21,8 +21,8 @@ pub struct Pools {
 
 impl Pools {
     /// App pool ≤ 8, read-only pool ≤ 2 (spec Part 04 §6.6 `max_connections` budget).
-    pub fn build(port: u16, creds: &Credentials) -> Result<Pools, AppError> {
-        Ok(Pools { app: pool(port, "outlooker_app", &creds.app, 8)?, ro: pool(port, "outlooker_ro", &creds.ro, 2)? })
+    pub fn build(port: u16, creds: &Credentials, dbname: &str) -> Result<Pools, AppError> {
+        Ok(Pools { app: pool(port, "outlooker_app", &creds.app, dbname, 8)?, ro: pool(port, "outlooker_ro", &creds.ro, dbname, 2)? })
     }
     pub fn close(&self) {
         self.app.close();
@@ -36,6 +36,7 @@ pub struct DbConn {
     pub creds: Credentials,
     pub pools: Pools,
     pub data_root: PathBuf,
+    pub dbname: String,
 }
 
 /// Shared handle to the running cluster. The Supervisor sets it on Ready and clears it before any stop,
@@ -71,11 +72,11 @@ impl Db {
     }
     pub async fn connect_admin(&self) -> Result<tokio_postgres::Client, AppError> {
         let c = self.conn()?;
-        connect_admin(c.port, &c.creds).await
+        connect(c.port, ADMIN_ROLE, &c.creds.admin, &c.dbname).await
     }
     pub async fn connect_app(&self) -> Result<tokio_postgres::Client, AppError> {
         let c = self.conn()?;
-        connect(c.port, "outlooker_app", &c.creds.app, DB_NAME).await
+        connect(c.port, "outlooker_app", &c.creds.app, &c.dbname).await
     }
     pub fn data_root(&self) -> Result<PathBuf, AppError> {
         Ok(self.conn()?.data_root)

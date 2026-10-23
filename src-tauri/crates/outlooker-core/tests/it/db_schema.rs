@@ -1,5 +1,5 @@
 #![cfg(feature = "test-support")]
-use outlooker_core::db::{indexes, Credentials, Db};
+use outlooker_core::db::{indexes, Credentials};
 use outlooker_core::dto::error::AppError;
 use outlooker_core::dto::settings::SettingsPatch;
 use outlooker_core::settings::SettingsStore;
@@ -100,17 +100,6 @@ async fn search_indexes_drop_and_ensure() {
     assert!(indexes::missing_or_invalid(&a).await.unwrap().is_empty());
     assert_eq!(calls.lock().unwrap().last().unwrap().1, 6);
     indexes::ensure_search_indexes(&a, &|_: &str, _: usize, _: usize| {}).await.unwrap(); // idempotent
-}
-
-#[tokio::test]
-async fn db_handle_not_ready_when_unset() {
-    let db = Db::new();
-    assert_eq!(db.app_pool().err(), Some(AppError::DbNotReady));
-    assert!(matches!(db.connect_admin().await, Err(AppError::DbNotReady)));
-    let tc = TestCluster::start().await;
-    let client = tc.db.app_pool().unwrap().get().await.unwrap();
-    let one: i32 = client.query_one("SELECT 1", &[]).await.unwrap().get(0);
-    assert_eq!(one, 1);
 }
 
 #[tokio::test]

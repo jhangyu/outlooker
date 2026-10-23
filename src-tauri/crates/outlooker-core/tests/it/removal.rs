@@ -40,7 +40,8 @@ async fn keeps_shared_deletes_rest() {
     let admin = tc.admin().await;
     assert_eq!(count(&admin, "SELECT count(*) FROM messages").await, 2);
     assert_eq!(count(&admin, "SELECT count(*) FROM image_blobs").await, 1);
-    let stats = remove::run(&tc.app().await, a).await.unwrap();
+    let app = tc.app().await;
+    let stats = remove::run(&app, a).await.unwrap();
     assert_eq!(stats, RemoveStats { occurrences_deleted: 2, messages_deleted: 1 });
     let left: Vec<(String, Option<i64>)> = admin
         .query("SELECT subject, first_pst_id FROM messages", &[])
@@ -55,19 +56,12 @@ async fn keeps_shared_deletes_rest() {
     assert_eq!(emails, vec!["shared@x.example".to_owned()]); // orphan address deleted
     assert_eq!(count(&admin, &format!("SELECT count(*) FROM pst_sources WHERE id = {a}")).await, 0);
     assert_eq!(count(&admin, &format!("SELECT count(*) FROM message_occurrences WHERE pst_id = {b}")).await, 1);
-}
-
-#[tokio::test]
-async fn second_run_is_noop() {
-    let tc = TestCluster::start().await;
-    let (a, b) = two_sources(&tc).await;
-    let app = tc.app().await;
-    remove::run(&app, a).await.unwrap();
+    // a second run is a no-op, then removing the other source empties the library
     assert_eq!(remove::run(&app, a).await.unwrap(), RemoveStats::default());
-    let admin = tc.admin().await;
     assert_eq!(count(&admin, "SELECT count(*) FROM messages").await, 1);
     assert_eq!(count(&admin, "SELECT count(*) FROM addresses").await, 1);
     remove::run(&app, b).await.unwrap();
     assert_eq!(count(&admin, "SELECT count(*) FROM messages").await, 0);
     assert_eq!(count(&admin, "SELECT count(*) FROM addresses").await, 0);
 }
+

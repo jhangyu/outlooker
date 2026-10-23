@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::time::SystemTime;
 
-use outlooker_core::db::{connect_admin, migrate, Credentials, Db, DbConn, Pools};
+use outlooker_core::db::{connect_admin, migrate, Credentials, Db, DbConn, Pools, DB_NAME};
 use outlooker_core::dto::error::AppError;
 use outlooker_core::importer::dedupe::format_utc_seconds;
 use outlooker_core::lifecycle::pg::{PgController, StopMode};
@@ -26,7 +26,7 @@ async fn connect(paths: Paths, creds: Credentials) -> Result<LibraryRoot, AppErr
     let mut admin = connect_admin(port, &creds).await?;
     migrate(&mut admin, &creds).await?;
     let db = Db::new();
-    db.set(Some(DbConn { port, creds: creds.clone(), pools: Pools::build(port, &creds)?, data_root: paths.data_root().to_path_buf() }));
+    db.set(Some(DbConn { port, creds: creds.clone(), pools: Pools::build(port, &creds, DB_NAME)?, data_root: paths.data_root().to_path_buf(), dbname: DB_NAME.to_owned() }));
     Ok(LibraryRoot { paths, port, creds, db })
 }
 

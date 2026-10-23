@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-use crate::db::{library_counts, Db};
+use crate::db::{library_counts, Db, DbConn};
 use crate::dto::app::{AppPhase, AppStatus, LibraryCounts};
 use crate::dto::error::AppError;
 use crate::gate::Gate;
@@ -39,6 +39,8 @@ pub(crate) struct Inner {
     pub(crate) restarts: Mutex<Vec<Instant>>,
     pub(crate) health_started: AtomicBool,
     pub(crate) fail_next_verify: AtomicBool,
+    #[cfg(feature = "test-support")]
+    pub(crate) attached: Mutex<Option<DbConn>>,
 }
 
 /// Owns `AppPhase` (spec Part 02 §2.1). Imports no importer / search / SQL console code.
@@ -63,6 +65,8 @@ impl Supervisor {
                 restarts: Mutex::new(Vec::new()),
                 health_started: AtomicBool::new(false),
                 fail_next_verify: AtomicBool::new(false),
+                #[cfg(feature = "test-support")]
+                attached: Mutex::new(None),
             }),
         }
     }
@@ -142,8 +146,18 @@ impl Supervisor {
     pub async fn shutdown_db(&self) -> Result<(), AppError> {
         self.set_phase(AppPhase::StoppingDb, None).await;
         self.inner.db.set(None);
+        #[cfg(feature = "test-support")]
+        if self.inner.attached.lock().unwrap_or_else(|p| p.into_inner()).is_some() {
+            return Ok(());
+        }
         let p = self.paths();
         PgController::new(p.clone()).stop(&p.pgdata(), StopMode::Fast).await
+    }
+
+    /// Test seam: run on a database of a shared cluster; PostgreSQL itself is never started or stopped.
+    #[cfg(feature = "test-support")]
+    pub fn attach_test_db(&self, c: DbConn) {
+        *self.inner.attached.lock().unwrap_or_else(|p| p.into_inner()) = Some(c);
     }
 
     #[cfg(any(test, feature = "test-support"))]

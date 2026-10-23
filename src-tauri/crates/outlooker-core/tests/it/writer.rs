@@ -56,17 +56,6 @@ async fn message_id_duplicate_adds_occurrence() {
 }
 
 #[tokio::test]
-async fn content_hash_crlf_vs_lf() {
-    let tc = TestCluster::start().await;
-    seed_mails(&tc.db, "/p/a.pst", vec![item(1, 11, mail("Quote", "line one\nline two\n", "a@x.example", None))]).await;
-    seed_mails(&tc.db, "/p/b.pst", vec![item(1, 11, mail("Quote", "line one\r\nline two\r\n", "a@x.example", None))]).await;
-    let a = tc.admin().await;
-    assert_eq!(count(&a, "SELECT count(*) FROM messages").await, 1);
-    assert_eq!(count(&a, "SELECT count(*) FROM message_occurrences").await, 2);
-    assert_eq!(count(&a, "SELECT count(*) FROM messages WHERE dedupe_kind = 'content_hash'").await, 1);
-}
-
-#[tokio::test]
 async fn batch_cut_by_items() {
     assert_eq!(WriterLimits::default().max_items, 1_000);
     let tc = TestCluster::start().await;

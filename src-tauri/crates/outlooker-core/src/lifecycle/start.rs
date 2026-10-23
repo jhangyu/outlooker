@@ -1,4 +1,4 @@
-use crate::db::{cjk_self_check, connect_admin, db_err, migrate, Credentials, DbConn, Pools};
+use crate::db::{cjk_self_check, connect_admin, db_err, migrate, Credentials, DbConn, Pools, DB_NAME};
 use crate::dto::app::AppPhase;
 use crate::dto::error::AppError;
 use crate::lifecycle::pg::{PgController, StopMode};
@@ -25,6 +25,10 @@ impl Supervisor {
     }
 
     async fn try_start(&self, paths: &Paths) -> Result<DbConn, AppError> {
+        #[cfg(feature = "test-support")]
+        if let Some(c) = self.inner.attached.lock().unwrap_or_else(|p| p.into_inner()).clone() {
+            return Ok(c);
+        }
         if !paths.marker().exists() {
             return Err(AppError::file_access(&paths.marker(), "notADataRoot"));
         }
@@ -42,8 +46,8 @@ impl Supervisor {
             admin.query_one("SELECT 1", &[]).await.map_err(db_err)?;
             migrate(&mut admin, &creds).await?;
             cjk_self_check(&admin).await?;
-            let pools = Pools::build(port, &creds)?;
-            Ok::<DbConn, AppError>(DbConn { port, creds, pools, data_root: paths.data_root().to_path_buf() })
+            let pools = Pools::build(port, &creds, DB_NAME)?;
+            Ok::<DbConn, AppError>(DbConn { port, creds, pools, data_root: paths.data_root().to_path_buf(), dbname: DB_NAME.to_owned() })
         }
         .await;
         if connected.is_err() {

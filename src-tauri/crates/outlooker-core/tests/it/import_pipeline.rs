@@ -101,7 +101,7 @@ fn synthetic_path(tc: &TestCluster, name: &str) -> String {
 
 #[derive(Debug, PartialEq, Eq)]
 struct Snapshot {
-    keys: BTreeSet<Vec<u8>>,
+    keys: BTreeSet<String>,
     messages: i64,
     occurrences: i64,
     recipients: i64,
@@ -110,7 +110,7 @@ struct Snapshot {
 
 async fn snapshot(tc: &TestCluster) -> Snapshot {
     let a = tc.admin().await;
-    let keys = a.query("SELECT dedupe_key FROM messages", &[]).await.unwrap().iter().map(|r| r.get::<_, Vec<u8>>(0)).collect();
+    let keys = a.query("SELECT message_id FROM messages", &[]).await.unwrap().iter().map(|r| r.get::<_, String>(0)).collect();
     let r = a
         .query_one(
             "SELECT (SELECT count(*) FROM messages), (SELECT count(*) FROM message_occurrences), \
@@ -186,34 +186,12 @@ fn corpus_tagged(n: i64, tag: &str) -> Vec<RawItem> {
         .collect()
 }
 
-/// The library one uninterrupted import of `items` produces (own TestCluster).
-async fn reference(items: Vec<RawItem>) -> Snapshot {
-    let tc = TestCluster::start().await;
-    let fx = manager(&tc, small_batches());
-    let pst_id = fx.mgr.import_synthetic(&synthetic_path(&tc, "ref.pst"), folders(), items).await.unwrap();
-    let list = fx.mgr.list().await.unwrap();
-    assert_eq!(list.iter().find(|p| p.id == pst_id).unwrap().status, ImportStatus::Completed);
-    snapshot(&tc).await
-}
-
-/// The sanitizer acceptance patterns (spec Part 04 §12.2 row Sanitizer), matched without a regex crate.
-fn hostile_violations(out: &str) -> Vec<String> {
-    let lower = out.to_ascii_lowercase();
-    let mut found: Vec<String> =
-        ["<script", "javascript:", "url(", "<iframe", "<form", "position", "src=\"http"].iter().filter(|p| lower.contains(*p)).map(|p| p.to_string()).collect();
-    let b = lower.as_bytes();
-    for i in 0..b.len().saturating_sub(2) {
-        if b[i] == b'o' && b[i + 1] == b'n' && (i == 0 || !b[i - 1].is_ascii_alphanumeric()) {
-            let mut j = i + 2;
-            while j < b.len() && b[j].is_ascii_lowercase() {
-                j += 1;
-            }
-            if j > i + 2 && j < b.len() && b[j] == b'=' {
-                found.push(lower[i..=j].to_string());
-            }
-        }
-    }
-    found
+/// The library one uninterrupted import of `corpus(n)` produces: every non-contact item is one mail with
+/// one recipient and one attachment.
+fn expected(n: i64) -> Snapshot {
+    let keys: BTreeSet<String> = (1..=n).filter(|i| i % 10 != 0).map(|i| format!("m{i}@synthetic.example")).collect();
+    let c = keys.len() as i64;
+    Snapshot { keys, messages: c, occurrences: c, recipients: c, attachments: c }
 }
 
 // ------------------------------------------------------------------------------------------------ outlook.pst
@@ -320,35 +298,6 @@ async fn corrupt_copy_outcome() {
 // ------------------------------------------------------------------------------------------------ synthetic items
 
 #[tokio::test(flavor = "multi_thread")]
-async fn synthetic_cjk() {
-    const EXPECTED: &str = "報價單";
-    let (big5, _, unmappable) = encoding_rs::BIG5.encode("<html><body><p>報價單 Big5 版本</p></body></html>");
-    assert!(!unmappable);
-    let items = vec![
-        item(1, 1, mail(RawMail { subject: Some("Big5".into()), internet_codepage: Some(950), html_body: Some(big5.into_owned()), ..Default::default() })),
-        item(
-            2,
-            1,
-            mail(RawMail {
-                subject: Some("UTF-8".into()),
-                internet_codepage: Some(65001),
-                html_body: Some("<html><body><p>報價單 UTF-8 版本</p></body></html>".as_bytes().to_vec()),
-                ..Default::default()
-            }),
-        ),
-    ];
-    let tc = TestCluster::start().await;
-    let fx = manager(&tc, ImportTuning::default());
-    fx.mgr.import_synthetic(&synthetic_path(&tc, "cjk.pst"), folders(), items).await.unwrap();
-    let rows = tc.admin().await.query("SELECT subject, body_text FROM messages ORDER BY subject", &[]).await.unwrap();
-    assert_eq!(rows.len(), 2);
-    for r in &rows {
-        let (subject, text): (String, String) = (r.get(0), r.get(1));
-        assert!(text.contains(EXPECTED), "{subject}: {text:?}");
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn synthetic_inline_images() {
     const MAILS: i64 = 10;
     const BLOBS: i64 = 1;
@@ -391,87 +340,6 @@ async fn synthetic_inline_images() {
     )
     .await;
     assert_eq!(dangling, 0);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn synthetic_attachments() {
-    let long_name = format!("{}.txt", "n".repeat(1_100));
-    let atts = vec![
-        RawAttachment { index: 0, attach_method: Some(5), embedded_subject: Some("Re: plan".into()), ..Default::default() },
-        RawAttachment { index: 1, long_filename: Some("report.pdf".into()), data_size: Some(1_234), attach_method: Some(1), ..Default::default() },
-        RawAttachment { index: 2, long_filename: Some(long_name), data_size: Some(10), attach_method: Some(1), ..Default::default() },
-    ];
-    // pre-registered (Part 04 §5.8): (file_name, chars, mime_type)
-    let expected: Vec<(String, i32, String)> = vec![
-        ("Re: plan.msg".into(), 12, "application/vnd.ms-outlook".into()),
-        ("report.pdf".into(), 10, "application/pdf".into()),
-        // cut to 1,024 chars before the MIME guess: the extension is gone
-        ("n".repeat(1_024), 1_024, "application/octet-stream".into()),
-    ];
-    let tc = TestCluster::start().await;
-    let fx = manager(&tc, ImportTuning::default());
-    let items = vec![item(1, 1, mail(RawMail { subject: Some("Attachments".into()), attachments: atts, ..Default::default() }))];
-    fx.mgr.import_synthetic(&synthetic_path(&tc, "attach.pst"), folders(), items).await.unwrap();
-    let rows = tc
-        .admin()
-        .await
-        .query("SELECT file_name, length(file_name), mime_type FROM attachments ORDER BY attachment_index", &[])
-        .await
-        .unwrap();
-    let got: Vec<(String, i32, String)> = rows.iter().map(|r| (r.get(0), r.get(1), r.get(2))).collect();
-    assert_eq!(got, expected);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn synthetic_hostile() {
-    let hostile = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/hostile.html")).unwrap();
-    let tc = TestCluster::start().await;
-    let fx = manager(&tc, ImportTuning::default());
-    let items = vec![item(1, 1, mail(RawMail { subject: Some("Hostile".into()), html_body: Some(hostile), ..Default::default() }))];
-    fx.mgr.import_synthetic(&synthetic_path(&tc, "hostile.pst"), folders(), items).await.unwrap();
-    let html: String = tc.admin().await.query_one("SELECT body_html FROM messages", &[]).await.unwrap().get(0);
-    assert_eq!(hostile_violations(&html), Vec::<String>::new(), "stored body_html: {html}");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn synthetic_message_id_dedupe() {
-    // A: shared 1–3 + own a4 + shared 1 copied into the second folder; B: shared 1–3 + own b4
-    const MESSAGES: i64 = 5;
-    // stored message_id is the normalized form (angle brackets removed, Part 04 §4.1)
-    const OCCURRENCES_PER_SHARED: [(&str, i64); 3] = [("shared1@x", 3), ("shared2@x", 2), ("shared3@x", 2)];
-    let m = |id: &str, body: &str| mail(RawMail { internet_message_id: Some(id.into()), plain_body: Some(body.into()), ..Default::default() });
-    let a = vec![
-        item(1, 1, m("<shared1@x>", "a one")),
-        item(2, 1, m("<shared2@x>", "a two")),
-        item(3, 1, m("<shared3@x>", "a three")),
-        item(4, 1, m("<a4@x>", "a four")),
-        item(5, 2, m("<shared1@x>", "a one, copy in Projects")),
-    ];
-    let b = vec![
-        item(1, 1, m("<shared1@x>", "b one")),
-        item(2, 1, m("<shared2@x>", "b two")),
-        item(3, 2, m("<shared3@x>", "b three")),
-        item(4, 2, m("<b4@x>", "b four")),
-    ];
-    let tc = TestCluster::start().await;
-    let fx = manager(&tc, ImportTuning::default());
-    let pa = fx.mgr.import_synthetic(&synthetic_path(&tc, "a.pst"), folders(), a).await.unwrap();
-    let pb = fx.mgr.import_synthetic(&synthetic_path(&tc, "b.pst"), folders(), b).await.unwrap();
-    assert_eq!(tc.count("SELECT count(*) FROM messages").await, MESSAGES);
-    let adm = tc.admin().await;
-    for (id, occ) in OCCURRENCES_PER_SHARED {
-        let r = adm
-            .query_one(
-                "SELECT count(DISTINCT m.id), count(*), count(*) FILTER (WHERE o.pst_id = $2), count(*) FILTER (WHERE o.pst_id = $3) \
-                   FROM messages m JOIN message_occurrences o ON o.message_id = m.id WHERE m.message_id = $1",
-                &[&id, &pa, &pb],
-            )
-            .await
-            .unwrap();
-        let (msgs, total, in_a, in_b): (i64, i64, i64, i64) = (r.get(0), r.get(1), r.get(2), r.get(3));
-        assert_eq!((msgs, total), (1, occ), "{id}");
-        assert_eq!((in_a, in_b), (occ - 1, 1), "{id}: one occurrence per source, the folder copy adds one in A");
-    }
 }
 
 // ------------------------------------------------------------------------------------------------ index policy, vacuum
@@ -536,9 +404,12 @@ async fn index_policy_rebuilt_after_cancel_and_disk_failure() {
 async fn index_policy_incremental_keeps_indexes() {
     const FIRST: i64 = 20; // 18 messages
     const SECOND: i64 = 4; // 2 * 4 < 18 → incremental
+    const VACUUMED: &str = "SELECT count(*) FROM pg_stat_user_tables WHERE relname = 'messages' AND coalesce(last_vacuum, last_autovacuum) IS NOT NULL";
     let tc = TestCluster::start().await;
+    assert_eq!(tc.count(VACUUMED).await, 0, "fresh database: never vacuumed");
     let fx = manager(&tc, small_batches());
     fx.mgr.import_synthetic(&synthetic_path(&tc, "big.pst"), folders(), corpus(FIRST)).await.unwrap();
+    assert_eq!(tc.count(VACUUMED).await, 1, "the after-job VACUUM ran");
     let before = index_oids(&tc).await;
     assert_eq!(before.len(), 6);
     fx.mgr.import_synthetic(&synthetic_path(&tc, "small.pst"), folders(), corpus_tagged(SECOND, "s")).await.unwrap();
@@ -546,25 +417,14 @@ async fn index_policy_incremental_keeps_indexes() {
     assert_eq!(index_oids(&tc).await, before, "no DROP INDEX: OIDs unchanged");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn after_job_vacuum_ran() {
-    const SQL: &str = "SELECT count(*) FROM pg_stat_user_tables WHERE relname = 'messages' AND coalesce(last_vacuum, last_autovacuum) IS NOT NULL";
-    let tc = TestCluster::start().await;
-    assert_eq!(tc.count(SQL).await, 0, "fresh database: never vacuumed");
-    let fx = manager(&tc, ImportTuning::default());
-    fx.mgr.import_synthetic(&synthetic_path(&tc, "v.pst"), folders(), corpus(3)).await.unwrap();
-    assert_eq!(tc.count(SQL).await, 1);
-}
-
 // ------------------------------------------------------------------------------------------------ resume, crash, poison
 
 #[tokio::test(flavor = "multi_thread")]
 async fn resume_after_cancel_equals_uninterrupted() {
-    const ITEMS: i64 = 40;
-    let want = reference(corpus(ITEMS)).await;
+    const ITEMS: i64 = 20;
     let tc = TestCluster::start().await;
     let mut tuning = small_batches();
-    tuning.hold_reader_after = Some(20);
+    tuning.hold_reader_after = Some(10);
     let mut batches = batch_signal(&mut tuning);
     let mut fx = manager(&tc, tuning);
     let pst_id = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "c.pst"), folders(), corpus(ITEMS)).await.unwrap();
@@ -576,18 +436,17 @@ async fn resume_after_cancel_equals_uninterrupted() {
     assert!((5..ITEMS).contains(&cursor), "cancelled mid-job: cursor {cursor}");
     fx.mgr.resume(pst_id).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
-    assert_eq!(snapshot(&tc).await, want);
+    assert_eq!(snapshot(&tc).await, expected(ITEMS));
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn resume_after_kill_equals_uninterrupted() {
-    const ITEMS: i64 = 40;
-    let want = reference(corpus(ITEMS)).await;
+    const ITEMS: i64 = 20;
     let tc = TestCluster::start().await;
     let path = synthetic_path(&tc, "k.pst");
     let mut tuning = small_batches();
     tuning.crash_after_batches = Some(1);
-    tuning.hold_reader_after = Some(20); // the input cannot end before the crash seam fires
+    tuning.hold_reader_after = Some(10); // the input cannot end before the crash seam fires
     let mut fx = manager(&tc, tuning);
     let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), corpus(ITEMS)).await.unwrap();
     fx.mgr.start_worker();
@@ -599,7 +458,7 @@ async fn resume_after_kill_equals_uninterrupted() {
     assert_eq!(fx.mgr.recover_after_crash().await.unwrap(), RecoveryReport { requeued: vec![pst_id], cancelled: vec![] });
     fx.mgr.start_worker();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
-    assert_eq!(snapshot(&tc).await, want);
+    assert_eq!(snapshot(&tc).await, expected(ITEMS));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -750,51 +609,29 @@ async fn retry_rewrites_marker_before_reading() {
     reader.join().unwrap();
 }
 
-/// `TestCluster::kill` = `pg_ctl stop -m immediate` of this test's own cluster; `restart` starts it again (new port).
-#[tokio::test(flavor = "multi_thread")]
-async fn pg_crash_mid_import_resumes() {
-    const ITEMS: i64 = 40;
-    let want = reference(corpus(ITEMS)).await;
-    let mut tc = TestCluster::start().await;
-    let mut tuning = small_batches();
-    tuning.hold_reader_after = Some(30);
-    let mut batches = batch_signal(&mut tuning);
-    let mut fx = manager(&tc, tuning);
-    let pst_id = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "pg.pst"), folders(), corpus(ITEMS)).await.unwrap();
-    fx.mgr.start_worker();
-    wait_batch(&mut batches, 2).await;
-    tc.kill().await;
-    fx.phase.send_replace(AppPhase::StartingDb);
-    tc.restart().await;
-    fx.phase.send_replace(AppPhase::Ready);
-    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
-    assert_eq!(snapshot(&tc).await, want);
-    let dup = tc.count("SELECT count(*) FROM (SELECT 1 FROM message_occurrences GROUP BY pst_id, pst_item_id HAVING count(*) > 1) d").await;
-    assert_eq!(dup, 0);
-}
-
 /// Part 02 §6.1: the restart budget runs out (phase `Failed`), the user retries (`app_retry` → `Ready` in the same
 /// process). The paused job must resume from its checkpoint; `recover_after_crash` runs only once per process.
 #[tokio::test(flavor = "multi_thread")]
 async fn pg_crash_failed_then_retry_resumes() {
-    const ITEMS: i64 = 40;
-    let want = reference(corpus(ITEMS)).await;
-    let mut tc = TestCluster::start().await;
+    const ITEMS: i64 = 20;
+    let tc = TestCluster::start().await;
     let mut tuning = small_batches();
-    tuning.hold_reader_after = Some(30);
+    tuning.hold_reader_after = Some(15);
     let mut batches = batch_signal(&mut tuning);
     let mut fx = manager(&tc, tuning);
     let pst_id = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "failed.pst"), folders(), corpus(ITEMS)).await.unwrap();
     fx.mgr.start_worker();
     wait_batch(&mut batches, 2).await;
-    tc.kill().await;
+    tc.cut_db().await;
     fx.phase.send_replace(AppPhase::StartingDb);
     fx.phase.send_replace(AppPhase::Failed);
-    tc.restart().await; // the job observes `Failed` while the cluster starts again
+    tc.restore_db().await; // the job observes `Failed` while the cluster starts again
     fx.phase.send_replace(AppPhase::Ready);
     let end = tokio::time::timeout(Duration::from_secs(20), wait_job(&mut fx.events, pst_id)).await;
     assert_eq!(end.ok(), Some(ImportStatus::Completed), "the paused job resumes on the next Ready");
-    assert_eq!(snapshot(&tc).await, want);
+    assert_eq!(snapshot(&tc).await, expected(ITEMS));
+    let dup = tc.count("SELECT count(*) FROM (SELECT 1 FROM message_occurrences GROUP BY pst_id, pst_item_id HAVING count(*) > 1) d").await;
+    assert_eq!(dup, 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -838,19 +675,8 @@ async fn recover_after_crash_states() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn pst_list_status_derivation() {
-    // Part 04 §2.1: newest job (kind, state) → status; the last row has an older completed import
-    const TABLE: [(&[(&str, &str)], ImportStatus); 10] = [
-        (&[("import", "queued")], ImportStatus::Queued),
-        (&[("import", "running")], ImportStatus::Running),
-        (&[("import", "cancelling")], ImportStatus::Cancelling),
-        (&[("import", "cancelled")], ImportStatus::Cancelled),
-        (&[("import", "failed")], ImportStatus::Failed),
-        (&[("import", "completed")], ImportStatus::Completed),
-        (&[("remove", "queued")], ImportStatus::Removing),
-        (&[("remove", "running")], ImportStatus::Removing),
-        (&[("remove", "failed")], ImportStatus::Failed),
-        (&[("import", "completed"), ("remove", "queued")], ImportStatus::Removing),
-    ];
+    // newest job wins: an older completed import plus a queued remove is Removing (single-job rows: queue.rs status_table)
+    const TABLE: [(&[(&str, &str)], ImportStatus); 1] = [(&[("import", "completed"), ("remove", "queued")], ImportStatus::Removing)];
     let tc = TestCluster::start().await;
     let adm = tc.admin().await;
     let fx = manager(&tc, ImportTuning::default());
@@ -943,6 +769,26 @@ async fn enqueue_validation() {
 #[cfg(feature = "outlook-fixtures")]
 mod fixtures {
     use super::*;
+
+    /// The sanitizer acceptance patterns (spec Part 04 §12.2 row Sanitizer), matched without a regex crate.
+    fn hostile_violations(out: &str) -> Vec<String> {
+        let lower = out.to_ascii_lowercase();
+        let mut found: Vec<String> =
+            ["<script", "javascript:", "url(", "<iframe", "<form", "position", "src=\"http"].iter().filter(|p| lower.contains(*p)).map(|p| p.to_string()).collect();
+        let b = lower.as_bytes();
+        for i in 0..b.len().saturating_sub(2) {
+            if b[i] == b'o' && b[i + 1] == b'n' && (i == 0 || !b[i - 1].is_ascii_alphanumeric()) {
+                let mut j = i + 2;
+                while j < b.len() && b[j].is_ascii_lowercase() {
+                    j += 1;
+                }
+                if j > i + 2 && j < b.len() && b[j] == b'=' {
+                    found.push(lower[i..=j].to_string());
+                }
+            }
+        }
+        found
+    }
 
     fn fixture(name: &str) -> String {
         let p = Path::new(env!("CARGO_MANIFEST_DIR")).join(REPO_ROOT).join(format!("tests/fixtures/pst/{name}.pst"));

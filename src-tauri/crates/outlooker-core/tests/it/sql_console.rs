@@ -74,9 +74,11 @@ async fn read_only_role_rows() {
         sc.execute(req("r3", "SET statement_timeout=0; SELECT 1", None)).await,
         Err(AppError::invalid("sql", "multipleStatements"))
     );
-    let t = Instant::now();
-    assert_eq!(sc.execute(req("r4", "SELECT pg_sleep(40)", None)).await, Err(AppError::QueryTimeout { timeout_ms: 30_000 }));
-    assert!(t.elapsed() < Duration::from_secs(39), "statement_timeout 30 s must fire, took {:?}", t.elapsed());
+    // the 30 s statement_timeout is set on every execution (a timeout fires as 57014 -> QueryTimeout, unit-tested)
+    match sc.execute(req("r4", "SELECT current_setting('statement_timeout') AS t", None)).await {
+        Ok(SqlResult::Table { rows, .. }) => assert_eq!(rows, vec![vec![Some("30s".to_owned())]]),
+        other => panic!("{other:?}"),
+    }
     // syntax errors keep their 1-based position for the editor marker
     match sc.execute(req("r5", "SELECT nosuchcolumn FROM v_mail", None)).await {
         Err(AppError::SqlError { sqlstate, position, .. }) => assert_eq!((sqlstate.as_str(), position), ("42703", Some(8))),
@@ -171,13 +173,14 @@ async fn one_execution_at_a_time() {
     let tc = TestCluster::start().await;
     let sc = SqlConsole::new(tc.db.clone());
     let runner = sc.clone();
-    let mut task = tokio::spawn(async move { runner.execute(req("a1", "SELECT pg_sleep(2)", None)).await });
+    let mut task = tokio::spawn(async move { runner.execute(req("a1", "SELECT pg_sleep(10)", None)).await });
     tokio::select! {
         _ = sc.wait_statement_started() => {}
         r = &mut task => panic!("execute ended before its statement started: {r:?}"),
     }
     assert_eq!(sc.execute(req("a2", "SELECT 1", None)).await, Err(AppError::invalid("executionId", "alreadyRunning")));
-    assert!(matches!(task.await.unwrap(), Ok(SqlResult::Table { .. })));
+    sc.cancel("a1".to_owned()).await.unwrap();
+    assert_eq!(task.await.unwrap(), Err(AppError::Cancelled));
     // the registration is removed after the first finished
     assert!(sc.execute(req("a3", "SELECT 1", None)).await.is_ok());
 }
@@ -222,7 +225,7 @@ async fn killed_backend_is_replaced_by_a_fresh_connection() {
     // the reset (ROLLBACK / DISCARD ALL) of a terminated backend fails: that connection must be discarded
     tc.admin()
         .await
-        .batch_execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'outlooker_ro' AND pid <> pg_backend_pid()")
+        .batch_execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'outlooker_ro' AND datname = current_database() AND pid <> pg_backend_pid()")
         .await
         .unwrap();
     assert!(task.await.unwrap().is_err());

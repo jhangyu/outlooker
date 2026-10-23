@@ -9,7 +9,7 @@ use outlooker_core::importer::webp::source_hash;
 use outlooker_core::search::mail::IMAGE_URL_PREFIX;
 use outlooker_core::search::{compile, search_page, SearchService};
 use outlooker_core::test_support::import_fixtures::{add_recipient, item, mail, seed_mails};
-use outlooker_core::test_support::TestCluster;
+use outlooker_core::test_support::{BoxFuture, TestCluster};
 
 const T0: u64 = 1_600_000_000; // 2020-09-13T12:26:40Z
 
@@ -48,15 +48,17 @@ async fn reference(tc: &TestCluster, subject_like: &str, limit: i64) -> Vec<i64>
 }
 
 /// 100 mails, one hour apart; subject "dense" on all, "sparse" on every 10th (ids 10, 20, …), 5 without sent time.
-async fn seed_window_set(tc: &TestCluster) {
-    let mails = (1..=100)
-        .map(|i| {
-            let subject = if i % 10 == 0 { format!("dense sparse {i}") } else { format!("dense {i}") };
-            let sent = if i > 95 { None } else { Some(T0 + i as u64 * 3600) };
-            m(i, &subject, "body", "s@x.example", sent)
-        })
-        .collect();
-    seed_mails(&tc.db, "/p/window.pst", items(mails)).await;
+fn seed_window_set(tc: &TestCluster) -> BoxFuture<'_, ()> {
+    Box::pin(async move {
+        let mails = (1..=100)
+            .map(|i| {
+                let subject = if i % 10 == 0 { format!("dense sparse {i}") } else { format!("dense {i}") };
+                let sent = if i > 95 { None } else { Some(T0 + i as u64 * 3600) };
+                m(i, &subject, "body", "s@x.example", sent)
+            })
+            .collect();
+        seed_mails(&tc.db, "/p/window.pst", items(mails)).await;
+    })
 }
 
 async fn page_ids(client: &mut tokio_postgres::Client, req: &SearchRequest, w: i64) -> (Vec<i64>, Option<String>, bool) {
@@ -173,8 +175,16 @@ async fn literal_percent_underscore_backslash() {
 #[tokio::test]
 async fn count_capped() {
     let tc = TestCluster::start().await;
-    let mails = (1..=10_001).map(|i| m(i, &format!("capword {i}"), "x", "s@x.example", Some(T0 + i as u64))).collect();
-    seed_mails(&tc.db, "/p/a.pst", items(mails)).await;
+    // the count reads only `messages`, so seed it directly
+    tc.admin()
+        .await
+        .batch_execute(
+            "INSERT INTO messages (dedupe_key, dedupe_kind, body_source, subject, sent_at) \
+             SELECT decode(lpad(to_hex(g),64,'0'),'hex'), 'content_hash', 'none', 'capword ' || g, to_timestamp(1600000000+g) \
+             FROM generate_series(1,10001) g",
+        )
+        .await
+        .unwrap();
     let svc = SearchService::new(tc.db.clone());
     let q = || SearchQuery::Dsl { root: ConditionGroup { op: GroupOp::And, children: vec![N::Subject { value: "capword".into() }] } };
     let c = svc.count(q()).await.unwrap();
@@ -230,8 +240,7 @@ async fn mail_get_image_urls_platform_form() {
 
 #[tokio::test]
 async fn two_phase_dense_phase_a_only() {
-    let tc = TestCluster::start().await;
-    seed_window_set(&tc).await;
+    let tc = TestCluster::from_seed("window", seed_window_set).await;
     let mut client = tc.app().await;
     let (ids, _, phase_b) = page_ids(&mut client, &dsl(vec![N::Subject { value: "dense".into() }], 10), 20).await;
     assert!(!phase_b);
@@ -240,8 +249,7 @@ async fn two_phase_dense_phase_a_only() {
 
 #[tokio::test]
 async fn two_phase_sparse_runs_phase_b() {
-    let tc = TestCluster::start().await;
-    seed_window_set(&tc).await;
+    let tc = TestCluster::from_seed("window", seed_window_set).await;
     let mut client = tc.app().await;
     let (ids, _, phase_b) = page_ids(&mut client, &dsl(vec![N::Subject { value: "sparse".into() }], 5), 20).await;
     assert!(phase_b);
@@ -250,8 +258,7 @@ async fn two_phase_sparse_runs_phase_b() {
 
 #[tokio::test]
 async fn two_phase_pages_no_gap_no_overlap() {
-    let tc = TestCluster::start().await;
-    seed_window_set(&tc).await;
+    let tc = TestCluster::from_seed("window", seed_window_set).await;
     let mut client = tc.app().await;
     let mut req = dsl(vec![N::Subject { value: "sparse".into() }], 3);
     let mut all = Vec::new();
@@ -267,8 +274,7 @@ async fn two_phase_pages_no_gap_no_overlap() {
 
 #[tokio::test]
 async fn null_sent_at_last_and_paged() {
-    let tc = TestCluster::start().await;
-    seed_window_set(&tc).await;
+    let tc = TestCluster::from_seed("window", seed_window_set).await;
     let mut client = tc.app().await;
     let expected = reference(&tc, "%dense%", 100).await;
     let mut req = dsl(vec![N::Subject { value: "dense".into() }], 7);
@@ -289,8 +295,7 @@ async fn null_sent_at_last_and_paged() {
 
 #[tokio::test]
 async fn reset_after_phase_b() {
-    let tc = TestCluster::start().await;
-    seed_window_set(&tc).await;
+    let tc = TestCluster::from_seed("window", seed_window_set).await;
     let mut client = tc.app().await;
     let (_, _, phase_b) = page_ids(&mut client, &dsl(vec![N::Subject { value: "sparse".into() }], 5), 20).await;
     assert!(phase_b);

@@ -28,7 +28,7 @@ fn tree_stats(dir: &Path) -> std::io::Result<(u64, u64)> {
     Ok((files, bytes))
 }
 
-fn copy_tree(src: &Path, dst: &Path, copied: &mut u64, on_progress: &mut dyn FnMut(u64)) -> std::io::Result<()> {
+pub(crate) fn copy_tree(src: &Path, dst: &Path, copied: &mut u64, on_progress: &mut dyn FnMut(u64)) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
     // PostgreSQL refuses a pgdata whose mode is not 0700, so directories keep the source mode.
     std::fs::set_permissions(dst, std::fs::metadata(src)?.permissions())?;
