@@ -198,6 +198,29 @@ async fn pause_wait(inner: &Inner) -> bool {
     }
 }
 
+/// What `run_import` does with the job once its attempt loop ended.
+#[derive(Debug, PartialEq, Eq)]
+enum EndAction {
+    /// Crash seam: no state change, the worker stops.
+    Crash,
+    /// Shutdown without a failure: state `queued`, resumed at the next start.
+    Requeue,
+    /// Finalize (indexes, VACUUM, marker), then this final state and status.
+    Finalize(JobState, ImportStatus),
+}
+
+/// End-of-attempt decision (Part 03 §7.1). A failure beats any cancel reason; `Paused` never gets here (the loop
+/// re-runs or returns) and decides like `Finished`.
+fn end_of_attempt(end: &AttemptEnd, reason: Option<CancelReason>) -> EndAction {
+    match (end, reason) {
+        (AttemptEnd::Crashed, _) => EndAction::Crash,
+        (AttemptEnd::Failed(_), _) => EndAction::Finalize(JobState::Failed, ImportStatus::Failed),
+        (_, Some(CancelReason::Shutdown)) => EndAction::Requeue,
+        (_, Some(CancelReason::User)) => EndAction::Finalize(JobState::Cancelled, ImportStatus::Cancelled),
+        (_, None | Some(CancelReason::Pause)) => EndAction::Finalize(JobState::Completed, ImportStatus::Completed),
+    }
+}
+
 /// Returns true when the crash seam dropped the job.
 async fn run_import(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<JobCancel>) -> bool {
     let end = loop {
@@ -222,35 +245,32 @@ async fn run_import(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<J
             other => break other,
         }
     };
-    let failure = match end {
-        AttemptEnd::Crashed => {
+    let (state, status) = match end_of_attempt(&end, cancel.reason()) {
+        EndAction::Crash => {
             let _ = inner.events.send((pst_id, ImportStatus::Running));
             return true;
         }
+        EndAction::Requeue => {
+            // Part 02 §2.5 step 1: back to queued; index self-heal at the next start covers dropped indexes
+            if let Ok(m) = inner.inflight() {
+                m.clear();
+            }
+            if set_final(inner, job_id, pst_id, JobState::Queued, None).await.is_ok() {
+                emit_status(inner, pst_id).await;
+                let _ = inner.events.send((pst_id, ImportStatus::Queued));
+            }
+            return false;
+        }
+        EndAction::Finalize(state, status) => (state, status),
+    };
+    let failure = match end {
         AttemptEnd::Failed(f) => Some(f),
         _ => None,
     };
-    let reason = cancel.reason();
-    if reason == Some(CancelReason::Shutdown) && failure.is_none() {
-        // Part 02 §2.5 step 1: back to queued; index self-heal at the next start covers dropped indexes
-        if let Ok(m) = inner.inflight() {
-            m.clear();
-        }
-        if set_final(inner, job_id, pst_id, JobState::Queued, None).await.is_ok() {
-            emit_status(inner, pst_id).await;
-            let _ = inner.events.send((pst_id, ImportStatus::Queued));
-        }
-        return false;
-    }
     if let Err(e) = finalize(inner, pst_id).await {
         log::warn!("import job {job_id}: finalize: {e}"); // DB gone: row stays running, recovered at next start
         return false;
     }
-    let (state, status) = match (&failure, reason) {
-        (Some(_), _) => (JobState::Failed, ImportStatus::Failed),
-        (None, Some(CancelReason::User)) => (JobState::Cancelled, ImportStatus::Cancelled),
-        _ => (JobState::Completed, ImportStatus::Completed),
-    };
     if let Err(e) = set_final(inner, job_id, pst_id, state, failure.as_ref()).await {
         log::warn!("import job {job_id}: final state: {e}");
         return false;
@@ -275,5 +295,41 @@ async fn finalize(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
     c.batch_execute(AFTER_JOB_VACUUM).await.map_err(db_err)?;
     inner.inflight()?.clear();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn end_of_attempt_table() {
+        use CancelReason::{Pause, Shutdown, User};
+        use EndAction::{Crash, Finalize, Requeue};
+        let failed = || AttemptEnd::Failed(JobFailure { stage: ImportErrorStage::Store, message: "x".into() });
+        let completed = Finalize(JobState::Completed, ImportStatus::Completed);
+        let cancelled = Finalize(JobState::Cancelled, ImportStatus::Cancelled);
+        let failure = Finalize(JobState::Failed, ImportStatus::Failed);
+        let rows = [
+            (AttemptEnd::Finished, None, &completed),
+            (AttemptEnd::Finished, Some(Pause), &completed),
+            (AttemptEnd::Finished, Some(User), &cancelled),
+            (AttemptEnd::Finished, Some(Shutdown), &Requeue),
+            (AttemptEnd::Paused, None, &completed),
+            (AttemptEnd::Paused, Some(Pause), &completed),
+            (AttemptEnd::Paused, Some(User), &cancelled),
+            (AttemptEnd::Paused, Some(Shutdown), &Requeue),
+            (AttemptEnd::Crashed, None, &Crash),
+            (AttemptEnd::Crashed, Some(Pause), &Crash),
+            (AttemptEnd::Crashed, Some(User), &Crash),
+            (AttemptEnd::Crashed, Some(Shutdown), &Crash),
+            (failed(), None, &failure),
+            (failed(), Some(Pause), &failure),
+            (failed(), Some(User), &failure),
+            (failed(), Some(Shutdown), &failure),
+        ];
+        for (i, (end, reason, want)) in rows.iter().enumerate() {
+            assert_eq!(&end_of_attempt(end, *reason), *want, "row {i}: {reason:?}");
+        }
+    }
 }
 
