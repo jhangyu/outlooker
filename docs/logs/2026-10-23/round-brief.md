@@ -5,9 +5,9 @@ Inventories: `docs/logs/2026-10-23/scan-core.md` (C*), `scan-app.md` (A*), `scan
 
 ## User decisions (final)
 - U1: FIX. Switching screens must keep each screen's state (SQL text/result/selection, search inputs/selection/scroll). Keep all screens mounted and hide inactive ones, or lift the state above `AppFrame` — the architect picks the smaller correct change.
-- D11: USE `outlooker-logo.svg` as the in-app logo: move it under `src/assets/`, replace the text "O" boxes in the title bar (`AppFrame.tsx`) and onboarding screen. Do not change the app icon.
+- D11: REVERTED by the user (logo is being redesigned). Restore the original text "O" boxes in the title bar (`AppFrame.tsx`) and onboarding screen (onboarding box back to its original brand-blue background), delete `src/assets/outlooker-logo.svg`, keep the U1 screen-state code from the same commit. Leave the untracked root `outlooker-logo.svg` alone.
 - D8: done (prototype dirs deleted).
-- A5 (narrow Tauri capabilities): user APPROVED one full `mise exec -- npm run e2e` run as runtime proof at round 2 close (long run, orchestrator schedules it).
+- A5 (narrow Tauri capabilities): user APPROVED one full `mise exec -- npm run e2e` run as runtime proof at round 2 close (long run, orchestrator schedules it). DONE: full e2e PASS at 1b13f56 (flow 5, seeded 1, scroll 1).
 - A7: keep the `outlook-fixtures` feature and `make-pst.ps1` (pending Windows phase).
 - No parking lot. Every finding is fixed in its round or judged "not worth fixing" with a one-line reason in the handoff.
 - Doc fixes are applied directly (no separate approval).
