@@ -1,5 +1,6 @@
 //! Host facts: RAM and free disk space.
 use std::path::Path;
+use std::sync::Mutex;
 
 use sysinfo::{Disks, MemoryRefreshKind, RefreshKind, System};
 
@@ -19,6 +20,9 @@ pub fn free_space(path: &Path) -> Result<u64, AppError> {
         }
     }
     let probe = probe.canonicalize().map_err(|e| AppError::file_access(path, &e.to_string()))?;
+    // ponytail: sysinfo-0.39.6 hits a macOS IOKit debug_assert under concurrent Disks refreshes, so one at a time
+    static DISKS: Mutex<()> = Mutex::new(());
+    let _guard = DISKS.lock().unwrap_or_else(|p| p.into_inner());
     let disks = Disks::new_with_refreshed_list();
     disks
         .iter()
