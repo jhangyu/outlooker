@@ -8,7 +8,9 @@ use outlooker_core::app::{self, AppDirs, BuildOptions, Services, ShutdownLimits,
 use outlooker_core::db::indexes::missing_or_invalid;
 use outlooker_core::db::Db;
 use outlooker_core::dto::app::Language;
+use outlooker_core::dto::error::AppError;
 use outlooker_core::dto::import::{EnqueueResult, ImportPhase, ImportStatus};
+use outlooker_core::dto::sync::{SyncSchedule, SyncStatus};
 use outlooker_core::importer::{ImportTuning, RecoveryReport};
 use outlooker_core::lifecycle::SupervisorConfig;
 use outlooker_core::paths::dev_pg_dir;
@@ -19,7 +21,8 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 
 const LONG: Duration = Duration::from_secs(120);
-const STEPS: [StartStep; 3] = [StartStep::Recovered, StartStep::IndexesEnsured, StartStep::WorkerStarted];
+const STEPS: [StartStep; 4] =
+    [StartStep::Recovered, StartStep::IndexesEnsured, StartStep::WorkerStarted, StartStep::SchedulerStarted];
 
 /// Records every event (RecordingSink), forwards it to a channel for event waits, and for one watched PST records,
 /// at the moment each `import:status-changed` (status other than `queued`) is emitted, whether all six search
@@ -198,4 +201,53 @@ async fn start_after_kill_recovers_jobs_then_heals_then_starts_worker() {
     assert!(valid, "the dropped index was rebuilt");
     drop(admin);
     app::shutdown(&s2, ShutdownLimits::default()).await;
+}
+
+async fn next_sync_status(events: &mut mpsc::UnboundedReceiver<CoreEvent>) -> SyncStatus {
+    timeout(LONG, async {
+        loop {
+            if let CoreEvent::SyncStatusChanged(st) = events.recv().await.expect("sink closed") {
+                break st;
+            }
+        }
+    })
+    .await
+    .expect("no sync:status-changed")
+}
+
+async fn last_run_epoch(admin: &tokio_postgres::Client) -> Option<f64> {
+    admin.query_one("SELECT extract(epoch FROM sync_last_run_at)::float8 FROM settings", &[]).await.unwrap().get(0)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn scheduler_catches_up_once_and_stores_schedule() {
+    let tc = TestCluster::start().await;
+    let admin = tc.admin().await;
+    // Closed for three days: the default 60-minute interval missed many slots.
+    admin.batch_execute("UPDATE settings SET sync_last_run_at = now() - interval '3 days'").await.unwrap();
+    let (sink, mut events) = TestSink::new();
+    let s = app_on(&tc, sink, ImportTuning::default());
+    let report = timeout(LONG, app::start_services(&s)).await.expect("start timeout").unwrap();
+    assert_eq!(report.steps, STEPS);
+
+    let st = next_sync_status(&mut events).await;
+    assert_eq!(st.schedule, SyncSchedule::Interval { minutes: 60 });
+    let ran = last_run_epoch(&admin).await.expect("catch-up run recorded");
+    let now: f64 = admin.query_one("SELECT extract(epoch FROM now())::float8", &[]).await.unwrap().get(0);
+    assert!((now - ran).abs() < 60.0, "catch-up stored now, not a missed slot: {ran} vs {now}");
+    assert!(st.last_run_at.is_some() && st.next_run_at > st.last_run_at, "{st:?}");
+
+    // A schedule change wakes the task; the next slot is in the future, so no second run.
+    let daily = SyncSchedule::Daily { time: "07:05".into(), weekdays: vec![1, 3] };
+    let set = s.scheduler.set_schedule(daily.clone()).await.unwrap();
+    assert_eq!(set.schedule, daily, "minute and weekday mask round-trip");
+    assert_eq!(next_sync_status(&mut events).await.schedule, daily);
+    assert_eq!(last_run_epoch(&admin).await, Some(ran), "catch-up ran once");
+
+    let off = s.scheduler.set_schedule(SyncSchedule::Off).await.unwrap();
+    assert_eq!((off.schedule, off.next_run_at), (SyncSchedule::Off, None));
+    let bad = s.scheduler.set_schedule(SyncSchedule::Interval { minutes: 1 }).await.unwrap_err();
+    assert_eq!(bad, AppError::invalid("schedule", "outOfRange"));
+    assert_eq!(s.scheduler.status().await.unwrap().schedule, SyncSchedule::Off, "rejected schedule not stored");
+    app::shutdown(&s, ShutdownLimits::default()).await;
 }

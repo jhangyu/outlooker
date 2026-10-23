@@ -13,9 +13,10 @@ pub mod names {
     pub const LIBRARY_CHANGED: &str = "library:changed";
     pub const DATA_DIR_MOVE_PROGRESS: &str = "data-dir:move-progress";
     pub const MAINTENANCE_STATUS_CHANGED: &str = "maintenance:status-changed";
-    pub const ALL: [&str; 6] = [
+    pub const SYNC_STATUS_CHANGED: &str = "sync:status-changed";
+    pub const ALL: [&str; 7] = [
         APP_STATUS_CHANGED, IMPORT_PROGRESS, IMPORT_STATUS_CHANGED,
-        LIBRARY_CHANGED, DATA_DIR_MOVE_PROGRESS, MAINTENANCE_STATUS_CHANGED,
+        LIBRARY_CHANGED, DATA_DIR_MOVE_PROGRESS, MAINTENANCE_STATUS_CHANGED, SYNC_STATUS_CHANGED,
     ];
 }
 
