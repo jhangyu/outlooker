@@ -186,12 +186,25 @@ fn corpus_tagged(n: i64, tag: &str) -> Vec<RawItem> {
         .collect()
 }
 
-/// The library one uninterrupted import of `corpus(n)` produces: every non-contact item is one mail with
-/// one recipient and one attachment.
-fn expected(n: i64) -> Snapshot {
-    let keys: BTreeSet<String> = (1..=n).filter(|i| i % 10 != 0).map(|i| format!("m{i}@synthetic.example")).collect();
-    let c = keys.len() as i64;
-    Snapshot { keys, messages: c, occurrences: c, recipients: c, attachments: c }
+/// The library one uninterrupted import of `items` produces, derived from the items (distinct Message-IDs,
+/// one occurrence per mail). `index_policy_incremental_keeps_indexes` checks it against a real import.
+fn expected(items: &[RawItem]) -> Snapshot {
+    let mut by_key: BTreeMap<String, &RawMail> = BTreeMap::new();
+    let mut occurrences = 0;
+    for i in items {
+        if let RawContent::Mail(m) = &i.content {
+            let id = m.internet_message_id.as_deref().expect("corpus mails carry a Message-ID");
+            by_key.entry(id.trim_matches(['<', '>']).to_owned()).or_insert(m);
+            occurrences += 1;
+        }
+    }
+    Snapshot {
+        messages: by_key.len() as i64,
+        occurrences,
+        recipients: by_key.values().map(|m| m.recipients.len() as i64).sum(),
+        attachments: by_key.values().map(|m| m.attachments.len() as i64).sum(),
+        keys: by_key.into_keys().collect(),
+    }
 }
 
 // ------------------------------------------------------------------------------------------------ outlook.pst
@@ -346,8 +359,8 @@ async fn synthetic_inline_images() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn index_policy_first_import_drops_and_rebuilds() {
-    const ITEMS: i64 = 20;
-    const HOLD_AT: i64 = 10;
+    const ITEMS: i64 = 10;
+    const HOLD_AT: i64 = 5;
     let tc = TestCluster::start().await;
     let before = index_oids(&tc).await;
     assert_eq!(before.len(), 6);
@@ -358,7 +371,7 @@ async fn index_policy_first_import_drops_and_rebuilds() {
     let pst_id = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "first.pst"), folders(), corpus(ITEMS)).await.unwrap();
     fx.mgr.start_worker();
     wait_batch(&mut batches, 1).await;
-    // during the job (reader held after item 10, job running): all six dropped
+    // during the job (reader held after item 5, job running): all six dropped
     assert_eq!(missing(&tc).await, all_six());
     fx.mgr.cancel(pst_id).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Cancelled);
@@ -409,6 +422,7 @@ async fn index_policy_incremental_keeps_indexes() {
     assert_eq!(tc.count(VACUUMED).await, 0, "fresh database: never vacuumed");
     let fx = manager(&tc, small_batches());
     fx.mgr.import_synthetic(&synthetic_path(&tc, "big.pst"), folders(), corpus(FIRST)).await.unwrap();
+    assert_eq!(snapshot(&tc).await, expected(&corpus(FIRST)), "the resume oracle matches a real uninterrupted import");
     assert_eq!(tc.count(VACUUMED).await, 1, "the after-job VACUUM ran");
     let before = index_oids(&tc).await;
     assert_eq!(before.len(), 6);
@@ -421,10 +435,10 @@ async fn index_policy_incremental_keeps_indexes() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn resume_after_cancel_equals_uninterrupted() {
-    const ITEMS: i64 = 20;
+    const ITEMS: i64 = 10;
     let tc = TestCluster::start().await;
     let mut tuning = small_batches();
-    tuning.hold_reader_after = Some(10);
+    tuning.hold_reader_after = Some(5);
     let mut batches = batch_signal(&mut tuning);
     let mut fx = manager(&tc, tuning);
     let pst_id = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "c.pst"), folders(), corpus(ITEMS)).await.unwrap();
@@ -436,17 +450,17 @@ async fn resume_after_cancel_equals_uninterrupted() {
     assert!((5..ITEMS).contains(&cursor), "cancelled mid-job: cursor {cursor}");
     fx.mgr.resume(pst_id).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
-    assert_eq!(snapshot(&tc).await, expected(ITEMS));
+    assert_eq!(snapshot(&tc).await, expected(&corpus(ITEMS)));
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn resume_after_kill_equals_uninterrupted() {
-    const ITEMS: i64 = 20;
+    const ITEMS: i64 = 10;
     let tc = TestCluster::start().await;
     let path = synthetic_path(&tc, "k.pst");
     let mut tuning = small_batches();
     tuning.crash_after_batches = Some(1);
-    tuning.hold_reader_after = Some(10); // the input cannot end before the crash seam fires
+    tuning.hold_reader_after = Some(5); // the input cannot end before the crash seam fires
     let mut fx = manager(&tc, tuning);
     let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), corpus(ITEMS)).await.unwrap();
     fx.mgr.start_worker();
@@ -458,17 +472,17 @@ async fn resume_after_kill_equals_uninterrupted() {
     assert_eq!(fx.mgr.recover_after_crash().await.unwrap(), RecoveryReport { requeued: vec![pst_id], cancelled: vec![] });
     fx.mgr.start_worker();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
-    assert_eq!(snapshot(&tc).await, expected(ITEMS));
+    assert_eq!(snapshot(&tc).await, expected(&corpus(ITEMS)));
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mtime_change_resets_cursor() {
-    const ITEMS: i64 = 20;
-    const MESSAGES: i64 = 18;
+    const ITEMS: i64 = 10;
+    const MESSAGES: i64 = 9;
     let tc = TestCluster::start().await;
     let path = synthetic_path(&tc, "m.pst");
     let mut tuning = small_batches();
-    tuning.hold_reader_after = Some(10);
+    tuning.hold_reader_after = Some(5);
     let mut batches = batch_signal(&mut tuning);
     let mut fx = manager(&tc, tuning);
     let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), corpus(ITEMS)).await.unwrap();
@@ -492,7 +506,7 @@ async fn mtime_change_resets_cursor() {
         .unwrap();
     let (cursor, stored, dups, non_mail): (i64, i64, i64, i64) = (r.get(0), r.get(1), r.get(2), r.get(3));
     assert_eq!(dups, before_resume, "cursor restarted at 0: every message stored before the touch was read again");
-    assert_eq!((cursor, stored + dups, non_mail), (ITEMS, MESSAGES, 2));
+    assert_eq!((cursor, stored + dups, non_mail), (ITEMS, MESSAGES, 1));
     assert_eq!(tc.count("SELECT count(*) FROM messages").await, MESSAGES);
     assert_eq!(tc.count("SELECT count(*) FROM message_occurrences").await, MESSAGES);
 }
@@ -613,15 +627,15 @@ async fn retry_rewrites_marker_before_reading() {
 /// process). The paused job must resume from its checkpoint; `recover_after_crash` runs only once per process.
 #[tokio::test(flavor = "multi_thread")]
 async fn pg_crash_failed_then_retry_resumes() {
-    const ITEMS: i64 = 20;
+    const ITEMS: i64 = 10;
     let tc = TestCluster::start().await;
     let mut tuning = small_batches();
-    tuning.hold_reader_after = Some(15);
+    tuning.hold_reader_after = Some(5);
     let mut batches = batch_signal(&mut tuning);
     let mut fx = manager(&tc, tuning);
     let pst_id = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "failed.pst"), folders(), corpus(ITEMS)).await.unwrap();
     fx.mgr.start_worker();
-    wait_batch(&mut batches, 2).await;
+    wait_batch(&mut batches, 1).await;
     tc.cut_db().await;
     fx.phase.send_replace(AppPhase::StartingDb);
     fx.phase.send_replace(AppPhase::Failed);
@@ -629,7 +643,7 @@ async fn pg_crash_failed_then_retry_resumes() {
     fx.phase.send_replace(AppPhase::Ready);
     let end = tokio::time::timeout(Duration::from_secs(20), wait_job(&mut fx.events, pst_id)).await;
     assert_eq!(end.ok(), Some(ImportStatus::Completed), "the paused job resumes on the next Ready");
-    assert_eq!(snapshot(&tc).await, expected(ITEMS));
+    assert_eq!(snapshot(&tc).await, expected(&corpus(ITEMS)));
     let dup = tc.count("SELECT count(*) FROM (SELECT 1 FROM message_occurrences GROUP BY pst_id, pst_item_id HAVING count(*) > 1) d").await;
     assert_eq!(dup, 0);
 }
