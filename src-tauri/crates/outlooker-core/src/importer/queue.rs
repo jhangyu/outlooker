@@ -1,40 +1,38 @@
-//! Durable job queue (spec Part 03 §7.1 state machine) and, in section "runner", the import / removal job runner.
+//! Durable job queue (spec Part 03 §7.1 state machine): job state, SQL commands, list, errors, recovery, worker
+//! start / shutdown. The job runner is `runner.rs`, one import attempt is `pipeline.rs`.
 use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use tokio::sync::{Notify, broadcast, oneshot, watch};
+use tokio::sync::{Notify, broadcast, watch};
 use tokio_postgres::error::SqlState;
 
-use crate::db::indexes::{drop_search_indexes, ensure_search_indexes};
-use crate::db::{db_err, library_counts, Db, RFC3339_UTC_FMT};
-use crate::dto::app::{AppPhase, LibraryCounts};
+use crate::db::indexes::ensure_search_indexes;
+use crate::db::{db_err, Db, RFC3339_UTC_FMT};
+use crate::dto::app::AppPhase;
 use crate::dto::error::AppError;
-use crate::dto::events::{ImportStatusChanged, LibraryChanged};
+use crate::dto::events::ImportStatusChanged;
 use crate::dto::import::{
     db_text, EnqueueResult, ImportErrorEntry, ImportErrorPage, ImportErrorSeverity, ImportErrorStage, ImportErrorsRequest, ImportPhase,
     ImportProgress, ImportStatus, PstSource,
 };
 use crate::gate::{Activity, Gate};
 use crate::importer::inflight::Inflight;
-use crate::importer::normalize::{NormalizeCtx, normalize};
 use crate::importer::progress::{BYTE_BUDGET, ByteBudget, Throughput};
-use crate::importer::pst_reader::{self, ReaderMsg, ReaderParams};
-use crate::importer::types::{FolderIn, ItemError, RawItem};
-use crate::importer::writer::{AFTER_JOB_VACUUM, Checkpoint, Writer, WriterConfig, load_known_hashes, truncate_to_micros, upsert_folders};
-use crate::importer::{ImportTuning, RecoveryReport, remove};
+use crate::importer::runner::worker;
+use crate::importer::types::{FolderIn, RawItem};
+use crate::importer::writer::truncate_to_micros;
+use crate::importer::{ImportTuning, RecoveryReport};
 use crate::paths::Paths;
 use crate::sink::{CoreEvent, EventSink};
 
 pub const MAX_ENQUEUE_PATHS: usize = 100;
 pub const ERRORS_DEFAULT_LIMIT: u32 = 100;
 pub const ERRORS_MAX_LIMIT: u32 = 500;
-/// How long `pause_for_db` waits for the Supervisor to leave `Ready` after a DB error (Part 02 §6.1 PG crash row).
-pub const PAUSE_DETECT: Duration = Duration::from_secs(30);
 const PST_MAGIC: &[u8; 4] = b"!BDN";
 const DISPLAY_NAME_MAX: usize = 512;
 
@@ -49,17 +47,17 @@ pub(crate) enum CancelReason {
 
 /// Cancel state of the running job. `flag` is what the reader, the byte budget and the pipeline see.
 pub(crate) struct JobCancel {
-    flag: Arc<AtomicBool>,
+    pub(super) flag: Arc<AtomicBool>,
     reason: Mutex<Option<CancelReason>>,
-    budget: Arc<ByteBudget>,
+    pub(super) budget: Arc<ByteBudget>,
 }
 
 impl JobCancel {
-    fn new() -> JobCancel {
+    pub(super) fn new() -> JobCancel {
         JobCancel { flag: Arc::new(AtomicBool::new(false)), reason: Mutex::new(None), budget: Arc::new(ByteBudget::new(BYTE_BUDGET)) }
     }
     /// User and Shutdown are final; Pause only applies when nothing stronger is set.
-    fn cancel(&self, why: CancelReason) {
+    pub(super) fn cancel(&self, why: CancelReason) {
         let mut r = self.reason.lock().unwrap_or_else(|p| p.into_inner());
         if matches!(*r, None | Some(CancelReason::Pause)) {
             *r = Some(why);
@@ -68,15 +66,15 @@ impl JobCancel {
         self.stop();
     }
     /// Stops reader and pipeline without a reason (writer stopped, crash seam).
-    fn stop(&self) {
+    pub(super) fn stop(&self) {
         self.flag.store(true, Ordering::SeqCst);
         self.budget.wake_all();
     }
-    fn reason(&self) -> Option<CancelReason> {
+    pub(super) fn reason(&self) -> Option<CancelReason> {
         *self.reason.lock().unwrap_or_else(|p| p.into_inner())
     }
     /// Before a re-run after a DB pause.
-    fn clear_pause(&self) {
+    pub(super) fn clear_pause(&self) {
         let mut r = self.reason.lock().unwrap_or_else(|p| p.into_inner());
         if *r == Some(CancelReason::Pause) {
             *r = None;
@@ -86,25 +84,25 @@ impl JobCancel {
 }
 
 #[derive(Clone)]
-struct RunningJob {
-    job_id: i64,
-    pst_id: i64,
-    cancel: Arc<JobCancel>,
+pub(super) struct RunningJob {
+    pub(super) job_id: i64,
+    pub(super) pst_id: i64,
+    pub(super) cancel: Arc<JobCancel>,
 }
 
 pub(crate) struct Inner {
-    db: Db,
-    gate: Gate,
-    paths: Paths,
-    sink: Arc<dyn EventSink>,
-    phase: watch::Receiver<AppPhase>,
-    tuning: ImportTuning,
-    kick: Notify,
+    pub(super) db: Db,
+    pub(super) gate: Gate,
+    pub(super) paths: Paths,
+    pub(super) sink: Arc<dyn EventSink>,
+    pub(super) phase: watch::Receiver<AppPhase>,
+    pub(super) tuning: ImportTuning,
+    pub(super) kick: Notify,
     worker: Mutex<Option<tokio::task::JoinHandle<()>>>,
     shutdown: watch::Sender<bool>,
     running: Mutex<Option<RunningJob>>,
-    throughput: Mutex<Throughput>,
-    hold_used: AtomicBool,
+    pub(super) throughput: Mutex<Throughput>,
+    pub(super) hold_used: AtomicBool,
     pub(crate) events: broadcast::Sender<(i64, ImportStatus)>,
 }
 
@@ -126,21 +124,21 @@ impl Inner {
             events: broadcast::Sender::new(64),
         }
     }
-    fn running(&self) -> Option<RunningJob> {
+    pub(super) fn running(&self) -> Option<RunningJob> {
         self.running.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
-    fn set_running(&self, r: Option<RunningJob>) {
+    pub(super) fn set_running(&self, r: Option<RunningJob>) {
         *self.running.lock().unwrap_or_else(|p| p.into_inner()) = r;
     }
-    fn shutting_down(&self) -> bool {
+    pub(super) fn shutting_down(&self) -> bool {
         *self.shutdown.borrow()
     }
-    async fn shutdown_signal(&self) {
+    pub(super) async fn shutdown_signal(&self) {
         let mut rx = self.shutdown.subscribe();
         let _ = rx.wait_for(|s| *s).await;
     }
     /// The inflight marker of the current data root (the root can move between jobs, Part 02 §8.3).
-    fn inflight(&self) -> Result<Inflight, AppError> {
+    pub(super) fn inflight(&self) -> Result<Inflight, AppError> {
         Ok(Inflight::new(self.paths.with_data_root(self.db.data_root()?).inflight_marker()))
     }
 }
@@ -255,33 +253,10 @@ pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSour
 }
 
 /// Emits the PST's current status and returns the source it fetched (None when the list query failed or the PST is gone).
-async fn emit_status(inner: &Inner, pst_id: i64) -> Option<PstSource> {
+pub(super) async fn emit_status(inner: &Inner, pst_id: i64) -> Option<PstSource> {
     let src = list(inner, Some(pst_id)).await.ok()?.pop()?;
     inner.sink.emit(CoreEvent::ImportStatusChanged(ImportStatusChanged { pst_id, status: src.status, removed: false, source: Some(src.clone()) }));
     Some(src)
-}
-
-async fn emit_library(inner: &Inner) {
-    let counts = async { library_counts(&*inner.db.app_client().await?).await };
-    if let Ok(counts) = counts.await {
-        inner.sink.emit(CoreEvent::LibraryChanged(LibraryChanged { counts }));
-    }
-}
-
-fn progress_event(cp: &Checkpoint, tp: Option<&Throughput>) -> ImportProgress {
-    ImportProgress {
-        pst_id: cp.pst_id,
-        phase: cp.phase,
-        items_total: cp.items_total,
-        items_done: cp.items_done(),
-        stored: cp.stored,
-        duplicates: cp.duplicates,
-        errors: cp.errors,
-        skipped_non_mail: cp.skipped_non_mail,
-        images_converted: cp.images_converted,
-        bytes_per_sec: tp.and_then(Throughput::bytes_per_sec),
-        eta_seconds: tp.and_then(|t| t.eta_seconds(cp.items_total, cp.items_done())),
-    }
 }
 
 // ------------------------------------------------------------------------------------------------ commands
@@ -558,11 +533,11 @@ static SYNTHETIC: std::sync::LazyLock<Mutex<std::collections::HashMap<String, Sy
     std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 #[cfg(feature = "test-support")]
-fn synthetic_items(path: &str) -> Option<(Vec<FolderIn>, Vec<RawItem>)> {
+pub(super) fn synthetic_items(path: &str) -> Option<(Vec<FolderIn>, Vec<RawItem>)> {
     SYNTHETIC.lock().unwrap_or_else(|p| p.into_inner()).get(path).cloned()
 }
 #[cfg(not(feature = "test-support"))]
-fn synthetic_items(_path: &str) -> Option<(Vec<FolderIn>, Vec<RawItem>)> {
+pub(super) fn synthetic_items(_path: &str) -> Option<(Vec<FolderIn>, Vec<RawItem>)> {
     None
 }
 
@@ -576,481 +551,10 @@ pub(crate) async fn enqueue_synthetic(inner: &Inner, path: &str, folders: Vec<Fo
     Ok(pst_id)
 }
 
-// ------------------------------------------------------------------------------------------------ runner
-
-/// Why a job attempt failed the job (one `job_failed` error row).
-struct JobFailure {
-    stage: ImportErrorStage,
-    message: String,
-}
-
-enum AttemptEnd {
-    /// Input exhausted or cancelled (user / shutdown): writer finished, checkpoint committed.
-    Finished,
-    /// DB went away (writer DbNotReady or phase change): uncommitted batch dropped.
-    Paused,
-    /// Test seam crash_after_batches.
-    Crashed,
-    Failed(JobFailure),
-}
-
-enum Next {
-    Job { id: i64, pst_id: i64, kind: JobKind },
-    Idle,
-}
-
-async fn worker(inner: Arc<Inner>) {
-    let mut phase = inner.phase.clone();
-    loop {
-        if inner.shutting_down() {
-            return;
-        }
-        if *phase.borrow_and_update() != AppPhase::Ready {
-            tokio::select! {
-                r = phase.changed() => if r.is_err() { return },
-                _ = inner.shutdown_signal() => return,
-            }
-            continue;
-        }
-        let kicked = inner.kick.notified();
-        tokio::pin!(kicked);
-        kicked.as_mut().enable(); // a kick during the query below is not lost
-        let next = next_job(&inner).await;
-        match next {
-            Ok(Next::Job { id, pst_id, kind }) => {
-                let activity = if kind == JobKind::Remove { Activity::Removal } else { Activity::Import };
-                let guard = match inner.gate.try_enter(activity) {
-                    Ok(g) => g,
-                    Err(_) => {
-                        tokio::select! {
-                            _ = inner.gate.released() => {},
-                            _ = inner.shutdown_signal() => return,
-                        }
-                        continue;
-                    }
-                };
-                let crashed = run_job(&inner, id, pst_id, kind).await;
-                drop(guard);
-                if crashed {
-                    return; // simulated process kill: the worker dies with the job
-                }
-                continue;
-            }
-            Ok(Next::Idle) => {}
-            Err(e) => log::warn!("import queue: {e}"),
-        }
-        tokio::select! {
-            _ = kicked => {},
-            r = phase.changed() => if r.is_err() { return },
-            _ = inner.shutdown_signal() => return,
-        }
-    }
-}
-
-async fn next_job(inner: &Inner) -> Result<Next, AppError> {
-    let c = inner.db.app_client().await?;
-    let row = c
-        .query_opt("SELECT id, pst_id, kind FROM import_jobs WHERE state = 'queued' ORDER BY id LIMIT 1", &[])
-        .await
-        .map_err(db_err)?;
-    match row {
-        None => Ok(Next::Idle),
-        Some(r) => Ok(Next::Job { id: r.get(0), pst_id: r.get(1), kind: JobKind::from_db(r.get(2))? }),
-    }
-}
-
-/// Takes the job (`queued` → `running`) and runs it. Returns true when the crash seam dropped it.
-async fn run_job(inner: &Arc<Inner>, job_id: i64, pst_id: i64, kind: JobKind) -> bool {
-    let cancel = Arc::new(JobCancel::new());
-    // registered before the row turns `running`, so a cancel that sees `running` finds the flag
-    inner.set_running(Some(RunningJob { job_id, pst_id, cancel: cancel.clone() }));
-    *inner.throughput.lock().unwrap_or_else(|p| p.into_inner()) = Throughput::new();
-    let taken = match inner.db.app_client().await {
-        Ok(c) => c
-            .execute("UPDATE import_jobs SET state = 'running', started_at = now() WHERE id = $1 AND state = 'queued'", &[&job_id])
-            .await
-            .map_err(db_err),
-        Err(e) => Err(e),
-    };
-    let crashed = match taken {
-        Ok(1) => {
-            emit_status(inner, pst_id).await;
-            if kind == JobKind::Remove {
-                run_removal(inner, job_id, pst_id).await;
-                false
-            } else {
-                run_import(inner, job_id, pst_id, &cancel).await
-            }
-        }
-        Ok(_) => false, // cancelled or removed meanwhile
-        Err(e) => {
-            log::warn!("cannot start job {job_id}: {e}");
-            false
-        }
-    };
-    inner.set_running(None);
-    crashed
-}
-
-async fn run_removal(inner: &Arc<Inner>, job_id: i64, pst_id: i64) {
-    loop {
-        let result = match inner.db.app_client().await {
-            Ok(c) => remove::run(&c, pst_id).await,
-            Err(e) => Err(e),
-        };
-        match result {
-            Ok(stats) => {
-                log::info!("removed pst {pst_id}: {stats:?}");
-                inner.sink.emit(CoreEvent::ImportStatusChanged(ImportStatusChanged { pst_id, status: ImportStatus::Removing, removed: true, source: None }));
-                emit_library(inner).await;
-                let _ = inner.events.send((pst_id, ImportStatus::Removing));
-                return;
-            }
-            Err(AppError::DbNotReady) => {
-                if !pause_wait(inner).await {
-                    return; // row stays `running`; recover_after_crash re-queues it (idempotent removal)
-                }
-            }
-            Err(e) => {
-                let failure = JobFailure { stage: ImportErrorStage::Store, message: e.to_string() };
-                if set_final(inner, job_id, pst_id, JobState::Failed, Some(&failure)).await.is_ok() {
-                    emit_status(inner, pst_id).await;
-                    let _ = inner.events.send((pst_id, ImportStatus::Failed));
-                }
-                return;
-            }
-        }
-    }
-}
-
-/// Final job row state (+ the job_failed error row in the same transaction).
-async fn set_final(inner: &Inner, job_id: i64, pst_id: i64, state: JobState, failure: Option<&JobFailure>) -> Result<(), AppError> {
-    let mut c = inner.db.app_client().await?;
-    let tx = c.transaction().await.map_err(db_err)?;
-    if let Some(f) = failure {
-        let e = ItemError::new(f.stage, ImportErrorSeverity::JobFailed, "", 0, &f.message);
-        tx.execute(
-            "INSERT INTO import_errors (pst_id, job_id, stage, severity, message) VALUES ($1, $2, $3, 'job_failed', $4)",
-            &[&pst_id, &job_id, &f.stage.as_db(), &e.message],
-        )
-        .await
-        .map_err(db_err)?;
-    }
-    tx.execute(
-        "UPDATE import_jobs SET state = $2, finished_at = CASE WHEN $2 = 'queued' THEN NULL ELSE now() END WHERE id = $1",
-        &[&job_id, &state.as_db()],
-    )
-    .await
-    .map_err(db_err)?;
-    tx.commit().await.map_err(db_err)
-}
-
-/// pause_for_db wait (Part 02 §6.1 PG crash row): DB reachable → resume at once; else wait up to 30 s for the
-/// phase to leave `Ready`, then for `Ready` again (also after `Failed`: app_retry resumes the job in this process).
-/// false = shutdown: the job row stays `running` and `recover_after_crash` re-queues it at the next start.
-async fn pause_wait(inner: &Inner) -> bool {
-    if let Ok(c) = inner.db.app_client().await
-        && c.simple_query("SELECT 1").await.is_ok()
-    {
-        return true;
-    }
-    let mut ph = inner.phase.clone();
-    if *ph.borrow() == AppPhase::Ready {
-        let _ = tokio::time::timeout(PAUSE_DETECT, ph.wait_for(|p| *p != AppPhase::Ready)).await;
-    }
-    tokio::select! {
-        // `Failed` is not a wake-up: the job stays paused and resumes on the next `Ready` (app_retry), Part 02 §6.1
-        r = ph.wait_for(|p| *p == AppPhase::Ready) => r.is_ok(),
-        _ = inner.shutdown_signal() => false,
-    }
-}
-
-/// Returns true when the crash seam dropped the job.
-async fn run_import(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<JobCancel>) -> bool {
-    let end = loop {
-        let end = attempt(inner, job_id, pst_id, cancel).await.unwrap_or_else(|e| match e {
-            AppError::DbNotReady => AttemptEnd::Paused,
-            other => AttemptEnd::Failed(JobFailure { stage: ImportErrorStage::Store, message: other.to_string() }),
-        });
-        match end {
-            AttemptEnd::Paused => {
-                if let Ok(m) = inner.inflight() {
-                    m.clear(); // the reader stopped cleanly: the marker names no poison item
-                }
-                if !pause_wait(inner).await || cancel.reason() == Some(CancelReason::Shutdown) {
-                    return false;
-                }
-                if cancel.reason() == Some(CancelReason::User) {
-                    break AttemptEnd::Finished;
-                }
-                cancel.clear_pause();
-                log::info!("import job {job_id}: database back, resuming from the checkpoint");
-            }
-            other => break other,
-        }
-    };
-    let failure = match end {
-        AttemptEnd::Crashed => {
-            let _ = inner.events.send((pst_id, ImportStatus::Running));
-            return true;
-        }
-        AttemptEnd::Failed(f) => Some(f),
-        _ => None,
-    };
-    let reason = cancel.reason();
-    if reason == Some(CancelReason::Shutdown) && failure.is_none() {
-        // Part 02 §2.5 step 1: back to queued; index self-heal at the next start covers dropped indexes
-        if let Ok(m) = inner.inflight() {
-            m.clear();
-        }
-        if set_final(inner, job_id, pst_id, JobState::Queued, None).await.is_ok() {
-            emit_status(inner, pst_id).await;
-            let _ = inner.events.send((pst_id, ImportStatus::Queued));
-        }
-        return false;
-    }
-    if let Err(e) = finalize(inner, pst_id).await {
-        log::warn!("import job {job_id}: finalize: {e}"); // DB gone: row stays running, recovered at next start
-        return false;
-    }
-    let (state, status) = match (&failure, reason) {
-        (Some(_), _) => (JobState::Failed, ImportStatus::Failed),
-        (None, Some(CancelReason::User)) => (JobState::Cancelled, ImportStatus::Cancelled),
-        _ => (JobState::Completed, ImportStatus::Completed),
-    };
-    if let Err(e) = set_final(inner, job_id, pst_id, state, failure.as_ref()).await {
-        log::warn!("import job {job_id}: final state: {e}");
-        return false;
-    }
-    emit_status(inner, pst_id).await;
-    emit_library(inner).await;
-    let _ = inner.events.send((pst_id, status));
-    false
-}
-
-/// Step 9: Finalizing phase, indexes (always; idempotent), after-job VACUUM, marker removed.
-async fn finalize(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
-    let c = inner.db.app_client().await?;
-    if Checkpoint::load(&c, pst_id).await?.is_some() {
-        Checkpoint::set_phase(&c, pst_id, ImportPhase::Finalizing, None).await?;
-        if let Some(cp) = Checkpoint::load(&c, pst_id).await? {
-            inner.sink.emit(CoreEvent::ImportProgress(progress_event(&cp, None)));
-        }
-    }
-    let admin = inner.db.connect_admin().await?;
-    ensure_search_indexes(&admin, &|name: &str, done: usize, total: usize| log::info!("import finalize index {name} ({done}/{total})")).await?;
-    c.batch_execute(AFTER_JOB_VACUUM).await.map_err(db_err)?;
-    inner.inflight()?.clear();
-    Ok(())
-}
-
-/// One run of the pipeline from the checkpoint (steps 1–8).
-async fn attempt(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<JobCancel>) -> Result<AttemptEnd, AppError> {
-    let mut c = inner.db.app_client().await?;
-    let row = c.query_one("SELECT path, file_size_bytes, file_mtime FROM pst_sources WHERE id = $1", &[&pst_id]).await.map_err(db_err)?;
-    let path: String = row.get(0);
-    let synthetic = synthetic_items(&path);
-    // (1) file identity
-    let identity = match std::fs::metadata(&path) {
-        Ok(m) => Ok((m.len() as i64, truncate_to_micros(m.modified().unwrap_or(UNIX_EPOCH)))),
-        Err(_) if synthetic.is_some() => Ok((row.get(1), row.get(2))),
-        Err(e) => Err(e),
-    };
-    let (size, mtime) = match identity {
-        Ok(v) => v,
-        Err(e) => return Ok(AttemptEnd::Failed(JobFailure { stage: ImportErrorStage::Open, message: format!("cannot open PST file: {e}") })),
-    };
-    // (2) checkpoint
-    let (start, reset) = Checkpoint::begin(&c, pst_id, job_id, size, mtime).await?;
-    if reset {
-        log::info!("pst {pst_id}: file size or mtime changed, import restarts from the beginning");
-    }
-    // (3) poison item: the marker of this job is the pending record; another job's marker is ignored (Part 02 §6.3 rule 1)
-    let inflight = inner.inflight()?;
-    // A reset checkpoint (file changed) renumbers the items: the marker's seq may name another item, so drop it.
-    let pending = if reset { None } else { inflight.read().filter(|r| r.job_id == job_id) };
-    // (4) reader
-    let params = ReaderParams {
-        path: PathBuf::from(&path),
-        cursor_seq: start.cursor_seq,
-        pending,
-        inflight: Some(inflight),
-        cancel: cancel.flag.clone(),
-        // test seam: only the first attempt of this manager holds (a re-run after a pause or resume never blocks)
-        hold_after: inner.tuning.hold_reader_after.filter(|_| !inner.hold_used.swap(true, Ordering::SeqCst)),
-        budget: cancel.budget.clone(),
-        job_id,
-    };
-    let (rx, reader) = match synthetic {
-        #[cfg(feature = "test-support")]
-        Some((folders, items)) => pst_reader::spawn_synthetic(params, folders, items),
-        _ => pst_reader::spawn(params),
-    };
-    let first = tokio::task::spawn_blocking(move || (rx.recv(), rx)).await.map_err(|e| AppError::internal(e.to_string()))?;
-    let (first, rx) = first;
-    let scanned = match first {
-        Ok(ReaderMsg::Scanned(s)) => s,
-        Ok(ReaderMsg::Failed { stage, message }) => {
-            join_thread(reader).await;
-            return Ok(AttemptEnd::Failed(JobFailure { stage, message }));
-        }
-        Ok(ReaderMsg::Item(_)) | Err(_) => {
-            cancel.stop();
-            join_thread(reader).await;
-            return Ok(AttemptEnd::Failed(JobFailure { stage: ImportErrorStage::Scan, message: "reader stopped before the scan finished".into() }));
-        }
-    };
-    upsert_folders(&mut c, pst_id, &scanned.folders).await?;
-    for e in &scanned.scan_errors {
-        c.execute(
-            "INSERT INTO import_errors (pst_id, job_id, stage, severity, folder_path, message) VALUES ($1, $2, 'scan', 'degraded', $3, $4)",
-            &[&pst_id, &job_id, &e.folder_path, &e.message],
-        )
-        .await
-        .map_err(db_err)?;
-    }
-    Checkpoint::set_phase(&c, pst_id, ImportPhase::Importing, Some(scanned.items_total)).await?;
-    let start = Checkpoint { phase: ImportPhase::Importing, items_total: Some(scanned.items_total), ..start };
-    inner.sink.emit(CoreEvent::ImportProgress(progress_event(&start, None)));
-    // (5) index policy (Part 04 §6.4)
-    let LibraryCounts { messages, psts } = library_counts(&c).await?;
-    let remaining = scanned.items_total - start.cursor_seq;
-    if 2 * remaining >= messages {
-        let admin = inner.db.connect_admin().await?;
-        drop_search_indexes(&admin).await?;
-        log::info!("pst {pst_id}: {remaining} items for {messages} messages: search indexes dropped until finalize");
-    }
-    // (6) writer
-    let quality: i16 = c.query_one("SELECT webp_quality FROM settings", &[]).await.map_err(db_err)?.get(0);
-    let known = Arc::new(load_known_hashes(&c).await?);
-    drop(c);
-    let crash = Arc::new(Notify::new());
-    let sent_bytes = Arc::new(AtomicU64::new(0));
-    let on_commit = {
-        let inner = inner.clone();
-        let crash = crash.clone();
-        let sent_bytes = sent_bytes.clone();
-        let start_batches = start.batches_committed;
-        let start_stored = start.stored;
-        Box::new(move |cp: &Checkpoint| {
-            let progress = {
-                let mut tp = inner.throughput.lock().unwrap_or_else(|p| p.into_inner());
-                tp.record(Instant::now(), cp.items_done(), sent_bytes.load(Ordering::Relaxed));
-                progress_event(cp, Some(&tp))
-            };
-            inner.sink.emit(CoreEvent::ImportProgress(progress));
-            if cp.stored > start_stored {
-                let counts = LibraryCounts { messages: messages + (cp.stored - start_stored), psts };
-                inner.sink.emit(CoreEvent::LibraryChanged(LibraryChanged { counts }));
-            }
-            if let Some(f) = &inner.tuning.on_batch {
-                f(cp.batches_committed);
-            }
-            if inner.tuning.crash_after_batches.is_some_and(|n| cp.batches_committed - start_batches >= n) {
-                crash.notify_one();
-            }
-        })
-    };
-    let cfg = WriterConfig { pst_id, data_root: inner.db.data_root()?, start: start.clone(), limits: inner.tuning.writer.clone(), known: known.clone() };
-    let writer = Writer::spawn(inner.db.connect_app().await?, cfg, on_commit).await?;
-    // (7) pipeline thread: rayon pool runs normalize, results go to the writer
-    let ctx = NormalizeCtx { webp_quality: quality.clamp(1, 100) as u8, known };
-    let sender = writer.sender();
-    let flag = cancel.clone();
-    let late_failure: Arc<Mutex<Option<JobFailure>>> = Arc::new(Mutex::new(None));
-    let late = late_failure.clone();
-    let (done_tx, done_rx) = oneshot::channel::<()>();
-    let pipeline = std::thread::Builder::new()
-        .name("import-pipeline".into())
-        .spawn(move || {
-            use rayon::iter::{ParallelBridge, ParallelIterator};
-            let threads = std::thread::available_parallelism().map_or(1, |n| n.get().saturating_sub(1).max(1));
-            let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).thread_name(|i| format!("normalize-{i}")).build().expect("rayon pool");
-            let writer_gone = AtomicBool::new(false);
-            pool.install(|| {
-                rx.into_iter().par_bridge().for_each(|msg| match msg {
-                    ReaderMsg::Item(raw) => {
-                        let bytes = raw.approx_bytes();
-                        if !writer_gone.load(Ordering::SeqCst) {
-                            let item = normalize(raw, &ctx);
-                            if sender.blocking_send(item).is_err() {
-                                writer_gone.store(true, Ordering::SeqCst);
-                                flag.stop(); // writer stopped: stop the reader too
-                            } else {
-                                sent_bytes.fetch_add(bytes, Ordering::Relaxed);
-                            }
-                        }
-                        flag.budget.release(bytes);
-                    }
-                    ReaderMsg::Failed { stage, message } => {
-                        *late.lock().unwrap_or_else(|p| p.into_inner()) = Some(JobFailure { stage, message });
-                        flag.stop();
-                    }
-                    ReaderMsg::Scanned(_) => {}
-                })
-            });
-            drop(sender);
-            let _ = done_tx.send(());
-        })
-        .expect("spawn pipeline thread");
-    // wait for: end of input, the crash seam, or a phase change (Supervisor restarting PostgreSQL)
-    let mut phase = inner.phase.clone();
-    phase.borrow_and_update();
-    enum Wake {
-        Done,
-        Crash,
-        Phase,
-    }
-    let wake = tokio::select! {
-        _ = done_rx => Wake::Done,
-        _ = crash.notified() => Wake::Crash,
-        _ = phase.changed() => Wake::Phase,
-    };
-    match wake {
-        Wake::Done => {}
-        Wake::Crash => {
-            cancel.stop();
-            writer.abort();
-            join_thread(pipeline).await;
-            join_thread(reader).await;
-            return Ok(AttemptEnd::Crashed);
-        }
-        Wake::Phase => {
-            cancel.cancel(CancelReason::Pause);
-            writer.abort();
-            join_thread(pipeline).await;
-            join_thread(reader).await;
-            return Ok(AttemptEnd::Paused);
-        }
-    }
-    join_thread(pipeline).await;
-    join_thread(reader).await;
-    // (8) end of input: commit the gap-free prefix
-    let finished = writer.finish().await;
-    if let Some(f) = late_failure.lock().unwrap_or_else(|p| p.into_inner()).take() {
-        return Ok(AttemptEnd::Failed(f));
-    }
-    match finished {
-        Ok(_) => {
-            if cancel.reason() == Some(CancelReason::Pause) {
-                return Ok(AttemptEnd::Paused);
-            }
-            Ok(AttemptEnd::Finished)
-        }
-        Err(AppError::DbNotReady) => Ok(AttemptEnd::Paused),
-        Err(AppError::FileAccess { reason, .. }) if reason == "insufficientSpace" => {
-            Ok(AttemptEnd::Failed(JobFailure { stage: ImportErrorStage::Store, message: "disk space low".into() }))
-        }
-        Err(e) => Ok(AttemptEnd::Failed(JobFailure { stage: ImportErrorStage::Store, message: e.to_string() })),
-    }
-}
-
-async fn join_thread(h: std::thread::JoinHandle<()>) {
-    let _ = tokio::task::spawn_blocking(move || h.join()).await;
-}
-
 #[cfg(test)]
 mod tests {
+    use std::time::UNIX_EPOCH;
+
     use super::*;
 
     #[test]

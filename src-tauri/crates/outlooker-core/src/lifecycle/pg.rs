@@ -5,15 +5,15 @@ use std::path::Path;
 use std::process::Output;
 use std::sync::{Arc, Mutex};
 
-use sysinfo::{MemoryRefreshKind, Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use tokio::process::Command;
 
+use crate::db::{connect, ADMIN_ROLE, CJK_SELF_CHECK};
 use crate::dto::error::AppError;
 use crate::paths::Paths;
+use crate::sys::total_ram_bytes;
 
 pub const HBA_CONF: &str = "host all all 127.0.0.1/32 scram-sha-256\n";
-pub const CJK_SELF_CHECK: &str = "SELECT similarity('測試測試','測試') > 0";
-pub const ADMIN_ROLE: &str = "outlooker_admin";
 const MB: u64 = 1024 * 1024;
 
 #[cfg(windows)]
@@ -68,11 +68,6 @@ pub fn auto_conf(ram_bytes: u64) -> String {
     )
 }
 
-pub fn total_ram_bytes() -> u64 {
-    let sys = System::new_with_specifics(RefreshKind::nothing().with_memory(MemoryRefreshKind::nothing().with_ram()));
-    sys.total_memory()
-}
-
 fn io_err(context: &str, e: std::io::Error) -> AppError {
     AppError::internal(format!("{context}: {e}"))
 }
@@ -103,22 +98,6 @@ fn initdb_locale_failure(stderr: &str) -> bool {
 fn initdb_detail(stderr: &str) -> String {
     let lines: Vec<&str> = stderr.lines().map(str::trim).filter(|l| l.contains("FATAL:") || l.contains("ERROR:") || l.starts_with("initdb: error")).collect();
     if lines.is_empty() { last_line(stderr) } else { lines.join("; ") }
-}
-
-/// One connection for the self-check and role setup. `db::connect` re-exports this.
-pub async fn connect(port: u16, user: &str, password: &str, dbname: &str) -> Result<tokio_postgres::Client, AppError> {
-    let mut cfg = tokio_postgres::Config::new();
-    cfg.host("127.0.0.1").port(port).user(user).password(password).dbname(dbname).application_name("outlooker");
-    let (client, conn) = cfg
-        .connect(tokio_postgres::NoTls)
-        .await
-        .map_err(|e| AppError::internal(format!("connect as {user}: {e}")))?;
-    tokio::spawn(async move {
-        if let Err(e) = conn.await {
-            log::debug!("postgres connection closed: {e}");
-        }
-    });
-    Ok(client)
 }
 
 /// What owns the PID in `postmaster.pid`.
@@ -276,7 +255,8 @@ impl PgController {
         tokio::fs::write(pgdata.join("pg_hba.conf"), HBA_CONF).await.map_err(|e| io_err("write pg_hba.conf", e))?;
         let port = self.start(pgdata).await?;
         let check = async {
-            let postgres = connect(port, ADMIN_ROLE, pw, "postgres").await?;            postgres.batch_execute("CREATE DATABASE outlooker").await.map_err(|e| AppError::internal(e.to_string()))?;
+            let postgres = connect(port, ADMIN_ROLE, pw, "postgres").await?;
+            postgres.batch_execute("CREATE DATABASE outlooker").await.map_err(|e| AppError::internal(e.to_string()))?;
             drop(postgres);
             let db = connect(port, ADMIN_ROLE, pw, "outlooker").await?;
             db.batch_execute("CREATE EXTENSION IF NOT EXISTS pg_trgm").await.map_err(|e| AppError::internal(e.to_string()))?;

@@ -18,7 +18,7 @@ use crate::dto::error::AppError;
 use crate::dto::import::ImportPhase;
 use crate::importer::types::{FolderIn, NormalizedItem, Outcome};
 use crate::importer::webp::KnownHashes;
-use crate::lifecycle::move_dir::free_space;
+use crate::sys::free_space;
 
 /// Batch limits and the disk guard threshold (spec Part 04 §6.2, §5.1). Tests override them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,7 +200,7 @@ CREATE TEMP TABLE stage_errors (stage text, severity text, folder_path text, pst
 CREATE TEMP TABLE stage_new_ids (message_id bigint, dedupe_key bytea) ON COMMIT DELETE ROWS;";
 
 /// Session setup of the writer connection: `synchronous_commit = off` (spec Part 04 §6.2) and the seven staging
-/// tables (§6.1). Called only by `Writer::spawn`; public so the test can check the session setting.
+/// tables (§6.1). Called only by `WriterHandle::spawn`; public so the test can check the session setting.
 pub async fn prepare_session(client: &Client) -> Result<(), tokio_postgres::Error> {
     client.batch_execute(SESSION_SETUP).await
 }
@@ -304,23 +304,18 @@ pub struct WriterConfig {
 
 pub type OnCommit = Box<dyn Fn(&Checkpoint) + Send + Sync>;
 
-pub struct Writer;
-
 pub struct WriterHandle {
     tx: mpsc::Sender<NormalizedItem>,
     join: tokio::task::JoinHandle<Result<Checkpoint, AppError>>,
 }
 
-impl Writer {
+impl WriterHandle {
     pub async fn spawn(client: Client, cfg: WriterConfig, on_commit: OnCommit) -> Result<WriterHandle, AppError> {
         prepare_session(&client).await.map_err(|e| map_db_error(e, &cfg.data_root))?;
         let (tx, rx) = mpsc::channel(256);
         let join = tokio::spawn(run(client, cfg, rx, on_commit));
         Ok(WriterHandle { tx, join })
     }
-}
-
-impl WriterHandle {
     pub fn sender(&self) -> mpsc::Sender<NormalizedItem> {
         self.tx.clone()
     }

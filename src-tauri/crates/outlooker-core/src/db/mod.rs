@@ -3,14 +3,14 @@ pub mod indexes;
 pub mod pools;
 
 pub use credentials::Credentials;
-pub use crate::lifecycle::pg::connect;
 pub use pools::{Db, DbConn, Pools};
 
 use crate::dto::app::LibraryCounts;
 use crate::dto::error::AppError;
-use crate::lifecycle::pg::{ADMIN_ROLE, CJK_SELF_CHECK};
 
 pub const DB_NAME: &str = "outlooker";
+pub const ADMIN_ROLE: &str = "outlooker_admin";
+pub const CJK_SELF_CHECK: &str = "SELECT similarity('測試測試','測試') > 0";
 /// Use as `to_char(ts AT TIME ZONE 'UTC', '<RFC3339_UTC_FMT>')` (spec Part 03 §1 timestamps).
 pub const RFC3339_UTC_FMT: &str = r#"YYYY-MM-DD"T"HH24:MI:SS"Z""#;
 
@@ -58,6 +58,27 @@ pub fn pool_err(e: deadpool_postgres::PoolError) -> AppError {
 pub async fn library_counts(c: &tokio_postgres::Client) -> Result<LibraryCounts, AppError> {
     let r = c.query_one("SELECT (SELECT count(*) FROM messages), (SELECT count(*) FROM pst_sources)", &[]).await.map_err(db_err)?;
     Ok(LibraryCounts { messages: r.get(0), psts: r.get(1) })
+}
+
+/// The one base connection config (loopback, `application_name`) shared by `connect` and the pools.
+pub fn base_config(port: u16, user: &str, password: &str, dbname: &str) -> tokio_postgres::Config {
+    let mut cfg = tokio_postgres::Config::new();
+    cfg.host("127.0.0.1").port(port).user(user).password(password).dbname(dbname).application_name("outlooker");
+    cfg
+}
+
+/// One connection (self-check, role setup, migrations).
+pub async fn connect(port: u16, user: &str, password: &str, dbname: &str) -> Result<tokio_postgres::Client, AppError> {
+    let (client, conn) = base_config(port, user, password, dbname)
+        .connect(tokio_postgres::NoTls)
+        .await
+        .map_err(|e| AppError::internal(format!("connect as {user}: {e}")))?;
+    tokio::spawn(async move {
+        if let Err(e) = conn.await {
+            log::debug!("postgres connection closed: {e}");
+        }
+    });
+    Ok(client)
 }
 
 pub async fn connect_admin(port: u16, creds: &Credentials) -> Result<tokio_postgres::Client, AppError> {

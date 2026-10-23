@@ -9,7 +9,7 @@ use outlooker_core::db::indexes::{drop_search_indexes, ensure_search_indexes};
 use outlooker_core::dto::error::AppError;
 use outlooker_core::importer::types::FolderIn;
 use outlooker_core::importer::writer::{
-    load_known_hashes, upsert_folders, Checkpoint, Writer, WriterConfig, WriterLimits, AFTER_JOB_VACUUM,
+    load_known_hashes, upsert_folders, Checkpoint, WriterConfig, WriterHandle, WriterLimits, AFTER_JOB_VACUUM,
 };
 use outlooker_core::test_support::import_fixtures::complete_job;
 use rayon::prelude::*;
@@ -76,7 +76,7 @@ pub async fn load_sources(db: &Db, cfg: &GenConfig, sources: Range<u32>, defer_i
         let app = db.connect_app().await?;
         let (start, _) = Checkpoint::begin(&app, pst_id, job_id, 1, SystemTime::now()).await?;
         let wcfg = WriterConfig { pst_id, data_root: db.data_root()?, start, limits: WriterLimits::default(), known: known.clone() };
-        let writer = Writer::spawn(db.connect_app().await?, wcfg, Box::new(|_| {})).await?;
+        let writer = WriterHandle::spawn(db.connect_app().await?, wcfg, Box::new(|_| {})).await?;
         let n = cfg.per_source(s);
         let mut i = 0;
         'generate: while i < n {

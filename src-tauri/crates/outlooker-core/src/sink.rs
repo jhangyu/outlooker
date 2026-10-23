@@ -5,6 +5,10 @@ use crate::dto::events::{names, DataDirMoveProgress, ImportStatusChanged, Librar
 use crate::dto::import::ImportProgress;
 use crate::dto::settings::MaintenanceState;
 
+mod throttle;
+
+pub use throttle::Throttle;
+
 pub trait EventSink: Send + Sync {
     fn emit(&self, event: CoreEvent);
 }

@@ -11,8 +11,9 @@ pub struct Paths {
 
 impl Paths {
     pub fn new(app_local_data_dir: PathBuf, app_log_dir: PathBuf, pg_dir: PathBuf) -> Paths {
-        let data_root = app_local_data_dir.join("data");
-        Paths { app_local_data_dir, app_log_dir, pg_dir, data_root }
+        let base = Paths { app_local_data_dir, app_log_dir, pg_dir, data_root: PathBuf::new() };
+        let data_root = base.default_data_root();
+        base.with_data_root(data_root)
     }
 
     pub fn with_data_root(&self, data_root: PathBuf) -> Paths {

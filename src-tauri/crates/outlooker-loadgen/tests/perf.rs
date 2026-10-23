@@ -1,5 +1,5 @@
 //! Perf gates (spec Part 04 §12.3, Part 02 §9). All `#[ignore]`; run one at a time on the reference machine:
-//! `cargo test -p outlooker-loadgen --release -- --ignored --test-threads 1 <name>`; `perf_generate` first.
+//! `cargo test --workspace --release --test perf -- --ignored --test-threads 1 <name>`; `perf_generate` first.
 //! Each gate appends its result to `docs/logs/loadtest-<date>.md` or `docs/logs/perf-<date>.md`, then asserts the
 //! threshold. Thresholds are the spec values and are never changed after a run.
 use std::sync::Arc;
@@ -14,9 +14,12 @@ use outlooker_core::search::{compile, SearchService};
 use outlooker_loadgen::corpus::Corpus;
 use outlooker_loadgen::generate::GenConfig;
 use outlooker_loadgen::load::{load, load_sources, source_path};
-use outlooker_loadgen::perf::{canned_queries, explain, generate_json, ms, open_library, percentile, perf_root, record, repo_root, Log};
 use outlooker_loadgen::rng::Rng;
 use outlooker_loadgen::root::LibraryRoot;
+
+#[path = "perf/support.rs"]
+mod support;
+use support::{canned_queries, explain, generate_json, ms, open_library, percentile, perf_root, record, repo_root, Log};
 
 const MB: f64 = 1024.0 * 1024.0;
 
@@ -90,11 +93,14 @@ fn perf_writer_throughput() {
 fn perf_e2e_import() {
     let pst = std::env::var("OUTLOOKER_PERF_PST").expect("set OUTLOOKER_PERF_PST to a large real PST (not in git)");
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let out = std::process::Command::new(cargo)
-        .args(["run", "--release", "-p", "outlooker-core", "--features", "test-support", "--example", "import_bench", "--", &pst])
+    let built = std::process::Command::new(cargo)
+        .args(["build", "--release", "--workspace", "--example", "import_bench"])
         .current_dir(repo_root().join("src-tauri"))
         .output()
-        .expect("run import_bench");
+        .expect("build import_bench");
+    assert!(built.status.success(), "build import_bench failed: {}", String::from_utf8_lossy(&built.stderr));
+    let target = std::env::var_os("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| repo_root().join("src-tauri/target"));
+    let out = std::process::Command::new(target.join(format!("release/examples/import_bench{}", std::env::consts::EXE_SUFFIX))).arg(&pst).output().expect("run import_bench");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "import_bench failed: {}", String::from_utf8_lossy(&out.stderr));
     let last = stdout.lines().last().unwrap_or_default();

@@ -24,7 +24,7 @@ fn main() {
     let vendored = manifest.join("../../native/libpff");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed={}", vendored.join("ORIGIN").display());
-    assert!(vendored.join("ORIGIN").exists(), "src-tauri/native/libpff is missing: run scripts/vendor-libpff.sh");
+    assert!(vendored.join("ORIGIN").exists(), "src-tauri/native/libpff is missing: run scripts/vendor-libpff.py");
 
     let msvc = env::var("CARGO_CFG_TARGET_ENV").unwrap() == "msvc";
     let src = PathBuf::from(env::var("OUT_DIR").unwrap()).join("libpff-src");

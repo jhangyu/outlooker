@@ -5,13 +5,11 @@ use deadpool_postgres::{Manager, ManagerConfig, Object, Pool, RecyclingMethod};
 use tokio_postgres::NoTls;
 
 use super::credentials::Credentials;
-use super::{connect, connect_admin, pool_err, DB_NAME};
+use super::{base_config, connect, connect_admin, pool_err, DB_NAME};
 use crate::dto::error::AppError;
 
 fn pool(port: u16, user: &str, password: &str, max: usize) -> Result<Pool, AppError> {
-    let mut cfg = tokio_postgres::Config::new();
-    cfg.host("127.0.0.1").port(port).user(user).password(password).dbname(DB_NAME).application_name("outlooker");
-    let mgr = Manager::from_config(cfg, NoTls, ManagerConfig { recycling_method: RecyclingMethod::Fast });
+    let mgr = Manager::from_config(base_config(port, user, password, DB_NAME), NoTls, ManagerConfig { recycling_method: RecyclingMethod::Fast });
     Pool::builder(mgr).max_size(max).build().map_err(|e| AppError::internal(format!("pool {user}: {e}")))
 }
 
