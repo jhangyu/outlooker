@@ -23,6 +23,8 @@ export type SplitterProps = {
   minOther?: number;
   onChange: (px: number) => void;
   onReset: () => void;
+  /** The sized pane is AFTER the border (right/bottom pane): dragging toward the start grows it. */
+  reverse?: boolean;
   /** Current px size of the sized pane, needed only while `value` is undefined (fr or auto tracks). */
   measure?: () => number;
   /** Position inside the (position: relative) parent, e.g. left/top and the grid area. */
@@ -32,9 +34,9 @@ export type SplitterProps = {
 
 /**
  * Invisible 6 px hit area. Place it as a child of the layout container (`position: relative`), centred on the border.
- * Drag (pointer capture), arrows move 16 px, Home/End jump to min/max, double-click resets.
+ * Drag (pointer capture, `reverse` for a pane after the border), arrows move 16 px, Home/End jump to min/max, double-click resets.
  */
-export function Splitter({ orientation, value, min, max, minOther = 0, onChange, onReset, measure, style, label }: SplitterProps) {
+export function Splitter({ orientation, value, min, max, minOther = 0, onChange, onReset, reverse, measure, style, label }: SplitterProps) {
   const s = useStyles();
   const vertical = orientation === "vertical";
   const drag = useRef<{ from: number; start: number } | null>(null);
@@ -44,6 +46,7 @@ export function Splitter({ orientation, value, min, max, minOther = 0, onChange,
     const container = parent ? (vertical ? parent.clientWidth : parent.clientHeight) : Infinity;
     return Math.max(min, max ?? container - minOther);
   };
+  const dir = reverse ? -1 : 1;
   const base = () => value ?? measure?.() ?? min;
   const apply = (el: HTMLElement, px: number) => onChange(Math.min(Math.max(px, min), limit(el)));
 
@@ -52,15 +55,15 @@ export function Splitter({ orientation, value, min, max, minOther = 0, onChange,
     drag.current = { from: vertical ? e.clientX : e.clientY, start: base() };
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (drag.current) apply(e.currentTarget, drag.current.start + (vertical ? e.clientX : e.clientY) - drag.current.from);
+    if (drag.current) apply(e.currentTarget, drag.current.start + dir * ((vertical ? e.clientX : e.clientY) - drag.current.from));
   };
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const [dec, inc] = vertical ? ["ArrowLeft", "ArrowRight"] : ["ArrowUp", "ArrowDown"];
     const el = e.currentTarget;
-    if (e.key === dec) apply(el, base() - STEP);
-    else if (e.key === inc) apply(el, base() + STEP);
-    else if (e.key === "Home") apply(el, min);
-    else if (e.key === "End") apply(el, limit(el));
+    if (e.key === dec) apply(el, base() - dir * STEP);
+    else if (e.key === inc) apply(el, base() + dir * STEP);
+    else if (e.key === "Home") apply(el, reverse ? limit(el) : min);
+    else if (e.key === "End") apply(el, reverse ? min : limit(el));
     else return;
     e.preventDefault();
   };

@@ -2,10 +2,14 @@ import {
   Accordion, AccordionHeader, AccordionItem, AccordionPanel, Body1Strong, Button, Caption1, makeStyles, mergeClasses, tokens,
 } from "@fluentui/react-components";
 import { AddRegular, DocumentRegular } from "@fluentui/react-icons";
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { SavedQuery } from "../../api/bindings/SavedQuery";
-import { ellipsis } from "../../components/common";
+import { Splitter, ellipsis, useSplit, type SplitDefaults } from "../../components/common";
 import { VIEW_COLUMNS } from "../../components/sql-editor";
+
+// Sized pane = the schema (below the border); default is content height capped at 42 % (see `schema` style).
+const SPLITS: SplitDefaults = { schema: { min: 60, max: 600 } };
 
 const useStyles = makeStyles({
   root: { display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, overflow: "hidden", borderRight: `1px solid ${tokens.colorNeutralStroke2}` },
@@ -20,6 +24,8 @@ const useStyles = makeStyles({
   picked: { backgroundColor: tokens.colorBrandBackground2, fontWeight: tokens.fontWeightSemibold, boxShadow: `inset 3px 0 0 ${tokens.colorCompoundBrandStroke}` },
   empty: { padding: tokens.spacingHorizontalM, color: tokens.colorNeutralForeground3 },
   schema: { maxHeight: "42%", overflowY: "auto", borderTop: `1px solid ${tokens.colorNeutralStroke2}` },
+  // Zero-height flex item sitting exactly on the list | schema border; the splitter hangs off it.
+  seam: { position: "relative", height: 0, flexShrink: 0 },
   col: { display: "flex", whiteSpace: "nowrap", gap: tokens.spacingHorizontalS, fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200, paddingLeft: tokens.spacingHorizontalM },
   name: { ...ellipsis },
   type: { flexShrink: 0, color: tokens.colorNeutralForeground3 },
@@ -35,6 +41,9 @@ export function SavedQueries({ items, selectedId, onPick, onNew }: {
 }) {
   const { t } = useTranslation("sql");
   const s = useStyles();
+  const split = useSplit("advanced-sql-saved", SPLITS);
+  const seam = useRef<HTMLDivElement>(null);
+  const schemaHeight = split.sizes.schema;
   return (
     <section className={s.root}>
       <div className={s.head}>
@@ -51,7 +60,14 @@ export function SavedQueries({ items, selectedId, onPick, onNew }: {
           </Button>
         ))}
       </div>
-      <Accordion collapsible className={s.schema}>
+      <div ref={seam} className={s.seam}>
+        <Splitter
+          orientation="horizontal" reverse {...split.props("schema")}
+          measure={() => (seam.current?.nextElementSibling as HTMLElement | null)?.offsetHeight ?? 0}
+          style={{ top: -3, left: 0, right: 0 }}
+        />
+      </div>
+      <Accordion collapsible className={s.schema} style={schemaHeight === undefined ? undefined : { height: schemaHeight, maxHeight: "70%" }}>
         <AccordionItem value="schema">
           <AccordionHeader>{t("schema")}</AccordionHeader>
           <AccordionPanel>

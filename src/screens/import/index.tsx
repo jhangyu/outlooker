@@ -7,7 +7,7 @@ import {
   AddRegular, DeleteRegular, DismissRegular, DocumentRegular, ErrorCircleRegular, MailInboxRegular, PlayRegular, WarningRegular,
 } from "@fluentui/react-icons";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
 import { dbStatusQuery, pstListQuery } from "../../api/queries";
@@ -15,7 +15,8 @@ import type { ImportStatus } from "../../api/bindings/ImportStatus";
 import type { PstSource } from "../../api/bindings/PstSource";
 import { useAppStatus } from "../../app/AppStatusContext";
 import {
-  EmptyState, ellipsis, formatBytes, formatDateTime, formatNumber, useAppToast, useColumnWidths, useEnqueuePst,
+  EmptyState, Splitter, ellipsis, formatBytes, formatDateTime, formatNumber, useAppToast, useColumnWidths, useEnqueuePst, useSplit,
+  type SplitDefaults,
 } from "../../components/common";
 import { RemoveDialog } from "./RemoveDialog";
 
@@ -34,8 +35,11 @@ const NUMERIC: ReadonlySet<TableColumnId> = new Set<ColumnKey>(["size", "message
 const column = (columnId: ColumnKey, def: Omit<CreateTableColumnOptions<PstSource>, "columnId">) =>
   createTableColumn<PstSource>({ ...def, columnId });
 
+// Sized pane = the left pane of each border; the default is the 1.6:1:1 ratio (fr tracks).
+const SPLITS: SplitDefaults = { p1: { min: 320, minOther: 240 }, p2: { min: 200, minOther: 240 } };
+
 const useStyles = makeStyles({
-  root: { display: "grid", gridTemplateRows: "auto 1fr", gridTemplateColumns: "1.6fr 1fr 1fr", height: "100%", minHeight: 0 },
+  root: { position: "relative", display: "grid", gridTemplateRows: "auto 1fr", height: "100%", minHeight: 0 },
   cmdbar: {
     gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`, backgroundColor: tokens.colorNeutralBackground1,
@@ -109,6 +113,9 @@ const useStyles = makeStyles({
 
 export function ImportScreen() {
   const s = useStyles();
+  const split = useSplit("import", SPLITS);
+  const root = useRef<HTMLDivElement>(null);
+  const paneWidth = (i: number) => root.current?.querySelectorAll<HTMLElement>(":scope > section")[i]?.offsetWidth ?? 0;
   const { t, i18n } = useTranslation("import");
   const lng = i18n.language;
   const status = useAppStatus();
@@ -212,7 +219,11 @@ export function ImportScreen() {
   );
 
   return (
-    <div className={s.root}>
+    <div
+      ref={root}
+      className={s.root}
+      style={{ gridTemplateColumns: `${split.track("p1", "minmax(0, 1.6fr)")} ${split.track("p2", "minmax(0, 1fr)")} minmax(0, 1fr)` }}
+    >
       <div className={s.cmdbar}>
         <Subtitle2 as="h2" className={s.title}>
           {t("title")}
@@ -303,6 +314,9 @@ export function ImportScreen() {
             </div>
           </section>
           <ErrorLog pst={list.find((p) => p.id === selected) ?? null} />
+          {(["p1", "p2"] as const).map((id, i) => (
+            <Splitter key={id} orientation="vertical" {...split.props(id)} measure={() => paneWidth(i)} style={{ gridColumn: i + 1, gridRow: 2, top: 0, bottom: 0, right: -3 }} />
+          ))}
         </>
       )}
       {removing ? <RemoveDialog pst={removing} onClose={() => setRemoving(null)} /> : null}

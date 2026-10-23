@@ -4,7 +4,7 @@ import {
 } from "@fluentui/react-components";
 import { DatabaseRegular, DeleteRegular, LockClosedRegular, PlayRegular, SaveRegular, StopRegular, TableRegular } from "@fluentui/react-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
 import type { AppError } from "../../api/bindings/AppError";
@@ -12,7 +12,9 @@ import type { SavedQuery } from "../../api/bindings/SavedQuery";
 import type { SqlExecuteRequest } from "../../api/bindings/SqlExecuteRequest";
 import type { SqlResult } from "../../api/bindings/SqlResult";
 import { useAppStatus, useNavigation } from "../../app/AppStatusContext";
-import { EmptyState, ellipsis, formatAppError, formatNumber, toAppError, useAppToast } from "../../components/common";
+import {
+  EmptyState, Splitter, ellipsis, formatAppError, formatNumber, toAppError, useAppToast, useSplit, type SplitDefaults,
+} from "../../components/common";
 import { MailList, ReadingPane } from "../../components/mail";
 import { SqlEditor } from "../../components/sql-editor";
 import { ResultTable } from "./ResultTable";
@@ -22,8 +24,11 @@ import { SavedQueries } from "./SavedQueries";
 export const MAX_ROWS = 10_000;
 const noop = () => {};
 
+// Sized pane = the left column of each border; the default is the 1:3:1:3 ratio (fr tracks).
+const SPLITS: SplitDefaults = { c1: { min: 160, minOther: 240 }, c2: { min: 240, minOther: 240 }, c3: { min: 160, minOther: 240 } };
+
 const useStyles = makeStyles({
-  root: { display: "grid", gridTemplateColumns: "1fr 3fr 1fr 3fr", height: "100%", minHeight: 0 },
+  root: { position: "relative", display: "grid", height: "100%", minHeight: 0 },
   // `:last-of-type`, not `:last-child`: an open dialog's portal anchor can follow the last column.
   col: {
     display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -113,6 +118,9 @@ function DeleteDialog({ query, onConfirm, onClose }: { query: SavedQuery; onConf
 export function AdvancedSqlScreen() {
   const { t, i18n } = useTranslation("sql");
   const s = useStyles();
+  const split = useSplit("advanced-sql", SPLITS);
+  const root = useRef<HTMLDivElement>(null);
+  const paneWidth = (i: number) => root.current?.querySelectorAll<HTMLElement>(":scope > section")[i]?.offsetWidth ?? 0;
   const qc = useQueryClient();
   const toast = useAppToast();
   const status = useAppStatus();
@@ -301,7 +309,14 @@ export function AdvancedSqlScreen() {
   }
 
   return (
-    <div className={s.root}>
+    <div
+      ref={root}
+      className={s.root}
+      style={{ gridTemplateColumns: `${split.track("c1", "minmax(0, 1fr)")} ${split.track("c2", "minmax(0, 3fr)")} ${split.track("c3", "minmax(0, 1fr)")} minmax(0, 3fr)` }}
+    >
+      {(["c1", "c2", "c3"] as const).map((id, i) => (
+        <Splitter key={id} orientation="vertical" {...split.props(id)} measure={() => paneWidth(i)} style={{ gridColumn: i + 1, gridRow: 1, top: 0, bottom: 0, right: -3 }} />
+      ))}
       <SavedQueries items={saved.data ?? []} selectedId={savedId} onPick={pick} onNew={newQuery} />
       <section className={s.col}>
         <Toolbar size="small" className={s.toolbar}>
