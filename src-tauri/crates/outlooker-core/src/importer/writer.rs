@@ -15,8 +15,7 @@ use tokio_postgres::{Client, Row, Transaction};
 
 use crate::db::db_err;
 use crate::dto::error::AppError;
-use crate::dto::import::{ImportErrorSeverity, ImportErrorStage, ImportPhase};
-use crate::dto::search::RecipientKind;
+use crate::dto::import::ImportPhase;
 use crate::importer::types::{FolderIn, NormalizedItem, Outcome};
 use crate::importer::webp::KnownHashes;
 use crate::lifecycle::move_dir::free_space;
@@ -85,41 +84,6 @@ const CP_BATCH: &str = concat!(
     cp_cols!()
 );
 
-pub fn phase_db(p: ImportPhase) -> &'static str {
-    match p {
-        ImportPhase::Scanning => "scanning",
-        ImportPhase::Importing => "importing",
-        ImportPhase::Finalizing => "finalizing",
-    }
-}
-
-pub fn stage_db(s: ImportErrorStage) -> &'static str {
-    match s {
-        ImportErrorStage::Open => "open",
-        ImportErrorStage::Scan => "scan",
-        ImportErrorStage::Parse => "parse",
-        ImportErrorStage::Html => "html",
-        ImportErrorStage::Image => "image",
-        ImportErrorStage::Store => "store",
-    }
-}
-
-pub fn severity_db(s: ImportErrorSeverity) -> &'static str {
-    match s {
-        ImportErrorSeverity::ItemSkipped => "item_skipped",
-        ImportErrorSeverity::Degraded => "degraded",
-        ImportErrorSeverity::JobFailed => "job_failed",
-    }
-}
-
-fn kind_db(k: RecipientKind) -> &'static str {
-    match k {
-        RecipientKind::To => "to",
-        RecipientKind::Cc => "cc",
-        RecipientKind::Bcc => "bcc",
-    }
-}
-
 /// The value PostgreSQL stores for `t` in a `timestamptz` column (postgres-types 0.2.14 truncates toward
 /// 2000-01-01 to whole microseconds). Compare file mtimes only after this truncation.
 pub fn truncate_to_micros(t: SystemTime) -> SystemTime {
@@ -131,12 +95,7 @@ pub fn truncate_to_micros(t: SystemTime) -> SystemTime {
 }
 
 fn cp_from_row(r: &Row) -> Result<Checkpoint, AppError> {
-    let phase = match r.get::<_, &str>(2) {
-        "scanning" => ImportPhase::Scanning,
-        "importing" => ImportPhase::Importing,
-        "finalizing" => ImportPhase::Finalizing,
-        other => return Err(AppError::internal(format!("unknown checkpoint phase {other}"))),
-    };
+    let phase = ImportPhase::from_db(r.get(2))?;
     Ok(Checkpoint {
         pst_id: r.get(0),
         job_id: r.get(1),
@@ -182,7 +141,7 @@ impl Checkpoint {
 
     /// `items_total: None` keeps the stored value.
     pub async fn set_phase(client: &Client, pst_id: i64, phase: ImportPhase, items_total: Option<i64>) -> Result<(), AppError> {
-        client.execute(CP_SET_PHASE, &[&pst_id, &phase_db(phase), &items_total]).await.map_err(db_err)?;
+        client.execute(CP_SET_PHASE, &[&pst_id, &phase.as_db(), &items_total]).await.map_err(db_err)?;
         Ok(())
     }
 }
@@ -532,7 +491,7 @@ async fn copy_batch(tx: &Transaction<'_>, items: &[NormalizedItem]) -> Result<()
             let email = r.address.as_ref().map(|a| a.email.as_str());
             let atype = r.address.as_ref().map(|a| a.address_type.as_db());
             w.as_mut()
-                .write(&[&it.seq, &&m.dedupe_key[..], &r.ordinal, &kind_db(r.kind), &email, &atype, &r.display_name, &r.search_text])
+                .write(&[&it.seq, &&m.dedupe_key[..], &r.ordinal, &r.kind.as_db(), &email, &atype, &r.display_name, &r.search_text])
                 .await?;
         }
     }
@@ -578,7 +537,7 @@ async fn copy_batch(tx: &Transaction<'_>, items: &[NormalizedItem]) -> Result<()
     let mut w = pin!(BinaryCopyInWriter::new(sink, &[T::TEXT, T::TEXT, T::TEXT, T::INT8, T::TEXT]));
     for it in items {
         for e in &it.errors {
-            w.as_mut().write(&[&stage_db(e.stage), &severity_db(e.severity), &e.folder_path, &e.pst_item_id, &e.message]).await?;
+            w.as_mut().write(&[&e.stage.as_db(), &e.severity.as_db(), &e.folder_path, &e.pst_item_id, &e.message]).await?;
         }
     }
     w.finish().await?;

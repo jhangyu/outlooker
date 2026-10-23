@@ -3,7 +3,7 @@
 use tokio_postgres::types::ToSql;
 
 use crate::dto::error::AppError;
-use crate::dto::search::{ConditionGroup, ConditionNode, GroupOp, RecipientKind, SearchQuery};
+use crate::dto::search::{ConditionGroup, ConditionNode, GroupOp, SearchQuery};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Param {
@@ -115,12 +115,7 @@ impl Builder {
                 let p = self.param(Param::Text(like(&v)));
                 let mut names: Vec<String> = kinds
                     .iter()
-                    .map(|k| match k {
-                        RecipientKind::To => "to",
-                        RecipientKind::Cc => "cc",
-                        RecipientKind::Bcc => "bcc",
-                    })
-                    .map(str::to_owned)
+                    .map(|k| k.as_db().to_owned())
                     .collect();
                 names.sort();
                 names.dedup();
@@ -314,7 +309,7 @@ pub fn is_rfc3339(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::search::ConditionNode as N;
+    use crate::dto::search::{ConditionNode as N, RecipientKind};
 
     fn dsl(op: GroupOp, children: Vec<ConditionNode>) -> SearchQuery {
         SearchQuery::Dsl { root: ConditionGroup { op, children } }

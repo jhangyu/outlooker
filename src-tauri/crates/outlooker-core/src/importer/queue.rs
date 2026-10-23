@@ -16,7 +16,7 @@ use crate::dto::app::{AppPhase, LibraryCounts};
 use crate::dto::error::AppError;
 use crate::dto::events::{ImportStatusChanged, LibraryChanged};
 use crate::dto::import::{
-    EnqueueResult, ImportErrorEntry, ImportErrorPage, ImportErrorSeverity, ImportErrorStage, ImportErrorsRequest, ImportPhase,
+    db_text, EnqueueResult, ImportErrorEntry, ImportErrorPage, ImportErrorSeverity, ImportErrorStage, ImportErrorsRequest, ImportPhase,
     ImportProgress, ImportStatus, PstSource,
 };
 use crate::gate::{Activity, Gate};
@@ -25,7 +25,7 @@ use crate::importer::normalize::{NormalizeCtx, normalize};
 use crate::importer::progress::{BYTE_BUDGET, ByteBudget, Throughput};
 use crate::importer::pst_reader::{self, ReaderMsg, ReaderParams};
 use crate::importer::types::{FolderIn, ItemError, RawItem};
-use crate::importer::writer::{AFTER_JOB_VACUUM, Checkpoint, Writer, WriterConfig, load_known_hashes, stage_db, truncate_to_micros, upsert_folders};
+use crate::importer::writer::{AFTER_JOB_VACUUM, Checkpoint, Writer, WriterConfig, load_known_hashes, truncate_to_micros, upsert_folders};
 use crate::importer::{ImportTuning, RecoveryReport, remove};
 use crate::paths::Paths;
 use crate::sink::{CoreEvent, EventSink};
@@ -147,25 +147,40 @@ impl Inner {
 
 // ------------------------------------------------------------------------------------------------ status
 
-/// Part 04 §2.1 table.
-pub fn status_of(kind: &str, state: &str) -> ImportStatus {
-    match (kind, state) {
-        ("remove", "failed") => ImportStatus::Failed,
-        ("remove", _) => ImportStatus::Removing,
-        (_, "queued") => ImportStatus::Queued,
-        (_, "running") => ImportStatus::Running,
-        (_, "cancelling") => ImportStatus::Cancelling,
-        (_, "cancelled") => ImportStatus::Cancelled,
-        (_, "failed") => ImportStatus::Failed,
-        _ => ImportStatus::Completed,
-    }
+/// `import_jobs.kind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JobKind {
+    Import,
+    Remove,
 }
+db_text!(JobKind, "job kind", { Import => "import", Remove => "remove" });
 
-fn phase_of(s: &str) -> ImportPhase {
-    match s {
-        "scanning" => ImportPhase::Scanning,
-        "importing" => ImportPhase::Importing,
-        _ => ImportPhase::Finalizing,
+/// `import_jobs.state` (Part 03 §7.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JobState {
+    Queued,
+    Running,
+    Cancelling,
+    Cancelled,
+    Failed,
+    Completed,
+}
+db_text!(JobState, "job state", {
+    Queued => "queued", Running => "running", Cancelling => "cancelling",
+    Cancelled => "cancelled", Failed => "failed", Completed => "completed",
+});
+
+/// Part 04 §2.1 table.
+pub(crate) fn status_of(kind: JobKind, state: JobState) -> ImportStatus {
+    match (kind, state) {
+        (JobKind::Remove, JobState::Failed) => ImportStatus::Failed,
+        (JobKind::Remove, _) => ImportStatus::Removing,
+        (JobKind::Import, JobState::Queued) => ImportStatus::Queued,
+        (JobKind::Import, JobState::Running) => ImportStatus::Running,
+        (JobKind::Import, JobState::Cancelling) => ImportStatus::Cancelling,
+        (JobKind::Import, JobState::Cancelled) => ImportStatus::Cancelled,
+        (JobKind::Import, JobState::Failed) => ImportStatus::Failed,
+        (JobKind::Import, JobState::Completed) => ImportStatus::Completed,
     }
 }
 
@@ -183,14 +198,15 @@ pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSour
     let c = inner.db.app_client().await?;
     let rows = c.query(LIST_SQL, &[&RFC3339_UTC_FMT, &only]).await.map_err(db_err)?;
     let running = inner.running();
-    let mut out: Vec<(u8, i64, PstSource)> = rows
+    let mut out = rows
         .iter()
         .map(|r| {
             let id: i64 = r.get(0);
-            let status = status_of(r.get(4), r.get(5));
+            let status = status_of(JobKind::from_db(r.get(4))?, JobState::from_db(r.get(5))?);
             let job_id: i64 = r.get(6);
             let phase: Option<&str> = r.get(9);
-            let progress = phase.map(|p| {
+            let phase = phase.map(ImportPhase::from_db).transpose()?;
+            let progress = phase.map(|phase| {
                 let (stored, duplicates, errors, skipped_non_mail): (i64, i64, i64, i64) = (r.get(11), r.get(12), r.get(13), r.get(14));
                 let items_total: Option<i64> = r.get(10);
                 let items_done = stored + duplicates + errors + skipped_non_mail;
@@ -198,7 +214,7 @@ pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSour
                 let tp = inner.throughput.lock().unwrap_or_else(|p| p.into_inner());
                 ImportProgress {
                     pst_id: id,
-                    phase: phase_of(p),
+                    phase,
                     items_total,
                     items_done,
                     stored,
@@ -228,9 +244,9 @@ pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSour
                 queued_at: r.get(7),
                 finished_at: r.get(8),
             };
-            (rank, job_id, src)
+            Ok((rank, job_id, src))
         })
-        .collect();
+        .collect::<Result<Vec<(u8, i64, PstSource)>, AppError>>()?;
     // running first; queued / removing in queue order; the rest newest first
     out.sort_by(|a, b| {
         a.0.cmp(&b.0).then_with(|| if a.0 == 2 { (&b.2.queued_at, b.1).cmp(&(&a.2.queued_at, a.1)) } else { a.1.cmp(&b.1) })
@@ -238,14 +254,11 @@ pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSour
     Ok(out.into_iter().map(|(_, _, s)| s).collect())
 }
 
-async fn source(inner: &Inner, pst_id: i64) -> Option<PstSource> {
-    list(inner, Some(pst_id)).await.ok()?.pop()
-}
-
-async fn emit_status(inner: &Inner, pst_id: i64) {
-    if let Some(src) = source(inner, pst_id).await {
-        inner.sink.emit(CoreEvent::ImportStatusChanged(ImportStatusChanged { pst_id, status: src.status, removed: false, source: Some(src) }));
-    }
+/// Emits the PST's current status and returns the source it fetched (None when the list query failed or the PST is gone).
+async fn emit_status(inner: &Inner, pst_id: i64) -> Option<PstSource> {
+    let src = list(inner, Some(pst_id)).await.ok()?.pop()?;
+    inner.sink.emit(CoreEvent::ImportStatusChanged(ImportStatusChanged { pst_id, status: src.status, removed: false, source: Some(src.clone()) }));
+    Some(src)
 }
 
 async fn emit_library(inner: &Inner) {
@@ -341,8 +354,7 @@ pub(crate) async fn enqueue(inner: &Inner, paths: Vec<String>) -> Result<Vec<Enq
                 Err(e @ AppError::AlreadyImported { .. }) => EnqueueResult::Rejected { path, error: e },
                 Err(e) => return Err(e),
                 Ok(pst_id) => {
-                    emit_status(inner, pst_id).await;
-                    let pst = source(inner, pst_id).await.ok_or_else(|| AppError::internal("enqueued source vanished"))?;
+                    let pst = emit_status(inner, pst_id).await.ok_or_else(|| AppError::internal("enqueued source vanished"))?;
                     EnqueueResult::Queued { pst }
                 }
             },
@@ -354,7 +366,7 @@ pub(crate) async fn enqueue(inner: &Inner, paths: Vec<String>) -> Result<Vec<Enq
 }
 
 /// Newest job of a PST, locked for the rest of the transaction. None when the PST does not exist.
-async fn newest_job_for_update(tx: &tokio_postgres::Transaction<'_>, pst_id: i64) -> Result<Option<(i64, String, String)>, AppError> {
+async fn newest_job_for_update(tx: &tokio_postgres::Transaction<'_>, pst_id: i64) -> Result<Option<(i64, JobKind, JobState)>, AppError> {
     let exists = tx.query_opt("SELECT 1 FROM pst_sources WHERE id = $1 FOR UPDATE", &[&pst_id]).await.map_err(db_err)?;
     if exists.is_none() {
         return Ok(None);
@@ -363,7 +375,7 @@ async fn newest_job_for_update(tx: &tokio_postgres::Transaction<'_>, pst_id: i64
         .query_opt("SELECT id, kind, state FROM import_jobs WHERE pst_id = $1 ORDER BY id DESC LIMIT 1 FOR UPDATE", &[&pst_id])
         .await
         .map_err(db_err)?;
-    Ok(row.map(|r| (r.get(0), r.get(1), r.get(2))))
+    row.map(|r| Ok((r.get(0), JobKind::from_db(r.get(1))?, JobState::from_db(r.get(2))?))).transpose()
 }
 
 pub(crate) async fn cancel(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
@@ -372,11 +384,11 @@ pub(crate) async fn cancel(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
     let Some((job_id, kind, state)) = newest_job_for_update(&tx, pst_id).await? else {
         return Err(AppError::not_found("pst", pst_id));
     };
-    match (kind.as_str(), state.as_str()) {
-        ("import", "queued") => {
+    match (kind, state) {
+        (JobKind::Import, JobState::Queued) => {
             tx.execute("UPDATE import_jobs SET state = 'cancelled', finished_at = now() WHERE id = $1", &[&job_id]).await.map_err(db_err)?;
         }
-        ("import", "running") => {
+        (JobKind::Import, JobState::Running) => {
             tx.execute("UPDATE import_jobs SET state = 'cancelling' WHERE id = $1", &[&job_id]).await.map_err(db_err)?;
         }
         _ => return Err(AppError::invalid("pstId", "notCancellable")),
@@ -395,7 +407,7 @@ pub(crate) async fn resume(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
     let Some((_, kind, state)) = newest_job_for_update(&tx, pst_id).await? else {
         return Err(AppError::not_found("pst", pst_id));
     };
-    if kind != "import" || !matches!(state.as_str(), "cancelled" | "failed") {
+    if kind != JobKind::Import || !matches!(state, JobState::Cancelled | JobState::Failed) {
         return Err(AppError::invalid("pstId", "notResumable"));
     }
     let path: String = tx.query_one("SELECT path FROM pst_sources WHERE id = $1", &[&pst_id]).await.map_err(db_err)?.get(0);
@@ -413,12 +425,12 @@ pub(crate) async fn remove(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
     let Some((job_id, kind, state)) = newest_job_for_update(&tx, pst_id).await? else {
         return Err(AppError::not_found("pst", pst_id));
     };
-    match status_of(&kind, &state) {
+    match status_of(kind, state) {
         ImportStatus::Running | ImportStatus::Cancelling => return Err(AppError::Busy { reason: crate::dto::error::BusyReason::ImportRunning }),
         ImportStatus::Removing => return Err(AppError::Busy { reason: crate::dto::error::BusyReason::PstRemoving }),
         _ => {}
     }
-    if kind == "import" && state == "queued" {
+    if (kind, state) == (JobKind::Import, JobState::Queued) {
         // required by import_jobs_one_active_per_pst (Part 04 §4.3)
         tx.execute("UPDATE import_jobs SET state = 'cancelled', finished_at = now() WHERE id = $1", &[&job_id]).await.map_err(db_err)?;
     }
@@ -464,19 +476,6 @@ pub(crate) async fn errors(inner: &Inner, req: ImportErrorsRequest) -> Result<Im
             Some(c) if *c == SqlState::INVALID_DATETIME_FORMAT || *c == SqlState::DATETIME_FIELD_OVERFLOW => bad_cursor(),
             _ => db_err(e),
         })?;
-    let stage = |s: &str| match s {
-        "open" => ImportErrorStage::Open,
-        "scan" => ImportErrorStage::Scan,
-        "parse" => ImportErrorStage::Parse,
-        "html" => ImportErrorStage::Html,
-        "image" => ImportErrorStage::Image,
-        _ => ImportErrorStage::Store,
-    };
-    let severity = |s: &str| match s {
-        "item_skipped" => ImportErrorSeverity::ItemSkipped,
-        "degraded" => ImportErrorSeverity::Degraded,
-        _ => ImportErrorSeverity::JobFailed,
-    };
     let more = rows.len() > limit as usize;
     let page: Vec<_> = rows.iter().take(limit as usize).collect();
     let next_cursor = more.then(|| {
@@ -486,16 +485,18 @@ pub(crate) async fn errors(inner: &Inner, req: ImportErrorsRequest) -> Result<Im
     Ok(ImportErrorPage {
         rows: page
             .iter()
-            .map(|r| ImportErrorEntry {
-                id: r.get(0),
-                occurred_at: r.get(1),
-                folder_path: r.get(3),
-                pst_item_id: r.get(4),
-                stage: stage(r.get(5)),
-                severity: severity(r.get(6)),
-                message: r.get(7),
+            .map(|r| {
+                Ok(ImportErrorEntry {
+                    id: r.get(0),
+                    occurred_at: r.get(1),
+                    folder_path: r.get(3),
+                    pst_item_id: r.get(4),
+                    stage: ImportErrorStage::from_db(r.get(5))?,
+                    severity: ImportErrorSeverity::from_db(r.get(6))?,
+                    message: r.get(7),
+                })
             })
-            .collect(),
+            .collect::<Result<_, AppError>>()?,
         next_cursor,
     })
 }
@@ -514,7 +515,7 @@ pub(crate) async fn recover_after_crash(inner: &Inner) -> Result<RecoveryReport,
     let mut report = RecoveryReport::default();
     for r in &rows {
         let pst_id: i64 = r.get(0);
-        if r.get::<_, &str>(1) == "queued" { report.requeued.push(pst_id) } else { report.cancelled.push(pst_id) }
+        if JobState::from_db(r.get(1))? == JobState::Queued { report.requeued.push(pst_id) } else { report.cancelled.push(pst_id) }
     }
     report.requeued.sort_unstable();
     report.cancelled.sort_unstable();
@@ -594,7 +595,7 @@ enum AttemptEnd {
 }
 
 enum Next {
-    Job { id: i64, pst_id: i64, kind: String },
+    Job { id: i64, pst_id: i64, kind: JobKind },
     Idle,
 }
 
@@ -617,7 +618,7 @@ async fn worker(inner: Arc<Inner>) {
         let next = next_job(&inner).await;
         match next {
             Ok(Next::Job { id, pst_id, kind }) => {
-                let activity = if kind == "remove" { Activity::Removal } else { Activity::Import };
+                let activity = if kind == JobKind::Remove { Activity::Removal } else { Activity::Import };
                 let guard = match inner.gate.try_enter(activity) {
                     Ok(g) => g,
                     Err(_) => {
@@ -628,7 +629,7 @@ async fn worker(inner: Arc<Inner>) {
                         continue;
                     }
                 };
-                let crashed = run_job(&inner, id, pst_id, &kind).await;
+                let crashed = run_job(&inner, id, pst_id, kind).await;
                 drop(guard);
                 if crashed {
                     return; // simulated process kill: the worker dies with the job
@@ -652,11 +653,14 @@ async fn next_job(inner: &Inner) -> Result<Next, AppError> {
         .query_opt("SELECT id, pst_id, kind FROM import_jobs WHERE state = 'queued' ORDER BY id LIMIT 1", &[])
         .await
         .map_err(db_err)?;
-    Ok(row.map_or(Next::Idle, |r| Next::Job { id: r.get(0), pst_id: r.get(1), kind: r.get(2) }))
+    match row {
+        None => Ok(Next::Idle),
+        Some(r) => Ok(Next::Job { id: r.get(0), pst_id: r.get(1), kind: JobKind::from_db(r.get(2))? }),
+    }
 }
 
 /// Takes the job (`queued` → `running`) and runs it. Returns true when the crash seam dropped it.
-async fn run_job(inner: &Arc<Inner>, job_id: i64, pst_id: i64, kind: &str) -> bool {
+async fn run_job(inner: &Arc<Inner>, job_id: i64, pst_id: i64, kind: JobKind) -> bool {
     let cancel = Arc::new(JobCancel::new());
     // registered before the row turns `running`, so a cancel that sees `running` finds the flag
     inner.set_running(Some(RunningJob { job_id, pst_id, cancel: cancel.clone() }));
@@ -671,7 +675,7 @@ async fn run_job(inner: &Arc<Inner>, job_id: i64, pst_id: i64, kind: &str) -> bo
     let crashed = match taken {
         Ok(1) => {
             emit_status(inner, pst_id).await;
-            if kind == "remove" {
+            if kind == JobKind::Remove {
                 run_removal(inner, job_id, pst_id).await;
                 false
             } else {
@@ -709,7 +713,7 @@ async fn run_removal(inner: &Arc<Inner>, job_id: i64, pst_id: i64) {
             }
             Err(e) => {
                 let failure = JobFailure { stage: ImportErrorStage::Store, message: e.to_string() };
-                if set_final(inner, job_id, pst_id, "failed", Some(&failure)).await.is_ok() {
+                if set_final(inner, job_id, pst_id, JobState::Failed, Some(&failure)).await.is_ok() {
                     emit_status(inner, pst_id).await;
                     let _ = inner.events.send((pst_id, ImportStatus::Failed));
                 }
@@ -720,21 +724,21 @@ async fn run_removal(inner: &Arc<Inner>, job_id: i64, pst_id: i64) {
 }
 
 /// Final job row state (+ the job_failed error row in the same transaction).
-async fn set_final(inner: &Inner, job_id: i64, pst_id: i64, state: &str, failure: Option<&JobFailure>) -> Result<(), AppError> {
+async fn set_final(inner: &Inner, job_id: i64, pst_id: i64, state: JobState, failure: Option<&JobFailure>) -> Result<(), AppError> {
     let mut c = inner.db.app_client().await?;
     let tx = c.transaction().await.map_err(db_err)?;
     if let Some(f) = failure {
         let e = ItemError::new(f.stage, ImportErrorSeverity::JobFailed, "", 0, &f.message);
         tx.execute(
             "INSERT INTO import_errors (pst_id, job_id, stage, severity, message) VALUES ($1, $2, $3, 'job_failed', $4)",
-            &[&pst_id, &job_id, &stage_db(f.stage), &e.message],
+            &[&pst_id, &job_id, &f.stage.as_db(), &e.message],
         )
         .await
         .map_err(db_err)?;
     }
     tx.execute(
         "UPDATE import_jobs SET state = $2, finished_at = CASE WHEN $2 = 'queued' THEN NULL ELSE now() END WHERE id = $1",
-        &[&job_id, &state],
+        &[&job_id, &state.as_db()],
     )
     .await
     .map_err(db_err)?;
@@ -799,7 +803,7 @@ async fn run_import(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<J
         if let Ok(m) = inner.inflight() {
             m.clear();
         }
-        if set_final(inner, job_id, pst_id, "queued", None).await.is_ok() {
+        if set_final(inner, job_id, pst_id, JobState::Queued, None).await.is_ok() {
             emit_status(inner, pst_id).await;
             let _ = inner.events.send((pst_id, ImportStatus::Queued));
         }
@@ -810,9 +814,9 @@ async fn run_import(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<J
         return false;
     }
     let (state, status) = match (&failure, reason) {
-        (Some(_), _) => ("failed", ImportStatus::Failed),
-        (None, Some(CancelReason::User)) => ("cancelled", ImportStatus::Cancelled),
-        _ => ("completed", ImportStatus::Completed),
+        (Some(_), _) => (JobState::Failed, ImportStatus::Failed),
+        (None, Some(CancelReason::User)) => (JobState::Cancelled, ImportStatus::Cancelled),
+        _ => (JobState::Completed, ImportStatus::Completed),
     };
     if let Err(e) = set_final(inner, job_id, pst_id, state, failure.as_ref()).await {
         log::warn!("import job {job_id}: final state: {e}");
@@ -1051,20 +1055,37 @@ mod tests {
 
     #[test]
     fn status_table() {
+        use JobKind::{Import, Remove};
         let cases = [
-            ("import", "queued", ImportStatus::Queued),
-            ("import", "running", ImportStatus::Running),
-            ("import", "cancelling", ImportStatus::Cancelling),
-            ("import", "cancelled", ImportStatus::Cancelled),
-            ("import", "failed", ImportStatus::Failed),
-            ("import", "completed", ImportStatus::Completed),
-            ("remove", "queued", ImportStatus::Removing),
-            ("remove", "running", ImportStatus::Removing),
-            ("remove", "failed", ImportStatus::Failed),
+            (Import, JobState::Queued, ImportStatus::Queued),
+            (Import, JobState::Running, ImportStatus::Running),
+            (Import, JobState::Cancelling, ImportStatus::Cancelling),
+            (Import, JobState::Cancelled, ImportStatus::Cancelled),
+            (Import, JobState::Failed, ImportStatus::Failed),
+            (Import, JobState::Completed, ImportStatus::Completed),
+            (Remove, JobState::Queued, ImportStatus::Removing),
+            (Remove, JobState::Running, ImportStatus::Removing),
+            (Remove, JobState::Failed, ImportStatus::Failed),
         ];
         for (kind, state, want) in cases {
-            assert_eq!(status_of(kind, state), want, "{kind}/{state}");
+            assert_eq!(status_of(kind, state), want, "{kind:?}/{state:?}");
         }
+    }
+
+    #[test]
+    fn job_kind_db_round_trip() {
+        for &k in JobKind::ALL {
+            assert_eq!(JobKind::from_db(k.as_db()).unwrap(), k);
+        }
+        assert!(JobKind::from_db("bogus").is_err());
+    }
+
+    #[test]
+    fn job_state_db_round_trip() {
+        for &s in JobState::ALL {
+            assert_eq!(JobState::from_db(s.as_db()).unwrap(), s);
+        }
+        assert!(JobState::from_db("bogus").is_err());
     }
 
     #[test]
