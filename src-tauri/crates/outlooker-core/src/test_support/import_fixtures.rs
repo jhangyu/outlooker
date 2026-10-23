@@ -7,7 +7,7 @@ use crate::dto::search::RecipientKind;
 use crate::importer::dedupe;
 use crate::importer::types::{AddressIn, AddressType, BodySource, NormalizedItem, NormalizedMail, Outcome, RecipientOut};
 use crate::importer::webp::KnownHashes;
-use crate::importer::writer::{Checkpoint, Writer, WriterConfig, WriterLimits};
+use crate::importer::writer::{Checkpoint, WriterConfig, WriterHandle, WriterLimits};
 
 /// INSERT pst_sources + one import job (state 'running', started_at now()) + one folder (pst_folder_id 1, path "Inbox").
 /// Only one job may be running in a database (`import_jobs_one_running`): call `complete_job` before the next source.
@@ -98,7 +98,7 @@ pub fn item(seq: i64, pst_item_id: i64, mail: NormalizedMail) -> NormalizedItem 
     NormalizedItem { seq, pst_item_id, pst_folder_id: 1, raw_bytes: 0, outcome: Outcome::Mail(Box::new(mail)), errors: Vec::new() }
 }
 
-/// Runs one writer over `items` for a new source (new_source + Checkpoint::begin + Writer::spawn on db.connect_app()
+/// Runs one writer over `items` for a new source (new_source + Checkpoint::begin + WriterHandle::spawn on db.connect_app()
 /// + finish + job 'completed'). Returns pst_id.
 pub async fn seed_mails(db: &Db, path: &str, items: Vec<NormalizedItem>) -> i64 {
     let app = db.connect_app().await.expect("app connection");
@@ -111,7 +111,7 @@ pub async fn seed_mails(db: &Db, path: &str, items: Vec<NormalizedItem>) -> i64 
         limits: WriterLimits::default(),
         known: Arc::new(KnownHashes::new()),
     };
-    let writer = Writer::spawn(db.connect_app().await.expect("writer connection"), cfg, Box::new(|_| {})).await.expect("writer");
+    let writer = WriterHandle::spawn(db.connect_app().await.expect("writer connection"), cfg, Box::new(|_| {})).await.expect("writer");
     for it in items {
         writer.submit(it).await.expect("submit");
     }

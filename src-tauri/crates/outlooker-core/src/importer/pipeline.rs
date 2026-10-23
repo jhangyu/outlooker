@@ -22,7 +22,7 @@ use crate::importer::progress::Throughput;
 use crate::importer::pst_reader::{self, ReaderMsg, ReaderParams, ScanResult};
 use crate::importer::queue::{CancelReason, Inner, JobCancel, synthetic_items};
 use crate::importer::types::{FolderIn, NormalizedItem, RawItem};
-use crate::importer::writer::{Checkpoint, OnCommit, Writer, WriterConfig, load_known_hashes, truncate_to_micros, upsert_folders};
+use crate::importer::writer::{Checkpoint, OnCommit, WriterConfig, WriterHandle, load_known_hashes, truncate_to_micros, upsert_folders};
 use crate::sink::CoreEvent;
 
 pub(super) fn progress_event(cp: &Checkpoint, tp: Option<&Throughput>) -> ImportProgress {
@@ -104,7 +104,7 @@ pub(super) async fn attempt(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel
     let sent_bytes = Arc::new(AtomicU64::new(0));
     let on_commit = on_commit(inner, &crash, &sent_bytes, &start, counts);
     let cfg = WriterConfig { pst_id, data_root: inner.db.data_root()?, start: start.clone(), limits: inner.tuning.writer.clone(), known: known.clone() };
-    let writer = Writer::spawn(inner.db.connect_app().await?, cfg, on_commit).await?;
+    let writer = WriterHandle::spawn(inner.db.connect_app().await?, cfg, on_commit).await?;
     // (7) pipeline thread: rayon pool runs normalize, results go to the writer
     let ctx = NormalizeCtx { webp_quality: quality.clamp(1, 100) as u8, known };
     let (pipeline, done_rx, late_failure) = spawn_pipeline(rx, ctx, writer.sender(), cancel.clone(), sent_bytes);
