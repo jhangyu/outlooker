@@ -93,7 +93,7 @@ function Recipients({ list, copyLabel, title }: { list: Address[]; copyLabel: st
         <Text weight="semibold">{title}</Text>
         <Caption1 className={s.muted}>{t("preview.people", { n: list.length })}</Caption1>
         <span className={s.grow} />
-        <Button size="small" icon={<CopyRegular />} onClick={() => void navigator.clipboard.writeText(list.map(fmt).join(", "))}>
+        <Button size="small" icon={<CopyRegular />} onClick={() => navigator.clipboard.writeText(list.map(fmt).join(", ")).catch(() => undefined)}>
           {copyLabel}
         </Button>
       </div>
@@ -161,12 +161,27 @@ function WhenHidden({ id, title, children }: { id: string; title: string; childr
   );
 }
 
+function SenderDetails({ m }: { m: MailDetail }) {
+  const { t, i18n } = useTranslation("search");
+  const s = useStyles();
+  return (
+    <>
+      <div className={s.kv}><Caption1 className={s.muted}>{t("preview.subject")}</Caption1><Text>{m.subject || t("preview.noSubject")}</Text></div>
+      <div className={s.kv}><Caption1 className={s.muted}>{t("preview.from")}</Caption1><Text>{fmt(m.from)}</Text></div>
+      <div className={s.kv}><Caption1 className={s.muted}>{t("preview.date")}</Caption1><Text>{formatDateTime(m.sentAt, i18n.language)}</Text></div>
+    </>
+  );
+}
+
 function OverflowToken({ m }: { m: MailDetail }) {
   const { t } = useTranslation("search");
   const s = useStyles();
   const { ref, isOverflowing, overflowCount } = useOverflowMenu<HTMLButtonElement>();
   if (!isOverflowing) return null;
   const groups = [
+    { id: "sender", title: t("preview.from"), n: 1 },
+    { id: "to", title: t("preview.to"), n: m.to.length },
+    { id: "cc", title: t("preview.cc"), n: m.cc.length },
     { id: "bcc", title: t("preview.bcc"), n: m.bcc.length },
     { id: "found", title: t("preview.foundIn"), n: m.occurrences.length },
     { id: "att", title: t("preview.attachments"), n: m.attachments.length },
@@ -183,7 +198,7 @@ function OverflowToken({ m }: { m: MailDetail }) {
       <PopoverSurface className={s.surface} aria-label={t("preview.moreTitle")}>
         {groups.map((g) => (
           <WhenHidden key={g.id} id={g.id} title={`${g.title} · ${g.n}`}>
-            {g.id === "bcc" ? <RecipientList list={m.bcc} all /> : g.id === "found" ? <Places m={m} all /> : <Files m={m} />}
+            {g.id === "sender" ? <SenderDetails m={m} /> : g.id === "to" || g.id === "cc" || g.id === "bcc" ? <RecipientList list={m[g.id]} all /> : g.id === "found" ? <Places m={m} all /> : <Files m={m} />}
           </WhenHidden>
         ))}
       </PopoverSurface>
@@ -219,11 +234,7 @@ export function MessageHeader({ m }: { m: MailDetail }) {
       <Toolbar size="small" aria-label={t("preview.toolbar")} className={mergeClasses(s.bar, narrow && s.barTwo)}>
         <Token id="sender" priority={5} className={s.sender} label={`${t("preview.from")}: ${sender} ${m.from.address ?? ""}`.trim()}
           content={
-            <>
-              <div className={s.kv}><Caption1 className={s.muted}>{t("preview.subject")}</Caption1><Text>{subject}</Text></div>
-              <div className={s.kv}><Caption1 className={s.muted}>{t("preview.from")}</Caption1><Text>{fmt(m.from)}</Text></div>
-              <div className={s.kv}><Caption1 className={s.muted}>{t("preview.date")}</Caption1><Text>{full}</Text></div>
-            </>
+            <SenderDetails m={m} />
           }>
           <Avatar size={20} name={sender} color="colorful" />
           <b className={s.val}>{sender}</b>
