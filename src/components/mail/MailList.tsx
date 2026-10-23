@@ -4,18 +4,17 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useLayoutEffect, useMemo, useRef, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { MailRow } from "../../api/bindings/MailRow";
-import { Splitter, ellipsis, formatDay, formatMonth, useGridColumnSizing, useSplit, type SplitDefaults } from "../common";
+import { ellipsis, formatDay, formatMonth, useGridColumnSizing } from "../common";
 
 export const ROW_HEIGHT = 32;
 /** Prototype `.mail-item.compact`: sender + date, subject, snippet on three lines. */
 // 56 px of text lines + 2 × 8 px padding + 1 px bottom border (border-box).
 const COMPACT_ROW_HEIGHT = 73;
 const PREFETCH_ROWS = 50;
-// Sender and date have stored widths, subject is the 1fr remainder so extra pane width goes to the subject.
-// A 420 px pane (the minimum) fits: 24 avatar + 110 + 96 subject floor + 88 + 3 × 8 gaps + 24 padding + ~15 scrollbar.
-// Sender gets Fluent's right-edge handle (sender|subject), date the shared Splitter on its left edge (subject|date).
-const COLUMN_DEFAULTS = { sender: { width: 110, minWidth: 96 } };
-const SPLITS: SplitDefaults = { date: { size: 88, min: 72, max: 320 } };
+// Sender and subject are resizable (Fluent handles, `mail-list` key). Date is the 1fr remainder, right-aligned.
+// 420 px pane fits: 24 avatar + 110 + 150 + date >= 72, with 3 × 8 gaps + 24 padding + ~15 scrollbar (date gets 73).
+const COLUMN_DEFAULTS = { sender: { width: 110, minWidth: 96 }, subject: { width: 150, minWidth: 96 } };
+const DATE_MIN_WIDTH = 72;
 
 export type Entry = { kind: "month"; key: string; label: string } | { kind: "mail"; key: string; row: MailRow };
 
@@ -84,10 +83,11 @@ const useStyles = makeStyles({
     ":hover": { backgroundColor: tokens.colorBrandBackground2 },
   },
   ellipsis: { ...ellipsis },
+  date: { justifySelf: "end" },
   sender: { fontWeight: tokens.fontWeightSemibold },
   subject: { color: tokens.colorBrandForeground2 },
   snippet: { color: tokens.colorNeutralForeground3 },
-  meta: { display: "flex", whiteSpace: "nowrap", alignItems: "center", gap: tokens.spacingHorizontalXS, color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
+  meta: { display: "flex", justifySelf: "end", whiteSpace: "nowrap", alignItems: "center", gap: tokens.spacingHorizontalXS, color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
   footer: { display: "flex", alignItems: "center", justifyContent: "center", height: `${ROW_HEIGHT}px`, color: tokens.colorNeutralForeground3 },
 });
 
@@ -106,9 +106,7 @@ export function MailList(p: MailListProps) {
     if (el && el.scrollTop !== lastTop.current) el.scrollTop = lastTop.current;
   }, []);
   const { widths, headerProps } = useGridColumnSizing("mail-list", COLUMN_DEFAULTS);
-  const split = useSplit("mail-list", SPLITS);
-  const dateWidth = split.sizes.date!;
-  const grid = { gridTemplateColumns: `24px ${widths.sender}px minmax(96px, 1fr) ${dateWidth}px` };
+  const grid = { gridTemplateColumns: `24px ${widths.sender}px ${widths.subject}px minmax(${DATE_MIN_WIDTH}px, 1fr)` };
   const lng = i18n.language;
   const undated = t("list.undated");
   const entries = useMemo<Entry[]>(
@@ -142,7 +140,7 @@ export function MailList(p: MailListProps) {
   };
 
   const sender = headerProps("sender");
-  const dateSplit = split.props("date");
+  const subject = headerProps("subject");
   return (
     <div className={s.root}>
       {p.compact ? null : (
@@ -152,14 +150,11 @@ export function MailList(p: MailListProps) {
             <Caption1Strong className={s.ellipsis}>{t("list.col.from")}</Caption1Strong>
             {sender.aside}
           </span>
-          <Caption1Strong className={s.ellipsis}>{t("list.col.subject")}</Caption1Strong>
-          <span className={s.headCell}>
-            <Caption1Strong className={s.ellipsis}>{t("list.col.date")}</Caption1Strong>
-            <Splitter
-              orientation="vertical" reverse label={t("list.col.date")} {...dateSplit}
-              style={{ top: 0, bottom: 0, left: "-7px" }}
-            />
+          <span className={s.headCell} tabIndex={0} onKeyDown={subject.onKeyDown}>
+            <Caption1Strong className={s.ellipsis}>{t("list.col.subject")}</Caption1Strong>
+            {subject.aside}
           </span>
+          <Caption1Strong className={s.date}>{t("list.col.date")}</Caption1Strong>
         </div>
       )}
     <div ref={ref} className={s.scroll} role="listbox" aria-label={p.ariaLabel} tabIndex={0} onKeyDown={onKeyDown} onScroll={(e) => (lastTop.current = e.currentTarget.scrollTop)} data-testid="mail-list">
