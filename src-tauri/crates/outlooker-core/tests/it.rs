@@ -1,5 +1,5 @@
 #![cfg(feature = "test-support")]
-// A crate root directly under tests/ is an integration test, so libtest --ensure-time caps it.
+// All shared-cluster DB tests in one binary: the cargo test runner boots the cluster once for it (CLAUDE.md "Test policy").
 // `mod x;` in a crate root resolves beside the root file, hence the explicit paths into tests/it/.
 #[path = "it/app_compose.rs"]
 mod app_compose;

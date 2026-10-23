@@ -1,5 +1,6 @@
-//! Shared real-PostgreSQL test fixture: ONE cluster per test process (cloned from a cached template data root),
-//! one fresh `WAL_LOG` database per test. Production initdb flags, migrated, both pools.
+//! Shared real-PostgreSQL test fixture: ONE cluster per test run, booted by `examples/test_pg_server.rs` (spawned by
+//! `scripts/cargo-test-runner.mjs`, connection in `OUTLOOKER_TEST_PG`). Tests only connect and get one fresh
+//! `WAL_LOG` database each. Production initdb flags, migrated, both pools.
 pub mod import_fixtures;
 mod template;
 
@@ -10,16 +11,14 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use tempfile::TempDir;
 
 use crate::db::{connect, Credentials, Db, DbConn, Pools, ADMIN_ROLE, DB_NAME};
-use crate::lifecycle::pg::PgController;
 use crate::paths::{dev_pg_dir, Paths};
 
 pub use template::seeded_root;
 
-/// Builds the template data root (files only, no shared cluster). The cargo test runner calls it uncapped
+/// Builds the template data root (files only, no cluster). The cargo test runner calls it uncapped
 /// so a cold template build never lands inside a capped test.
 pub fn warm_template() {
     template::template_root();
@@ -27,11 +26,7 @@ pub fn warm_template() {
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-const TEST_CONF: &str = "fsync = off\nfull_page_writes = off\nmax_connections = 400\nshared_buffers = '128MB'\n";
-const RUN_PREFIX: &str = "outlooker-test-pg-run-";
-
 struct Run {
-    dir: PathBuf,
     port: u16,
     creds: Credentials,
 }
@@ -75,71 +70,27 @@ where
     })
 }
 
-fn pg_ctl_stop(dir: &std::path::Path) {
-    let pg_ctl = dev_pg_dir().join("bin").join(format!("pg_ctl{}", std::env::consts::EXE_SUFFIX));
-    let _ = std::process::Command::new(pg_ctl).args(["stop", "-m", "immediate", "-w", "-D"]).arg(dir.join("pgdata")).output();
-}
-
-extern "C" fn stop_shared() {
-    if let Some(run) = RUN.get() {
-        pg_ctl_stop(&run.dir);
-        let _ = std::fs::remove_dir_all(&run.dir);
-    }
-}
-
-unsafe extern "C" {
-    safe fn atexit(cb: extern "C" fn()) -> std::ffi::c_int;
-}
-
-/// Removes clusters left behind by test processes that died without running the exit hook.
-fn sweep_dead_runs() {
-    let mut sys = System::new();
-    for e in std::fs::read_dir(std::env::temp_dir()).expect("read temp dir").flatten() {
-        let name = e.file_name().to_string_lossy().into_owned();
-        let Some(rest) = name.strip_prefix(RUN_PREFIX) else { continue };
-        let Some(pid) = rest.split('-').next().and_then(|p| p.parse::<u32>().ok()) else { continue };
-        if pid == std::process::id() {
-            continue;
-        }
-        sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[Pid::from_u32(pid)]), true, ProcessRefreshKind::nothing());
-        if sys.process(Pid::from_u32(pid)).is_none() {
-            pg_ctl_stop(&e.path());
-            let _ = std::fs::remove_dir_all(e.path());
-        }
-    }
-}
-
-fn boot_shared() -> Run {
-    sweep_dead_runs();
-    let gen_ = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    let dir = std::env::temp_dir().join(format!("{RUN_PREFIX}{}-{gen_}", std::process::id()));
-    seeded_root(&dir);
-    let paths = Paths::new(dir.join("app"), dir.join("logs"), dev_pg_dir()).with_data_root(dir.clone());
-    {
-        use std::io::Write;
-        let mut conf = std::fs::OpenOptions::new().append(true).open(paths.pgdata().join("postgresql.auto.conf")).expect("open auto conf");
-        conf.write_all(TEST_CONF.as_bytes()).expect("append auto conf");
-    }
-    let creds = Credentials::load(&paths.credentials()).expect("template credentials");
-    let port = block_on(async {
-        let port = PgController::new(paths.clone()).start(&paths.pgdata()).await.expect("start shared cluster");
-        let admin = connect(port, ADMIN_ROLE, &creds.admin, "postgres").await.expect("admin connect");
-        admin.batch_execute("ALTER ROLE outlooker_ro CONNECTION LIMIT -1").await.expect("lift ro connection limit");
-        port
-    });
-    atexit(stop_shared);
-    Run { dir, port, creds }
+/// The shared cluster's connection from `OUTLOOKER_TEST_PG` = `<port>\t<run dir>`, set by the cargo test runner.
+fn shared() -> Run {
+    let v = std::env::var("OUTLOOKER_TEST_PG")
+        .expect("OUTLOOKER_TEST_PG is not set: run through cargo test (the runner boots the shared cluster)");
+    let (port, dir) = v.split_once('\t').expect("OUTLOOKER_TEST_PG is <port><TAB><run dir>");
+    let dir = PathBuf::from(dir);
+    let paths = Paths::new(dir.join("app"), dir.join("logs"), dev_pg_dir()).with_data_root(dir);
+    let creds = Credentials::load(&paths.credentials()).expect("shared cluster credentials");
+    Run { port: port.parse().expect("OUTLOOKER_TEST_PG port"), creds }
 }
 
 impl TestCluster {
-    /// A fresh migrated database on the shared cluster (the first caller boots the cluster).
+    /// A fresh migrated database on the shared cluster.
     pub async fn start() -> TestCluster {
         Self::create("outlooker", None).await
     }
 
     /// Like `start`, but the database is a copy of a shared seeded database: `seed` runs once per process per `name`.
     pub async fn from_seed(name: &'static str, seed: fn(&TestCluster) -> BoxFuture<'_, ()>) -> TestCluster {
-        let template = format!("seed_{name}");
+        // per process: the runner's solo rerun of a slow test is a second process on the same cluster
+        let template = format!("seed_{name}_{}", std::process::id());
         {
             let mut seeds = SEEDS.lock().unwrap_or_else(|p| p.into_inner());
             let seeds = seeds.get_or_insert_with(HashSet::new);
@@ -158,8 +109,8 @@ impl TestCluster {
 
     /// Creates database `fixed` (when given) or a numbered one from `template`, and the handle for it.
     async fn create(template: &str, fixed: Option<&str>) -> TestCluster {
-        let run = RUN.get_or_init(boot_shared);
-        let dbname = fixed.map(str::to_owned).unwrap_or_else(|| format!("t{}", NEXT.fetch_add(1, Ordering::Relaxed)));
+        let run = RUN.get_or_init(shared);
+        let dbname = fixed.map(str::to_owned).unwrap_or_else(|| format!("t{}_{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
         let postgres = connect(run.port, ADMIN_ROLE, &run.creds.admin, "postgres").await.expect("admin connect");
         let mut tries = 0;
         loop {
