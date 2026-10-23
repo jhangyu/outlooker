@@ -9,8 +9,13 @@ pub async fn pst_list(s: State<'_, Services>) -> Result<Vec<PstSource>, AppError
 }
 
 #[tauri::command]
-pub async fn import_enqueue(s: State<'_, Services>, paths: Vec<String>) -> Result<Vec<EnqueueResult>, AppError> {
+pub async fn pst_register(s: State<'_, Services>, paths: Vec<String>) -> Result<Vec<EnqueueResult>, AppError> {
     s.importer.register(paths).await
+}
+
+#[tauri::command]
+pub async fn pst_set_enabled(s: State<'_, Services>, pst_id: i64, enabled: bool) -> Result<PstSource, AppError> {
+    s.importer.set_enabled(pst_id, enabled).await
 }
 
 #[tauri::command]
