@@ -1,4 +1,4 @@
-// Builds the E2E binary src-tauri/target/debug/outlooker[.exe]: debug, no bundle, cargo feature e2e
+// Builds the E2E binary <TARGET_DIR>/debug/outlooker[.exe]: debug, no bundle, cargo feature e2e
 // (embedded WebDriver + OUTLOOKER_APP_DATA_DIR seam), frontend built with VITE_E2E=1 (native picker bypass).
 import { spawnSync } from "node:child_process";
 

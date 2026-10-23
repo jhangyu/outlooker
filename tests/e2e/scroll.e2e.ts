@@ -32,7 +32,7 @@ describe("scroll to the 100,000-row cap in the real webview", () => {
       );
     }
     assert.ok((await scrollHeight()) >= 3_200_000, `scrollHeight ${await scrollHeight()}`);
-    const rows = await $$(tid("mail-row"));
+    const rows = await $$(tid("mail-row")).getElements();
     const lastId = await rows[rows.length - 1]!.getAttribute("data-mail-id");
     assert.ok(/^\d+$/.test(lastId ?? ""), `last data-mail-id ${lastId}`);
   });
