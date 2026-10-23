@@ -6,11 +6,11 @@ import {
   ChevronDownRegular, ChevronUpRegular, ErrorCircleRegular, MailInboxRegular, MailRegular, SearchRegular, WarningRegular,
 } from "@fluentui/react-icons";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
 import { useAppStatus, useNavigation } from "../../app/AppStatusContext";
-import { EmptyState, formatAppError, formatNumber } from "../../components/common";
+import { EmptyState, Splitter, formatAppError, formatNumber, useSplit, type SplitDefaults } from "../../components/common";
 import { DslBuilder, MAX_LEAVES, countLeaves, newGroup, toConditionGroup, type GroupDraft } from "../../components/dsl";
 import { MailList, ReadingPane, useMailPages } from "../../components/mail";
 import { EMPTY_REFINE, LEAVES_PER_TERM, composeQuery, refineNodes, splitTerms, type RefineState } from "./compose";
@@ -19,10 +19,16 @@ import { RefinePane } from "./RefinePane";
 const DEBOUNCE_MS = 300;
 const COUNT_CAP = 10_000;
 /** Non-fresh object: passes Fluent's slot type, carries the E2E selector to the native <input>. */
+const SPLITS: SplitDefaults = {
+  refine: { size: 260, min: 200, max: 480 },
+  dsl: { min: 80, max: 640, minOther: 120 },
+  list: { min: 420, max: 1600 },
+};
 const SEARCH_INPUT = { "data-testid": "search-box", maxLength: 500 };
 
 const useStyles = makeStyles({
-  root: { display: "grid", gridTemplateColumns: "260px 1fr", height: "100%", minHeight: 0 },
+  root: { display: "grid", height: "100%", minHeight: 0, position: "relative" },
+  refineHost: { display: "grid", position: "relative", minWidth: 0, minHeight: 0 },
   main: { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 },
   bar: {
     display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS, padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
@@ -56,16 +62,17 @@ const useStyles = makeStyles({
   },
   popText: { maxWidth: "320px", display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS },
   summary: { color: tokens.colorNeutralForeground3, whiteSpace: "nowrap", flexShrink: 0 },
+  dslHost: { position: "relative", display: "flex", flexDirection: "column", flexShrink: 0 },
   dsl: {
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`, maxHeight: "40%", overflowY: "auto",
+    flex: 1, minHeight: 0, padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`, overflowY: "auto",
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`, backgroundColor: tokens.colorNeutralBackground2,
   },
   results: {
-    flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "minmax(420px, 34%) 1fr",
+    flex: 1, minHeight: 0, display: "grid",
     margin: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS} 0`, overflow: "hidden", boxShadow: tokens.shadow2,
     borderRadius: `${tokens.borderRadiusLarge} ${tokens.borderRadiusLarge} 0 0`, backgroundColor: tokens.colorNeutralBackground1,
   },
-  listPane: { display: "flex", flexDirection: "column", minHeight: 0, borderRight: `1px solid ${tokens.colorNeutralStroke2}` },
+  listPane: { position: "relative", display: "flex", flexDirection: "column", minHeight: 0, borderRight: `1px solid ${tokens.colorNeutralStroke2}` },
   paneHead: {
     display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS, minHeight: "44px", boxSizing: "border-box",
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -97,6 +104,9 @@ export function SearchScreen() {
     return () => clearTimeout(h);
   }, [inputs]);
   const [dslOpen, setDslOpen] = useState(false);
+  const split = useSplit("search", SPLITS);
+  const dslRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLElement>(null);
 
   const composed = useMemo(
     () => composeQuery(debounced.text, debounced.refine, toConditionGroup(debounced.draft)),
@@ -227,8 +237,11 @@ export function SearchScreen() {
   const boxTone = problem ? s.boxError : warning ? s.boxWarn : undefined;
 
   return (
-    <div className={s.root}>
-      <RefinePane value={inputs.refine} onChange={(refine) => setInputs((p) => ({ ...p, refine }))} options={filters.data} />
+    <div className={s.root} style={{ gridTemplateColumns: `${split.track("refine", "260px")} minmax(0, 1fr)` }}>
+      <div className={s.refineHost}>
+        <RefinePane value={inputs.refine} onChange={(refine) => setInputs((p) => ({ ...p, refine }))} options={filters.data} />
+        <Splitter orientation="vertical" {...split.props("refine")} style={{ top: 0, bottom: 0, right: -3 }} />
+      </div>
       <div className={s.main}>
         <div className={s.bar}>
           <SearchBox className={mergeClasses(s.box, boxTone)} appearance="filled-darker" input={problem ? { ...SEARCH_INPUT, "aria-invalid": true } : SEARCH_INPUT} placeholder={t("box.placeholder")} aria-label={t("box.label")}
@@ -244,19 +257,27 @@ export function SearchScreen() {
           {builderLeaves > 0 ? <Caption1 className={s.summary}>{t("dsl.summary", { n: builderLeaves })}</Caption1> : null}
         </div>
         {dslOpen ? (
-          <div className={s.dsl}>
-            <DslBuilder value={inputs.draft} onChange={(draft) => setInputs((p) => ({ ...p, draft }))}
-              options={filters.data ?? { psts: [], folders: [] }} leafBudget={leafBudget} />
+          <div ref={dslRef} className={s.dslHost} style={{ height: split.sizes.dsl, maxHeight: split.sizes.dsl === undefined ? "40%" : undefined }}>
+            <div className={s.dsl}>
+              <DslBuilder value={inputs.draft} onChange={(draft) => setInputs((p) => ({ ...p, draft }))}
+                options={filters.data ?? { psts: [], folders: [] }} leafBudget={leafBudget} />
+            </div>
+            <Splitter orientation="horizontal" {...split.props("dsl")} measure={() => dslRef.current?.offsetHeight ?? 0}
+              style={{ left: 0, right: 0, bottom: -3 }} />
           </div>
         ) : null}
         {/* Prototype keeps the two-pane grid for every state; empty and zero states render inside the list pane. */}
-        <div className={s.results}>
-          <section className={s.listPane}>
+        <div className={s.results} style={{ gridTemplateColumns: `${split.track("list", "minmax(420px, 34%)")} minmax(0, 1fr)` }}>
+          <section ref={listRef} className={s.listPane}>
             <div className={s.paneHead}>
               <Body1Strong>{t("results")}</Body1Strong>
               {countText ? <Caption1 className={s.count} data-testid="result-count">{countText}</Caption1> : null}
             </div>
             <div className={s.fill}>{list}</div>
+            {hasMail ? (
+              <Splitter orientation="vertical" {...split.props("list")} measure={() => listRef.current?.offsetWidth ?? 0}
+                style={{ top: 0, bottom: 0, right: -3 }} />
+            ) : null}
           </section>
           {hasMail ? <ReadingPane mailId={selectedId} /> : <div />}
         </div>
