@@ -1,20 +1,28 @@
 import { Avatar, Caption1Strong, CounterBadge, Spinner, makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { AttachRegular } from "@fluentui/react-icons";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useLayoutEffect, useMemo, useRef, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { MailRow } from "../../api/bindings/MailRow";
-import { ellipsis, formatDay, formatMonth, useGridColumnSizing } from "../common";
+import { ellipsis, formatDay, formatMonth, Splitter, useSplit, type SplitDefaults } from "../common";
+import { moveColumn, handleSide, readOrder, writeOrder, type ColId } from "./columnOrder";
 
 export const ROW_HEIGHT = 32;
 /** Prototype `.mail-item.compact`: sender + date, subject, snippet on three lines. */
 // 56 px of text lines + 2 × 8 px padding + 1 px bottom border (border-box).
 const COMPACT_ROW_HEIGHT = 73;
 const PREFETCH_ROWS = 50;
-// Sender and subject are resizable (Fluent handles, `mail-list` key). Date is the 1fr remainder, right-aligned.
-// 420 px pane fits: 24 avatar + 110 + 150 + date >= 72, with 3 × 8 gaps + 24 padding + ~15 scrollbar (date gets 73).
-const COLUMN_DEFAULTS = { sender: { width: 110, minWidth: 96 }, subject: { width: 150, minWidth: 96 } };
-const DATE_MIN_WIDTH = 72;
+const STORE = "mail-list";
+// Subject is the 1fr remainder wherever it sits. Sender and date have stored widths (one `outlooker.splits.mail-list` map, order included).
+// Both share one group: each is limited by the room left after the other, 24 px avatar, 3 × 8 gaps and the subject minimum.
+const SUBJECT_MIN = 96;
+const FIXED = 24 + 3 * 8 + SUBJECT_MIN;
+const COLUMN_SPLITS: SplitDefaults = {
+  sender: { size: 110, min: 96, group: "cols" },
+  date: { size: 80, min: 72, group: "cols", minOther: FIXED },
+};
+const DRAG_THRESHOLD = 4;
+const LABELS: Record<ColId, string> = { sender: "list.col.from", subject: "list.col.subject", date: "list.col.date" };
 
 export type Entry = { kind: "month"; key: string; label: string } | { kind: "mail"; key: string; row: MailRow };
 
@@ -56,7 +64,9 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2, color: tokens.colorNeutralForeground2,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  headCell: { position: "relative", minWidth: 0, outlineStyle: "none" },
+  headCell: { position: "relative", minWidth: 0, outlineStyle: "none", cursor: "grab", touchAction: "none" },
+  headEnd: { display: "flex", justifyContent: "flex-end" },
+  sr: { position: "absolute", width: "1px", height: "1px", overflow: "hidden", clipPath: "inset(50%)" },
   scroll: { flex: 1, minHeight: 0, overflowY: "auto", position: "relative", outlineStyle: "none", scrollbarGutter: "stable" },
   block: { position: "relative", width: "100%" },
   item: { position: "absolute", top: 0, left: 0, width: "100%", height: `${ROW_HEIGHT}px`, boxSizing: "border-box" },
@@ -83,7 +93,6 @@ const useStyles = makeStyles({
     ":hover": { backgroundColor: tokens.colorBrandBackground2 },
   },
   ellipsis: { ...ellipsis },
-  date: { justifySelf: "end" },
   sender: { fontWeight: tokens.fontWeightSemibold },
   subject: { color: tokens.colorBrandForeground2 },
   snippet: { color: tokens.colorNeutralForeground3 },
@@ -105,8 +114,27 @@ export function MailList(p: MailListProps) {
     const el = ref.current;
     if (el && el.scrollTop !== lastTop.current) el.scrollTop = lastTop.current;
   }, []);
-  const { widths, headerProps } = useGridColumnSizing("mail-list", COLUMN_DEFAULTS);
-  const grid = { gridTemplateColumns: `24px ${widths.sender}px ${widths.subject}px minmax(${DATE_MIN_WIDTH}px, 1fr)` };
+  const { track, props } = useSplit(STORE, COLUMN_SPLITS);
+  const storeKey = "outlooker.splits." + STORE;
+  const [order, setOrder] = useState(() => readOrder(storeKey));
+  const [announce, setAnnounce] = useState("");
+  const headRef = useRef<HTMLDivElement>(null);
+  const cells = useRef<Partial<Record<ColId, HTMLElement | null>>>({});
+  const refocus = useRef<ColId | null>(null);
+  const press = useRef<{ id: ColId; x: number } | null>(null);
+  useLayoutEffect(() => {
+    if (refocus.current) cells.current[refocus.current]?.focus();
+    refocus.current = null;
+  }, [order]);
+  const reorder = (id: ColId, to: number) => {
+    const next = moveColumn(order, id, to);
+    if (next.join() === order.join()) return;
+    writeOrder(storeKey, next);
+    setOrder(next);
+    setAnnounce(`${t(LABELS[id])} ${next.indexOf(id) + 1}/${next.length}`);
+  };
+  const tracks: Record<ColId, string> = { sender: track("sender", "110px"), subject: `minmax(${SUBJECT_MIN}px, 1fr)`, date: track("date", "80px") };
+  const grid = { gridTemplateColumns: `24px ${order.map((c) => tracks[c]).join(" ")}` };
   const lng = i18n.language;
   const undated = t("list.undated");
   const entries = useMemo<Entry[]>(
@@ -139,22 +167,62 @@ export function MailList(p: MailListProps) {
     v.scrollToIndex(idx);
   };
 
-  const sender = headerProps("sender");
-  const subject = headerProps("subject");
+  const ownEvent = (e: { target: EventTarget; currentTarget: EventTarget }) => e.target === e.currentTarget;
+  const onCellKeyDown = (id: ColId) => (e: KeyboardEvent<HTMLElement>) => {
+    if (!ownEvent(e) || !e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+    e.preventDefault();
+    refocus.current = id;
+    reorder(id, order.indexOf(id) + (e.key === "ArrowLeft" ? -1 : 1));
+  };
+  const onCellDown = (id: ColId) => (e: PointerEvent<HTMLElement>) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('[role="separator"]')) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    press.current = { id, x: e.clientX };
+  };
+  const onCellUp = (e: PointerEvent<HTMLElement>) => {
+    const down = press.current;
+    press.current = null;
+    if (!down || Math.abs(e.clientX - down.x) < DRAG_THRESHOLD) return;
+    // Drop position = number of other columns whose centre lies left of the pointer.
+    const to = order.filter((c) => c !== down.id).filter((c) => {
+      const r = cells.current[c]?.getBoundingClientRect();
+      return r ? r.left + r.width / 2 < e.clientX : false;
+    }).length;
+    refocus.current = down.id;
+    reorder(down.id, to);
+  };
+  const head = (id: ColId): ReactNode => {
+    const resizable = id !== "subject";
+    const side = resizable ? handleSide(order, id) : null;
+    return (
+      <span key={id} ref={(el) => void (cells.current[id] = el)} className={mergeClasses(s.headCell, id === "date" && s.headEnd)} tabIndex={0}
+        onKeyDown={onCellKeyDown(id)} onPointerDown={onCellDown(id)} onPointerUp={onCellUp} onPointerCancel={() => (press.current = null)}>
+        <Caption1Strong className={s.ellipsis}>{t(LABELS[id])}</Caption1Strong>
+        {resizable && side ? (
+          <Splitter orientation="vertical" reverse={side === "left"} {...props(id)} container={() => headRef.current}
+            style={side === "left" ? { left: "-7px", top: 0, height: "100%" } : { right: "-7px", top: 0, height: "100%" }} />
+        ) : null}
+      </span>
+    );
+  };
+  const cellOf = (id: ColId, row: MailRow, name: string, meta: ReactNode): ReactNode =>
+    id === "sender" ? (
+      <span key={id} className={mergeClasses(s.ellipsis, s.sender)}>{name}</span>
+    ) : id === "subject" ? (
+      <span key={id} className={s.ellipsis}>
+        <span className={s.subject}>{row.subject || t("preview.noSubject")}</span>
+        {row.snippet ? <span className={s.snippet}>{` — ${row.snippet}`}</span> : null}
+      </span>
+    ) : (
+      <Fragment key={id}>{meta}</Fragment>
+    );
   return (
     <div className={s.root}>
       {p.compact ? null : (
-        <div className={s.head} style={grid} role="presentation" data-testid="mail-list-header">
+        <div ref={headRef} className={s.head} style={grid} role="presentation" data-testid="mail-list-header">
           <span />
-          <span className={s.headCell} tabIndex={0} onKeyDown={sender.onKeyDown}>
-            <Caption1Strong className={s.ellipsis}>{t("list.col.from")}</Caption1Strong>
-            {sender.aside}
-          </span>
-          <span className={s.headCell} tabIndex={0} onKeyDown={subject.onKeyDown}>
-            <Caption1Strong className={s.ellipsis}>{t("list.col.subject")}</Caption1Strong>
-            {subject.aside}
-          </span>
-          <Caption1Strong className={s.date}>{t("list.col.date")}</Caption1Strong>
+          {order.map(head)}
+          <span className={s.sr} role="status" aria-live="polite">{announce}</span>
         </div>
       )}
     <div ref={ref} className={s.scroll} role="listbox" aria-label={p.ariaLabel} tabIndex={0} onKeyDown={onKeyDown} onScroll={(e) => (lastTop.current = e.currentTarget.scrollTop)} data-testid="mail-list">
@@ -194,12 +262,7 @@ export function MailList(p: MailListProps) {
             <div key={en.key} role="option" aria-selected={selected} data-testid="mail-row" data-mail-id={row.id}
               className={mergeClasses(s.item, s.row, selected && s.selected)} style={{ ...style, ...grid }} onClick={() => p.onSelect(row.id)}>
               <Avatar size={24} name={name} aria-hidden />
-              <span className={mergeClasses(s.ellipsis, s.sender)}>{name}</span>
-              <span className={s.ellipsis}>
-                <span className={s.subject}>{row.subject || t("preview.noSubject")}</span>
-                {row.snippet ? <span className={s.snippet}>{` — ${row.snippet}`}</span> : null}
-              </span>
-              {meta}
+              {order.map((c) => cellOf(c, row, name, meta))}
             </div>
           );
         })}
