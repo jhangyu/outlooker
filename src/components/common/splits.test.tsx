@@ -22,6 +22,9 @@ describe("useSplit", () => {
   it("round-trips through storage and reset restores the default", () => {
     localStorage.removeItem(KEY);
     const first = renderHook(() => useSplit("t", DEFS));
+    act(() => first.result.current.props("nav").onChange(250, true)); // mid-drag: state only, no storage write
+    expect(first.result.current.sizes.nav).toBe(250);
+    expect(localStorage.getItem(KEY)).toBeNull();
     act(() => first.result.current.props("nav").onChange(301.4));
     act(() => first.result.current.props("row").onChange(5));
     expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ nav: 301, row: 80 });

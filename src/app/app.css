@@ -1,3 +1,7 @@
 html, body, #root { height: 100%; margin: 0; }
+/* Click-only UI (body also covers portals): text is selectable only where it is content to copy, opted in with
+   makeStyles `userSelect: "text"` (mail header and body, SQL values, import error messages, error details). */
+body { -webkit-user-select: none; user-select: none; }
+input, textarea, [contenteditable]:not([contenteditable="false"]) { -webkit-user-select: text; user-select: text; }
 /* Fluent Button and Badge set no white-space rule, so labels wrap when a flex row shrinks. */
 .fui-Button, .fui-ToggleButton, .fui-Badge { white-space: nowrap; }

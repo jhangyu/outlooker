@@ -77,7 +77,7 @@ const useStyles = makeStyles({
   },
   failedIcon: { fontSize: "48px", color: tokens.colorStatusDangerForeground1 },
   details: { width: "min(720px, 100%)", textAlign: "left" },
-  pre: { whiteSpace: "pre-wrap", fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200, margin: 0 },
+  pre: { whiteSpace: "pre-wrap", fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200, margin: 0, userSelect: "text" },
 });
 
 // Every screen stays mounted so it keeps its state. <Activity> hides inactive ones and pauses their effects.

@@ -104,7 +104,7 @@ const useStyles = makeStyles({
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
   },
   logTime: { fontFamily: tokens.fontFamilyMonospace, color: tokens.colorNeutralForeground3, whiteSpace: "nowrap" },
-  logMsg: { minWidth: 0, overflowWrap: "anywhere" },
+  logMsg: { minWidth: 0, overflowWrap: "anywhere", userSelect: "text" },
   logLoc: {
     gridColumn: "3", fontFamily: tokens.fontFamilyMonospace, wordBreak: "break-all", color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,

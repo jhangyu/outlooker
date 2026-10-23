@@ -12,7 +12,7 @@ const useStyles = makeStyles({
   body: { flex: 1, minHeight: 0, overflow: "auto" },
   text: {
     margin: 0, padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalXXL}`, maxWidth: "900px", lineHeight: "22px",
-    whiteSpace: "pre-wrap", fontFamily: tokens.fontFamilyBase,
+    whiteSpace: "pre-wrap", fontFamily: tokens.fontFamilyBase, userSelect: "text",
   },
   center: { display: "grid", placeItems: "center", height: "100%" },
 });

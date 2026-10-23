@@ -26,6 +26,7 @@ const useStyles = makeStyles({
   cell: { padding: `0 ${tokens.spacingHorizontalS}`, ...ellipsis },
   num: { textAlign: "right", fontVariantNumeric: "tabular-nums" },
   nul: { fontStyle: "italic", color: tokens.colorNeutralForeground4 },
+  val: { userSelect: "text" },
 });
 
 export function ResultTable({ columns, rows, selected, onSelect }: {
@@ -71,7 +72,7 @@ export function ResultTable({ columns, rows, selected, onSelect }: {
               }}>
               {row.map((cell, j) => (
                 <span key={j} role="cell" title={cell ?? undefined}
-                  className={mergeClasses(s.cell, NUMERIC_TYPES.has(columns[j]?.pgType ?? "") && s.num, cell === null && s.nul)}>
+                  className={mergeClasses(s.cell, NUMERIC_TYPES.has(columns[j]?.pgType ?? "") && s.num, cell === null ? s.nul : s.val)}>
                   {cell ?? t("result.null")}
                 </span>
               ))}

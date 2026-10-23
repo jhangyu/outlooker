@@ -21,8 +21,8 @@ const useStyles = makeStyles({
   one: { height: "49px", alignItems: "center", columnGap: tokens.spacingHorizontalS },
   two: { height: "81px", flexDirection: "column", rowGap: "4px" },
   row: { display: "flex", alignItems: "center", columnGap: tokens.spacingHorizontalS, minWidth: 0, height: "28px" },
-  subject: { ...ellipsis, flex: "1 1 0", minWidth: "140px", margin: 0 },
-  date: { flexShrink: 0, whiteSpace: "nowrap", color: tokens.colorNeutralForeground3 },
+  subject: { ...ellipsis, flex: "1 1 0", minWidth: "140px", margin: 0, userSelect: "text" },
+  date: { flexShrink: 0, whiteSpace: "nowrap", color: tokens.colorNeutralForeground3, userSelect: "text" },
   bar: { flex: "0 1 auto", minWidth: 0, padding: 0, columnGap: "6px", minHeight: "28px", overflow: "hidden" },
   barTwo: { flex: "1 1 auto" },
   token: {
@@ -43,6 +43,7 @@ const useStyles = makeStyles({
   listAll: { maxHeight: "none" },
   li: { display: "flex", alignItems: "center", columnGap: tokens.spacingHorizontalS, padding: `5px ${tokens.spacingHorizontalM}`, minHeight: "32px" },
   tx: { display: "flex", flexDirection: "column", minWidth: 0, flex: 1 },
+  copy: { userSelect: "text" },
   muted: { color: tokens.colorNeutralForeground3 },
   kv: { display: "flex", flexDirection: "column", padding: `6px ${tokens.spacingHorizontalM}`, userSelect: "text" },
 });
@@ -108,7 +109,7 @@ function RecipientList({ list, all }: { list: Address[]; all?: boolean }) {
     <ul className={mergeClasses(s.list, all && s.listAll)}>
       {list.map((a, i) => (
         <li key={i} className={s.li}>
-          <span className={s.tx}>
+          <span className={mergeClasses(s.tx, s.copy)}>
             <Text className={s.val}>{nameOf(a)}</Text>
             {a.name && a.address ? <Caption1 className={mergeClasses(s.val, s.muted)}>{a.address}</Caption1> : null}
           </span>

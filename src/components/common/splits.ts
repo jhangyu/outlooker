@@ -85,9 +85,10 @@ export function useSplit(surfaceKey: string, defaults: SplitDefaults) {
   const hosts = useRef(new Map<string, (el: HTMLElement | null) => (() => void) | undefined>());
   const attached = useRef(new Set<string>());
 
+  /** `live` (mid-drag) updates state only; storage is written once the value is final. */
   const set = useCallback(
-    (id: string, px: number | undefined) => {
-      writeNumber(key, id, px);
+    (id: string, px: number | undefined, live?: boolean) => {
+      if (!live) writeNumber(key, id, px);
       setStored((m) => {
         const next = { ...m };
         if (px === undefined) delete next[id];
@@ -170,7 +171,7 @@ export function useSplit(surfaceKey: string, defaults: SplitDefaults) {
       value: sizes[id],
       min: d.min,
       max: limits[id],
-      onChange: (px: number) => set(id, Math.min(Math.max(px, d.min), limits[id] ?? Infinity)),
+      onChange: (px: number, live?: boolean) => set(id, Math.min(Math.max(px, d.min), limits[id] ?? Infinity), live),
       onReset: () => set(id, undefined),
     };
   };

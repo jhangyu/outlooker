@@ -59,7 +59,7 @@ const useStyles = makeStyles({
     padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalXL}`, overflow: "auto",
   },
   key: { fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
-  value: { margin: 0, overflowWrap: "anywhere", whiteSpace: "pre-wrap" },
+  value: { margin: 0, overflowWrap: "anywhere", whiteSpace: "pre-wrap", userSelect: "text" },
   nul: { fontStyle: "italic", color: tokens.colorNeutralForeground4 },
 });
 
