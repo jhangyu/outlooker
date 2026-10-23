@@ -47,8 +47,15 @@ The `localStorage` read, validation and write in `columnWidths.ts` (`readStored`
 | Import | each of the two pane borders | the left pane of each border; the current 1.6:1:1 ratio is the default |
 | Settings | nav \| body | nav width, 220 px |
 | Settings | the two column borders of the card grid | the card-grid columns; equal thirds by default |
+| Settings | the two row borders of the card grid (horizontal) | the height of each of the three card rows; content height by default |
 
-Settings card rows stay content-sized. A row has no empty space to give away, so dragging its height would only add blank space or clip content.
+Settings card rows:
+- The grid has three rows: storage + db, language + content + db, and index. The db card spans rows 1 and 2.
+- Row 1 | row 2 boundary: its hit area covers only the columns that row 1 and row 2 do not share, which are the storage card's columns. Dragging it resizes row 1. The db card stretches over both rows.
+- Row 2 | row 3 boundary: its hit area spans the full width.
+- Until the user drags a row, its height follows its content (`auto`). After a drag, the height is stored in px.
+- A card whose content is taller than its row scrolls inside the card (`overflow: auto`). The settings body still scrolls as a whole when the rows are taller than the window.
+- Double-click on a row boundary returns that row to content height.
 
 The reading-pane header \| body split is removed. The new header has a fixed height (section 3).
 
