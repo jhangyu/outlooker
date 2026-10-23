@@ -15,7 +15,7 @@ import type { Language } from "../../api/bindings/Language";
 import type { MaintenanceTask } from "../../api/bindings/MaintenanceTask";
 import { useAppStatus } from "../../app/AppStatusContext";
 import {
-  formatBytes, formatDateTime, formatNumber, useAppToast, useLanguageSwitch,
+  formatBytes, formatDateTime, formatNumber, useAppToast, useColumnWidths, useLanguageSwitch, type ColumnDefaults,
 } from "../../components/common";
 import { MoveDialog } from "./MoveDialog";
 
@@ -25,6 +25,7 @@ export function isValidQuality(v: number): boolean {
 
 type SectionId = "storage" | "language" | "content" | "db" | "index";
 const SECTIONS: SectionId[] = ["storage", "language", "content", "db", "index"];
+const INDEX_COLUMNS: ColumnDefaults = { name: { width: 260 }, table: { width: 180 }, size: { width: 96 }, state: { width: 120 } };
 
 const useStyles = makeStyles({
   root: { display: "grid", gridTemplateColumns: "220px 1fr", height: "100%", minHeight: 0 },
@@ -123,6 +124,7 @@ export function SettingsScreen() {
       <dd className={s.dd}>{value}</dd>
     </>
   );
+  const sizing = useColumnWidths("settings-indexes", INDEX_COLUMNS);
   const columns: TableColumnDefinition<IndexStatus>[] = [
     createTableColumn<IndexStatus>({ columnId: "name", renderHeaderCell: () => t("index.name"), renderCell: (x) => <span className={s.mono}>{x.name}</span> }),
     createTableColumn<IndexStatus>({ columnId: "table", renderHeaderCell: () => t("index.table"), renderCell: (x) => x.table }),
@@ -239,7 +241,7 @@ export function SettingsScreen() {
           "index",
           <WrenchRegular />,
           <>
-            <DataGrid items={db.data?.indexes ?? []} columns={columns} getRowId={(x) => x.name}>
+            <DataGrid {...sizing} items={db.data?.indexes ?? []} columns={columns} getRowId={(x) => x.name}>
               <DataGridHeader>
                 <DataGridRow>
                   {({ renderHeaderCell, columnId }) => (
