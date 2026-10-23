@@ -33,13 +33,13 @@ describe("mail components", () => {
     expect(frame.getAttribute("sandbox")).toBe("");
     expect(frame.outerHTML).not.toMatch(/allow-/);
     expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
-    expect(frame.getAttribute("srcdoc")).toBe("<p>Hi</p>");
+    expect(frame.getAttribute("srcdoc")).toMatch(/<\/style><p>Hi<\/p>$/);
   });
 
   it("reading pane renders HTML in the sandboxed preview and plain text when the mail has no HTML", async () => {
     vi.mocked(api.mailGet).mockResolvedValue(makeMailDetail());
     const r = renderWithProviders(<ReadingPane mailId={5} />);
-    expect((await screen.findByTestId("mail-preview")).getAttribute("srcdoc")).toBe("<p>Hello</p>");
+    expect((await screen.findByTestId("mail-preview")).getAttribute("srcdoc")).toMatch(/<\/style><p>Hello<\/p>$/);
     expect(api.mailGet).toHaveBeenCalledWith(5);
     r.unmount();
     vi.mocked(api.mailGet).mockResolvedValue(makeMailDetail({ bodyHtml: null, bodyText: "Plain body" }));

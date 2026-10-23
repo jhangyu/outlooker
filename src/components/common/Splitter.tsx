@@ -4,6 +4,11 @@ import { useTranslation } from "react-i18next";
 
 const STEP = 16;
 
+// An absolutely positioned grid child's `auto` end line is the grid's padding edge, not the next line (CSS Grid
+// "abspos items"), so a bare start line (`gridColumn: 2`) would stretch the box to the far edge of the grid and put
+// the hit area at the grid's edge. Pin a bare line to one track.
+const oneTrack = (v: CSSProperties["gridColumn"]) => (v === undefined || String(v).includes("/") ? v : `${v} / span 1`);
+
 const useStyles = makeStyles({
   base: {
     position: "absolute", zIndex: 1, touchAction: "none", outlineStyle: "none",
@@ -76,7 +81,7 @@ export function Splitter({ orientation, value, min, max, onChange, onReset, reve
       aria-valuemin={min}
       aria-valuemax={max ?? min}
       className={mergeClasses(s.base, vertical ? s.vertical : s.horizontal)}
-      style={style}
+      style={style && { ...style, gridColumn: oneTrack(style.gridColumn), gridRow: oneTrack(style.gridRow) }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={end}
