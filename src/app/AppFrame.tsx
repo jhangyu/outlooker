@@ -19,6 +19,7 @@ import { OnboardingScreen } from "../screens/onboarding";
 import { SearchScreen } from "../screens/search";
 import { SettingsScreen } from "../screens/settings";
 import { useMoveSession } from "../screens/settings/moveSession";
+import { BrandMark } from "../components/brand/BrandMark";
 import { useAppStatus, useNavigation, useOnboardingActive, type ScreenId } from "./AppStatusContext";
 
 const useStyles = makeStyles({
@@ -28,10 +29,6 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalL, backgroundColor: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand,
   },
   brand: { width: "68px", display: "grid", placeItems: "center" },
-  logo: {
-    width: "28px", height: "28px", borderRadius: tokens.borderRadiusMedium, display: "grid", placeItems: "center",
-    backgroundColor: tokens.colorNeutralBackground1, color: tokens.colorBrandForeground1, fontWeight: tokens.fontWeightBold,
-  },
   appName: { fontSize: tokens.fontSizeBase400, fontWeight: tokens.fontWeightSemibold },
   crumb: { opacity: 0.9 },
   langLabel: { fontSize: tokens.fontSizeBase200, opacity: 0.95 },
@@ -163,9 +160,7 @@ function TitleBar() {
   return (
     <header className={s.titleBar} data-testid="title-bar">
       <div className={s.brand}>
-        <div className={s.logo} aria-hidden>
-          O
-        </div>
+        <BrandMark size={28} chip />
       </div>
       <span className={s.appName}>{t("app.name")}</span>
       <span className={s.crumb}>· {t(`nav.${screen}`)}</span>

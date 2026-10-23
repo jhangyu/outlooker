@@ -12,6 +12,7 @@ import { pickFolder } from "../../api/dialog";
 import type { AppError } from "../../api/bindings/AppError";
 import type { Language } from "../../api/bindings/Language";
 import { useAppStatus, useNavigation } from "../../app/AppStatusContext";
+import { BrandMark } from "../../components/brand/BrandMark";
 import { formatAppError, toAppError, useEnqueuePst, useLanguageSwitch } from "../../components/common";
 
 type Step = 0 | 1 | 2 | 3;
@@ -58,10 +59,6 @@ const useStyles = makeStyles({
   },
   spacer: { flex: 1 },
   brandRow: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
-  logo: {
-    width: "28px", height: "28px", borderRadius: tokens.borderRadiusMedium, display: "grid", placeItems: "center",
-    backgroundColor: tokens.colorBrandBackground, color: tokens.colorNeutralForegroundOnBrand, fontWeight: tokens.fontWeightBold,
-  },
   feat: { display: "grid", gridTemplateColumns: "36px 1fr", gap: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}` },
   featIcon: {
     gridRow: "span 2", width: "36px", height: "36px", borderRadius: tokens.borderRadiusLarge, display: "grid",
@@ -200,9 +197,7 @@ export function OnboardingScreen() {
     <div className={s.root}>
       <aside className={mergeClasses(s.side, s.left)}>
         <div className={s.brandRow}>
-          <span className={s.logo} aria-hidden>
-            O
-          </span>
+          <BrandMark size={28} />
           <strong>{t("common:app.name")}</strong>
         </div>
         <Title3 as="h1">{t("title")}</Title3>
