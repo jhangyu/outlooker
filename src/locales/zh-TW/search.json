@@ -35,8 +35,12 @@
   "countCapped": "{{n}}+ 封郵件",
   "problem": {
     "tooManyTerms": "搜尋詞最多 10 個。",
-    "tooManyConditions": "搜尋條件超過 50 個，請移除部分詞或條件。"
+    "tooManyConditions": "搜尋條件超過 50 個，請移除部分詞或條件。",
+    "short": { "tooManyTerms": "詞太多", "tooManyConditions": "條件過多" }
   },
+  "shortQueryLabel": "短詞較慢",
+  "newMailShort": "已匯入新郵件 ｜ 重新整理",
+  "statusGroup": "搜尋條件與狀態",
   "newMail": "已匯入新郵件。",
   "refresh": "重新整理",
   "results": "結果",

@@ -1,10 +1,12 @@
 import {
-  Body1Strong, Button, Caption1, CounterBadge, MessageBar, MessageBarActions, MessageBarBody, SearchBox, Spinner, ToggleButton,
-  makeStyles, tokens,
+  Body1Strong, Button, Caption1, CounterBadge, MessageBar, MessageBarBody, Popover, PopoverSurface, PopoverTrigger, SearchBox, Spinner,
+  ToggleButton, makeStyles, mergeClasses, tokens,
 } from "@fluentui/react-components";
-import { ChevronDownRegular, ChevronUpRegular, MailInboxRegular, SearchRegular } from "@fluentui/react-icons";
+import {
+  ChevronDownRegular, ChevronUpRegular, ErrorCircleRegular, MailInboxRegular, MailRegular, SearchRegular, WarningRegular,
+} from "@fluentui/react-icons";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
 import { useAppStatus, useNavigation } from "../../app/AppStatusContext";
@@ -27,14 +29,36 @@ const useStyles = makeStyles({
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`, backgroundColor: tokens.colorNeutralBackground1,
   },
   box: { flex: 1, maxWidth: "880px", height: "36px" },
+  boxWarn: { boxShadow: `inset 0 -2px 0 ${tokens.colorStatusWarningBorder1}` },
+  boxError: { boxShadow: `inset 0 -2px 0 ${tokens.colorStatusDangerBorder1}` },
+  group: { display: "flex", alignItems: "stretch", flexShrink: 0 },
   toggle: { flexShrink: 0 },
+  toggleJoined: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+  seg: { display: "flex", marginLeft: "-1px" },
+  segBtn: {
+    borderRadius: 0, borderTopRightRadius: tokens.borderRadiusMedium, borderBottomRightRadius: tokens.borderRadiusMedium,
+    "@media (max-width: 900px)": { "& .seg-label": { display: "none" } },
+  },
+  segWarn: {
+    backgroundColor: tokens.colorStatusWarningBackground1, color: tokens.colorStatusWarningForeground1,
+    border: `1px solid ${tokens.colorStatusWarningBorder1}`,
+    ":hover": { backgroundColor: tokens.colorStatusWarningBackground2, color: tokens.colorStatusWarningForeground1 },
+  },
+  segError: {
+    backgroundColor: tokens.colorStatusDangerBackground1, color: tokens.colorStatusDangerForeground1, fontWeight: tokens.fontWeightBold,
+    border: `1px solid ${tokens.colorStatusDangerBorder1}`,
+    ":hover": { backgroundColor: tokens.colorStatusDangerBackground2, color: tokens.colorStatusDangerForeground1 },
+  },
+  segInfo: {
+    backgroundColor: tokens.colorBrandBackground2, color: tokens.colorBrandForeground2,
+    border: `1px solid ${tokens.colorBrandStroke1}`,
+    ":hover": { backgroundColor: tokens.colorBrandBackground2Hover, color: tokens.colorBrandForeground2 },
+  },
+  popText: { maxWidth: "320px", display: "flex", flexDirection: "column", gap: tokens.spacingVerticalS },
   summary: { color: tokens.colorNeutralForeground3, whiteSpace: "nowrap", flexShrink: 0 },
   dsl: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`, maxHeight: "40%", overflowY: "auto",
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`, backgroundColor: tokens.colorNeutralBackground2,
-  },
-  hints: {
-    display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS, padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL} 0`,
   },
   results: {
     flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "minmax(420px, 34%) 1fr",
@@ -165,39 +189,58 @@ export function SearchScreen() {
     );
   }
 
-  const hints = [
-    pages.shortQuery ? (
-      <MessageBar key="short" intent="warning" data-testid="short-query-hint">
-        <MessageBarBody>{t("shortQueryHint")}</MessageBarBody>
-      </MessageBar>
-    ) : null,
-    composed.problem ? (
-      <MessageBar key="problem" intent="error">
-        <MessageBarBody>{t(`problem.${composed.problem}`)}</MessageBarBody>
-      </MessageBar>
+  // Spec §4: error > warning > new mail. An error segment absorbs the warning text into its popover.
+  const warning = pages.shortQuery;
+  const problem = composed.problem;
+  const popover = (label: string, lines: string[], icon: ReactElement, cls: string, ariaLabel: string) => (
+    <Popover positioning="below-end">
+      <PopoverTrigger disableButtonEnhancement>
+        <Button className={mergeClasses(s.segBtn, cls)} appearance="subtle" size="medium" icon={icon} aria-label={ariaLabel}>
+          <span className="seg-label">{label}</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverSurface>
+        <div className={s.popText}>{lines.map((l) => <span key={l}>{l}</span>)}</div>
+      </PopoverSurface>
+    </Popover>
+  );
+  const segments = [
+    problem ? (
+      <span key="problem" role="alert" className={s.seg}>
+        {popover(t(`problem.short.${problem}`), [t(`problem.${problem}`), ...(warning ? [t("shortQueryHint")] : [])],
+          <ErrorCircleRegular />, s.segError, t(`problem.${problem}`))}
+      </span>
+    ) : warning ? (
+      <span key="short" role="status" className={s.seg} data-testid="short-query-hint">
+        {popover(t("shortQueryLabel"), [t("shortQueryHint")], <WarningRegular />, s.segWarn, t("shortQueryHint"))}
+      </span>
     ) : null,
     newMail ? (
-      <MessageBar key="newMail" intent="info" data-testid="new-mail-bar">
-        <MessageBarBody>{t("newMail")}</MessageBarBody>
-        <MessageBarActions>
-          <Button size="small" data-testid="new-mail-refresh" onClick={refresh}>{t("refresh")}</Button>
-        </MessageBarActions>
-      </MessageBar>
+      <span key="newMail" role="status" className={s.seg} data-testid="new-mail-bar">
+        <Button className={mergeClasses(s.segBtn, s.segInfo)} appearance="subtle" icon={<MailRegular />} data-testid="new-mail-refresh"
+          aria-label={`${t("newMail")} ${t("refresh")}`} onClick={refresh}>
+          <span className="seg-label">{t("newMailShort")}</span>
+        </Button>
+      </span>
     ) : null,
-  ].filter((h) => h !== null);
+  ].filter((x) => x !== null);
+  const boxTone = problem ? s.boxError : warning ? s.boxWarn : undefined;
 
   return (
     <div className={s.root}>
       <RefinePane value={inputs.refine} onChange={(refine) => setInputs((p) => ({ ...p, refine }))} options={filters.data} />
       <div className={s.main}>
         <div className={s.bar}>
-          <SearchBox className={s.box} appearance="filled-darker" input={SEARCH_INPUT} placeholder={t("box.placeholder")} aria-label={t("box.label")}
+          <SearchBox className={mergeClasses(s.box, boxTone)} appearance="filled-darker" input={problem ? { ...SEARCH_INPUT, "aria-invalid": true } : SEARCH_INPUT} placeholder={t("box.placeholder")} aria-label={t("box.label")}
             value={inputs.text} onChange={(_, d) => setInputs((p) => ({ ...p, text: d.value }))} />
-          <ToggleButton data-testid="dsl-toggle" className={s.toggle} checked={dslOpen} onClick={() => setDslOpen((o) => !o)}
+          <div role="group" aria-label={t("statusGroup")} className={s.group}>
+          <ToggleButton data-testid="dsl-toggle" className={mergeClasses(s.toggle, segments.length > 0 && s.toggleJoined)} checked={dslOpen} onClick={() => setDslOpen((o) => !o)}
             icon={dslOpen ? <ChevronUpRegular /> : <ChevronDownRegular />} iconPosition="after">
             {t("dsl.toggle")}
             <CounterBadge count={builderLeaves} size="small" />
           </ToggleButton>
+          {segments}
+          </div>
           {builderLeaves > 0 ? <Caption1 className={s.summary}>{t("dsl.summary", { n: builderLeaves })}</Caption1> : null}
         </div>
         {dslOpen ? (
@@ -206,7 +249,6 @@ export function SearchScreen() {
               options={filters.data ?? { psts: [], folders: [] }} leafBudget={leafBudget} />
           </div>
         ) : null}
-        {hints.length > 0 ? <div className={s.hints}>{hints}</div> : null}
         {/* Prototype keeps the two-pane grid for every state; empty and zero states render inside the list pane. */}
         <div className={s.results}>
           <section className={s.listPane}>

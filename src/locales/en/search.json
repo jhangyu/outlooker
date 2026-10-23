@@ -35,8 +35,12 @@
   "countCapped": "{{n}}+ messages",
   "problem": {
     "tooManyTerms": "Use at most 10 search words.",
-    "tooManyConditions": "The search has more than 50 conditions. Remove some words or conditions."
+    "tooManyConditions": "The search has more than 50 conditions. Remove some words or conditions.",
+    "short": { "tooManyTerms": "Too many words", "tooManyConditions": "Too many conditions" }
   },
+  "shortQueryLabel": "Short words: slower",
+  "newMailShort": "New mail imported | Refresh",
+  "statusGroup": "Search conditions and status",
   "newMail": "New mail was imported.",
   "refresh": "Refresh",
   "results": "Results",
