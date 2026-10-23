@@ -100,7 +100,7 @@ fn perf_e2e_import() {
         .expect("build import_bench");
     assert!(built.status.success(), "build import_bench failed: {}", String::from_utf8_lossy(&built.stderr));
     let target = std::env::var_os("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| repo_root().join("src-tauri/target"));
-    let out = std::process::Command::new(target.join("release/examples/import_bench")).arg(&pst).output().expect("run import_bench");
+    let out = std::process::Command::new(target.join(format!("release/examples/import_bench{}", std::env::consts::EXE_SUFFIX))).arg(&pst).output().expect("run import_bench");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "import_bench failed: {}", String::from_utf8_lossy(&out.stderr));
     let last = stdout.lines().last().unwrap_or_default();
