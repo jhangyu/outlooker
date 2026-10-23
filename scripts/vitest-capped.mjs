@@ -5,9 +5,10 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadConfigFromFile } from "vite";
 import { judge, TOLERANCE_S } from "./test-time-judge.mjs";
 
-const CAP_S = 1;
+const CAP_S = (await loadConfigFromFile({ command: "build", mode: "test" }, "vite.config.ts")).config.test.testTimeout / 1000;
 const out = join(mkdtempSync(join(tmpdir(), "vitest-capped-")), "result.json");
 const vitest = (args) => {
   const r = spawnSync(process.execPath, ["node_modules/vitest/vitest.mjs", "run", "--reporter=default", "--reporter=json", `--outputFile=${out}`, ...args], { stdio: "inherit" });
