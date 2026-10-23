@@ -6,7 +6,7 @@ use tokio_postgres::Client;
 use super::sql;
 use crate::db::{db_err, RFC3339_UTC_FMT};
 use crate::dto::error::AppError;
-use crate::dto::search::{Address, AttachmentMeta, MailDetail, Occurrence};
+use crate::dto::search::{Address, AttachmentMeta, MailDetail, Occurrence, RecipientKind};
 
 /// The only platform branch of the Search Service (Part 03 §5.6): WebView2 maps custom schemes to http.
 #[cfg(windows)]
@@ -43,10 +43,10 @@ pub async fn mail_get(client: &Client, id: i64) -> Result<MailDetail, AppError> 
     let (mut to, mut cc, mut bcc) = (Vec::new(), Vec::new(), Vec::new());
     for r in client.query(sql::MAIL_RECIPIENTS, &[&id]).await.map_err(db_err)? {
         let a = Address { name: r.get(1), address: r.get(2) };
-        match r.get::<_, &str>(0) {
-            "cc" => cc.push(a),
-            "bcc" => bcc.push(a),
-            _ => to.push(a),
+        match RecipientKind::from_db(r.get(0))? {
+            RecipientKind::To => to.push(a),
+            RecipientKind::Cc => cc.push(a),
+            RecipientKind::Bcc => bcc.push(a),
         }
     }
     let attachments = client

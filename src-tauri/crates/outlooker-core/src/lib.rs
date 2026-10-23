@@ -2,6 +2,7 @@
 pub mod app;
 pub mod db;
 pub mod dto;
+pub mod fsutil;
 pub mod gate;
 pub mod importer;
 pub mod lifecycle;

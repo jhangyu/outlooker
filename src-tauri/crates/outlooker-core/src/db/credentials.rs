@@ -27,21 +27,8 @@ impl Credentials {
     }
 
     pub fn save(&self, path: &Path) -> Result<(), AppError> {
-        let dir = path.parent().ok_or_else(|| AppError::internal("credentials path has no parent"))?;
-        std::fs::create_dir_all(dir).map_err(|e| AppError::file_access(dir, &e.to_string()))?;
-        let tmp = path.with_extension("tmp");
-        let body = serde_json::to_vec(self).expect("credentials serialize");
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opts.mode(0o600); // spec Part 02 §2.3 step 3; on Windows the file inherits the profile ACL
-        }
-        use std::io::Write;
-        let mut f = opts.open(&tmp).map_err(|e| AppError::file_access(&tmp, &e.to_string()))?;
-        f.write_all(&body).and_then(|_| f.sync_all()).map_err(|e| AppError::file_access(&tmp, &e.to_string()))?;
-        std::fs::rename(&tmp, path).map_err(|e| AppError::file_access(path, &e.to_string()))
+        // spec Part 02 §2.3 step 3: owner-only
+        crate::fsutil::write_atomic(path, &serde_json::to_vec(self).expect("credentials serialize"), true)
     }
 
     pub fn load(path: &Path) -> Result<Credentials, AppError> {

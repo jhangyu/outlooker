@@ -51,7 +51,7 @@ impl Supervisor {
         self.inner.db.set(None);
         let now = Instant::now();
         let over_budget = {
-            let mut r = self.inner.restarts.lock().unwrap();
+            let mut r = self.inner.restarts.lock().unwrap_or_else(|p| p.into_inner());
             r.retain(|t| now.duration_since(*t) < self.inner.config.restart_window);
             r.push(now);
             r.len() as u32 > self.inner.config.restart_budget

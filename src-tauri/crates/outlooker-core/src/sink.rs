@@ -51,16 +51,16 @@ pub struct RecordingSink {
 
 impl RecordingSink {
     pub fn events(&self) -> Vec<CoreEvent> {
-        self.events.lock().unwrap().clone()
+        self.events.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
     pub fn names(&self) -> Vec<&'static str> {
-        self.events.lock().unwrap().iter().map(CoreEvent::name).collect()
+        self.events.lock().unwrap_or_else(|p| p.into_inner()).iter().map(CoreEvent::name).collect()
     }
 }
 
 impl EventSink for RecordingSink {
     fn emit(&self, event: CoreEvent) {
-        self.events.lock().unwrap().push(event);
+        self.events.lock().unwrap_or_else(|p| p.into_inner()).push(event);
     }
 }
 

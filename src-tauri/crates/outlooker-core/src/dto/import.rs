@@ -3,6 +3,27 @@ use ts_rs::TS;
 
 use super::error::AppError;
 
+/// `as_db` / `from_db` for an enum stored as text in PostgreSQL. An unknown DB value is an internal error, never a fallback.
+macro_rules! db_text {
+    ($ty:ident, $what:literal, { $($v:ident => $s:literal),+ $(,)? }) => {
+        impl $ty {
+            #[cfg(test)]
+            pub const ALL: &'static [$ty] = &[$($ty::$v),+];
+            #[allow(dead_code)] // ponytail: JobKind is only written by SQL literals; the pair stays for the round-trip test
+            pub fn as_db(self) -> &'static str {
+                match self { $($ty::$v => $s),+ }
+            }
+            pub fn from_db(s: &str) -> Result<Self, $crate::dto::error::AppError> {
+                match s {
+                    $($s => Ok($ty::$v),)+
+                    other => Err($crate::dto::error::AppError::internal(format!(concat!("unknown ", $what, " {}"), other))),
+                }
+            }
+        }
+    };
+}
+pub(crate) use db_text;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
@@ -58,6 +79,7 @@ pub enum ImportPhase {
     Importing,
     Finalizing,
 }
+db_text!(ImportPhase, "import phase", { Scanning => "scanning", Importing => "importing", Finalizing => "finalizing" });
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -108,6 +130,9 @@ pub enum ImportErrorStage {
     Image,
     Store,
 }
+db_text!(ImportErrorStage, "import error stage", {
+    Open => "open", Scan => "scan", Parse => "parse", Html => "html", Image => "image", Store => "store",
+});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -116,4 +141,32 @@ pub enum ImportErrorSeverity {
     ItemSkipped,
     Degraded,
     JobFailed,
+}
+db_text!(ImportErrorSeverity, "import error severity", { ItemSkipped => "item_skipped", Degraded => "degraded", JobFailed => "job_failed" });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn round_trip<T: Copy + PartialEq + std::fmt::Debug>(all: &[T], as_db: fn(T) -> &'static str, from_db: fn(&str) -> Result<T, AppError>) {
+        for &v in all {
+            assert_eq!(from_db(as_db(v)).unwrap(), v);
+        }
+        assert!(from_db("bogus").is_err());
+    }
+
+    #[test]
+    fn import_phase_db_round_trip() {
+        round_trip(ImportPhase::ALL, ImportPhase::as_db, ImportPhase::from_db);
+    }
+
+    #[test]
+    fn import_error_stage_db_round_trip() {
+        round_trip(ImportErrorStage::ALL, ImportErrorStage::as_db, ImportErrorStage::from_db);
+    }
+
+    #[test]
+    fn import_error_severity_db_round_trip() {
+        round_trip(ImportErrorSeverity::ALL, ImportErrorSeverity::as_db, ImportErrorSeverity::from_db);
+    }
 }

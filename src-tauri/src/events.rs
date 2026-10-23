@@ -148,14 +148,14 @@ impl TauriSink {
         let (throttle, notify) = (sink.throttle.clone(), sink.notify.clone());
         tauri::async_runtime::spawn(async move {
             loop {
-                let deadline = throttle.lock().unwrap().next_deadline();
+                let deadline = throttle.lock().unwrap_or_else(|p| p.into_inner()).next_deadline();
                 match deadline {
                     Some(d) => {
                         let _ = tokio::time::timeout_at(tokio::time::Instant::from_std(d), notify.notified()).await;
                     }
                     None => notify.notified().await,
                 }
-                let due = throttle.lock().unwrap().due(Instant::now());
+                let due = throttle.lock().unwrap_or_else(|p| p.into_inner()).due(Instant::now());
                 for e in &due {
                     emit_now(&app, e);
                 }
@@ -167,7 +167,7 @@ impl TauriSink {
 
 impl EventSink for TauriSink {
     fn emit(&self, e: CoreEvent) {
-        let out = self.throttle.lock().unwrap().offer(e, Instant::now());
+        let out = self.throttle.lock().unwrap_or_else(|p| p.into_inner()).offer(e, Instant::now());
         for e in &out {
             emit_now(&self.app, e);
         }
