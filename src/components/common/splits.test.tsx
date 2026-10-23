@@ -32,4 +32,18 @@ describe("useSplit", () => {
     expect(second.result.current.sizes.nav).toBe(220);
     expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ row: 80 });
   });
+
+  it("keeps every other pane at its min when the container is smaller than the stored sizes", () => {
+    const defs: SplitDefaults = { a: { min: 100, group: "g" }, b: { min: 150, group: "g", minOther: 200 } };
+    localStorage.setItem(KEY, '{"a":900,"b":900}');
+    const { result } = renderHook(() => useSplit("t", defs));
+    act(() => result.current.props("a").onExtent(600));
+    const { a, b } = result.current.sizes as { a: number; b: number };
+    expect(a).toBe(600 - 150 - 200);
+    expect(a + b + 200).toBeLessThanOrEqual(600);
+    expect(b).toBeGreaterThanOrEqual(150);
+    expect(result.current.props("a").max).toBe(250);
+    act(() => result.current.props("a").onExtent(2000));
+    expect(result.current.sizes.a).toBe(900);
+  });
 });

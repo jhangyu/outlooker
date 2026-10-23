@@ -63,6 +63,7 @@ export function SavedQueries({ items, selectedId, onPick, onNew }: {
       <div ref={seam} className={s.seam}>
         <Splitter
           orientation="horizontal" reverse {...split.props("schema")}
+          container={() => seam.current?.parentElement}
           measure={() => (seam.current?.nextElementSibling as HTMLElement | null)?.offsetHeight ?? 0}
           style={{ top: -3, left: 0, right: 0 }}
         />

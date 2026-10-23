@@ -31,21 +31,26 @@ const PREFIX = "outlooker.splits.";
 const DEFAULT_MIN_OTHER = 240;
 
 /**
- * One boundary: `size` is the px size of the pane before the border (undefined = content/fr, no stored default),
- * `min` its minimum, `max` an optional hard maximum (otherwise container size - `minOther` at drag time).
+ * One boundary: `size` is the px size of the sized pane (undefined = content/fr, no stored default), `min` its minimum,
+ * `max` an optional hard maximum. Boundaries sharing a `group` lie along one container axis, in key order: each is
+ * also limited by the container minus the panes before it and the mins of those after it (last member's `minOther`
+ * is the room kept for the trailing pane, default 240). Without `group` a boundary is its own group.
  */
-export type SplitDef = { size?: number; min: number; max?: number; minOther?: number };
+export type SplitDef = { size?: number; min: number; max?: number; minOther?: number; group?: string };
 export type SplitDefaults = Record<string, SplitDef>;
 
-const clamp = (v: number, d: SplitDef) => Math.min(Math.max(v, d.min), d.max ?? Infinity);
+const groupOf = (id: string, d: SplitDef) => d.group ?? id;
 
 /**
  * Persisted sizes for the boundaries of one surface. `defaults` must be referentially stable (module constant).
- * `sizes[id]` is the clamped stored size, else the default (possibly undefined). `props(id)` feeds <Splitter>.
+ * `sizes[id]` is the stored size (else default) clamped to the measured container, recomputed on every resize, so a
+ * smaller window never hides a pane (the stored value is kept and returns when the window grows).
+ * `props(id)` feeds <Splitter>, which reports the container size.
  */
 export function useSplit(surfaceKey: string, defaults: SplitDefaults) {
   const key = PREFIX + surfaceKey;
   const [stored, setStored] = useState(() => readNumbers(key));
+  const [extents, setExtents] = useState<Record<string, number>>({});
 
   const set = useCallback(
     (id: string, px: number | undefined) => {
@@ -60,23 +65,37 @@ export function useSplit(surfaceKey: string, defaults: SplitDefaults) {
     [key],
   );
 
-  const size = (id: string): number | undefined => {
+  const setExtent = useCallback((group: string, px: number) => {
+    setExtents((m) => (m[group] === px ? m : { ...m, [group]: px }));
+  }, []);
+
+  const sizes: Record<string, number | undefined> = {};
+  const limits: Record<string, number | undefined> = {};
+  const reserves: Record<string, number> = {};
+  const ids = Object.keys(defaults);
+  const used: Record<string, number> = {};
+  for (const id of ids) {
     const d = defaults[id];
+    const g = groupOf(id, d);
+    const members = ids.filter((o) => groupOf(o, defaults[o]) === g);
+    const after = members.slice(members.indexOf(id) + 1);
+    const tail = defaults[after[after.length - 1] ?? id].minOther ?? DEFAULT_MIN_OTHER;
+    reserves[id] = after.reduce((n, o) => n + defaults[o].min, 0) + tail;
+    const ext = extents[g] || undefined;
+    const room = ext === undefined ? Infinity : Math.max(d.min, ext - (used[g] ?? 0) - reserves[id]);
+    const hard = Math.min(d.max ?? Infinity, room);
+    limits[id] = Number.isFinite(hard) ? Math.max(d.min, hard) : undefined;
     const v = stored[id] ?? d.size;
-    return v === undefined ? undefined : clamp(v, d);
-  };
+    sizes[id] = v === undefined ? undefined : Math.min(Math.max(v, d.min), limits[id] ?? Infinity);
+    used[g] = (used[g] ?? 0) + (sizes[id] ?? d.min);
+  }
 
-  const sizes = Object.fromEntries(Object.keys(defaults).map((id) => [id, size(id)])) as Record<string, number | undefined>;
-
-  /**
-   * CSS track for a grid template: `fallback` while the size is unset, else px kept inside the container so a
-   * smaller window never hides the other pane. Boundaries with a hard `max` are plain px.
-   */
+  /** CSS track for a grid template: `fallback` while the size is unset, else px (CSS-clamped until the container is measured). */
   const track = (id: string, fallback: string): string => {
     const v = sizes[id];
-    const d = defaults[id];
     if (v === undefined) return fallback;
-    return d.max !== undefined ? `${v}px` : `clamp(${d.min}px, ${v}px, calc(100% - ${d.minOther ?? DEFAULT_MIN_OTHER}px))`;
+    const d = defaults[id];
+    return extents[groupOf(id, d)] ? `${v}px` : `clamp(${d.min}px, ${v}px, calc(100% - ${reserves[id]}px))`;
   };
 
   const props = (id: string) => {
@@ -84,9 +103,9 @@ export function useSplit(surfaceKey: string, defaults: SplitDefaults) {
     return {
       value: sizes[id],
       min: d.min,
-      max: d.max,
-      minOther: d.minOther ?? DEFAULT_MIN_OTHER,
-      onChange: (px: number) => set(id, clamp(px, d)),
+      max: limits[id],
+      onExtent: (px: number) => setExtent(groupOf(id, d), px),
+      onChange: (px: number) => set(id, Math.min(Math.max(px, d.min), limits[id] ?? Infinity)),
       onReset: () => set(id, undefined),
     };
   };

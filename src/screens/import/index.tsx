@@ -36,7 +36,7 @@ const column = (columnId: ColumnKey, def: Omit<CreateTableColumnOptions<PstSourc
   createTableColumn<PstSource>({ ...def, columnId });
 
 // Sized pane = the left pane of each border; the default is the 1.6:1:1 ratio (fr tracks).
-const SPLITS: SplitDefaults = { p1: { min: 320, minOther: 240 }, p2: { min: 200, minOther: 240 } };
+const SPLITS: SplitDefaults = { p1: { min: 320, group: "cols" }, p2: { min: 200, group: "cols" } };
 
 const useStyles = makeStyles({
   root: { position: "relative", display: "grid", gridTemplateRows: "auto 1fr", height: "100%", minHeight: 0 },

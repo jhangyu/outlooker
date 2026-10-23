@@ -30,10 +30,10 @@ const INDEX_COLUMNS: ColumnDefaults = { name: { width: 260 }, table: { width: 18
 
 const SPLITS: SplitDefaults = {
   nav: { size: 220, min: 160, max: 400 },
-  c1: { min: 160, minOther: 320 },
-  c2: { min: 160, minOther: 320 },
-  r1: { min: 80, max: 1200 },
-  r2: { min: 80, max: 1200 },
+  c1: { min: 160, minOther: 320, group: "cols" },
+  c2: { min: 160, minOther: 320, group: "cols" },
+  r1: { min: 80, max: 1200, group: "rows" },
+  r2: { min: 80, max: 1200, group: "rows" },
 };
 // Centre a 6 px hit area in the grid gap after a grid area.
 const GAP_EDGE = `calc(${tokens.spacingHorizontalL} / -2 - 3px)`;

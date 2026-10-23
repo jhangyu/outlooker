@@ -25,7 +25,7 @@ export const MAX_ROWS = 10_000;
 const noop = () => {};
 
 // Sized pane = the left column of each border; the default is the 1:3:1:3 ratio (fr tracks).
-const SPLITS: SplitDefaults = { c1: { min: 160, minOther: 240 }, c2: { min: 240, minOther: 240 }, c3: { min: 160, minOther: 240 } };
+const SPLITS: SplitDefaults = { c1: { min: 160, group: "cols" }, c2: { min: 240, group: "cols" }, c3: { min: 160, group: "cols" } };
 
 const useStyles = makeStyles({
   root: { position: "relative", display: "grid", height: "100%", minHeight: 0 },

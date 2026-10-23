@@ -1,5 +1,5 @@
 import { makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
-import { useRef, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { useLayoutEffect, useRef, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 const STEP = 16;
@@ -19,9 +19,12 @@ export type SplitterProps = {
   /** Size in px of the pane before the border; undefined while it follows its content. */
   value: number | undefined;
   min: number;
-  /** Hard maximum; default is the parent element's size minus `minOther`. */
+  /** Current maximum (already bounded by the container), undefined until the container is measured. */
   max?: number;
-  minOther?: number;
+  /** Receives the container's content size along this axis, now and on every resize. */
+  onExtent?: (px: number) => void;
+  /** Element whose size bounds the split; default is the parent element. */
+  container?: () => HTMLElement | null | undefined;
   onChange: (px: number) => void;
   onReset: () => void;
   /** The sized pane is AFTER the border (right/bottom pane): dragging toward the start grows it. */
@@ -37,54 +40,72 @@ export type SplitterProps = {
  * Invisible 6 px hit area. Place it as a child of the layout container (`position: relative`), centred on the border.
  * Drag (pointer capture, `reverse` for a pane after the border), arrows move 16 px, Home/End jump to min/max, double-click resets.
  */
-export function Splitter({ orientation, value, min, max, minOther = 0, onChange, onReset, reverse, measure, style, label }: SplitterProps) {
+export function Splitter({ orientation, value, min, max, onExtent, container, onChange, onReset, reverse, measure, style, label }: SplitterProps) {
   const s = useStyles();
   const { t } = useTranslation("common");
   const vertical = orientation === "vertical";
+  const self = useRef<HTMLDivElement>(null);
   const drag = useRef<{ from: number; start: number } | null>(null);
+  const report = useRef(onExtent);
+  report.current = onExtent;
+  const pick = useRef(container);
+  pick.current = container;
 
-  const limit = (el: HTMLElement) => {
-    const parent = el.parentElement;
-    const container = parent ? (vertical ? parent.clientWidth : parent.clientHeight) : Infinity;
-    return Math.max(min, max ?? container - minOther);
-  };
+  useLayoutEffect(() => {
+    const host = pick.current?.() ?? self.current?.parentElement;
+    if (!host) return;
+    const read = () => {
+      const cs = getComputedStyle(host);
+      const pad = vertical ? parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) : parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      report.current?.((vertical ? host.clientWidth : host.clientHeight) - (pad || 0));
+    };
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(read);
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, [vertical]);
+
   const dir = reverse ? -1 : 1;
   const base = () => value ?? measure?.() ?? min;
-  const apply = (el: HTMLElement, px: number) => onChange(Math.min(Math.max(px, min), limit(el)));
+  const apply = (px: number) => onChange(Math.min(Math.max(px, min), max ?? Infinity));
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     drag.current = { from: vertical ? e.clientX : e.clientY, start: base() };
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (drag.current) apply(e.currentTarget, drag.current.start + dir * ((vertical ? e.clientX : e.clientY) - drag.current.from));
+    if (drag.current) apply(drag.current.start + dir * ((vertical ? e.clientX : e.clientY) - drag.current.from));
   };
+  const end = () => (drag.current = null);
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const [dec, inc] = vertical ? ["ArrowLeft", "ArrowRight"] : ["ArrowUp", "ArrowDown"];
-    const el = e.currentTarget;
-    if (e.key === dec) apply(el, base() - dir * STEP);
-    else if (e.key === inc) apply(el, base() + dir * STEP);
-    else if (e.key === "Home") apply(el, reverse ? limit(el) : min);
-    else if (e.key === "End") apply(el, reverse ? min : limit(el));
+    if (e.key === dec) apply(base() - dir * STEP);
+    else if (e.key === inc) apply(base() + dir * STEP);
+    else if (e.key === "Home") apply(min);
+    else if (e.key === "End" && max !== undefined) apply(max);
     else return;
     e.preventDefault();
   };
 
   return (
     <div
+      ref={self}
       role="separator"
       tabIndex={0}
       aria-label={label ?? t("action.resize")}
       aria-orientation={orientation}
-      aria-valuenow={value}
+      aria-valuenow={Math.round(value ?? (measure?.() || min))}
       aria-valuemin={min}
-      aria-valuemax={max}
+      aria-valuemax={max ?? min}
       className={mergeClasses(s.base, vertical ? s.vertical : s.horizontal)}
       style={style}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={() => (drag.current = null)}
-      onPointerCancel={() => (drag.current = null)}
+      onPointerUp={end}
+      onPointerCancel={end}
+      onLostPointerCapture={end}
       onDoubleClick={onReset}
       onKeyDown={onKeyDown}
     />
