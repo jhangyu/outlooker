@@ -1,9 +1,9 @@
 import { makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { ColumnMeta } from "../../api/bindings/ColumnMeta";
-import { ellipsis } from "../../components/common";
+import { ellipsis, useGridColumnSizing } from "../../components/common";
 import { ROW_HEIGHT } from "../../components/mail";
 
 /** Part 03 §6.2: numeric cells are right-aligned and never parsed. */
@@ -22,6 +22,7 @@ const useStyles = makeStyles({
     ":hover": { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
   selected: { backgroundColor: tokens.colorBrandBackground2, ":hover": { backgroundColor: tokens.colorBrandBackground2 } },
+  headCell: { position: "relative", display: "block" },
   cell: { padding: `0 ${tokens.spacingHorizontalS}`, ...ellipsis },
   num: { textAlign: "right", fontVariantNumeric: "tabular-nums" },
   nul: { fontStyle: "italic", color: tokens.colorNeutralForeground4 },
@@ -37,13 +38,19 @@ export function ResultTable({ columns, rows, selected, onSelect }: {
   const s = useStyles();
   const ref = useRef<HTMLDivElement>(null);
   const v = useVirtualizer({ count: rows.length, getScrollElement: () => ref.current, estimateSize: () => ROW_HEIGHT, overscan: 10 });
-  const grid = { gridTemplateColumns: `repeat(${columns.length}, minmax(120px, 1fr))`, minWidth: `${columns.length * 120}px` };
+  // Stored widths are keyed by column name (a repeated name gets `#j`) so a name keeps its width across queries.
+  const ids = useMemo(() => columns.map((c, j) => (columns.findIndex((x) => x.name === c.name) === j ? c.name : `${c.name}#${j}`)), [columns]);
+  const defaults = useMemo(() => Object.fromEntries(ids.map((id) => [id, { width: 160 }])), [ids]);
+  const { widths, total, headerProps } = useGridColumnSizing("sql-result", defaults);
+  const grid = { gridTemplateColumns: ids.map((id) => `${widths[id]}px`).join(" "), minWidth: `${total}px` };
   return (
     <div ref={ref} className={s.scroll} role="table" aria-rowcount={rows.length + 1}>
       <div role="row" className={s.head} style={grid}>
         {columns.map((c, j) => (
-          <span key={j} role="columnheader" title={c.pgType} className={mergeClasses(s.cell, NUMERIC_TYPES.has(c.pgType) && s.num)}>
-            {c.name}
+          <span key={ids[j]} role="columnheader" tabIndex={0} title={c.pgType} className={s.headCell}
+            onKeyDown={headerProps(ids[j]!).onKeyDown}>
+            <span className={mergeClasses(s.cell, NUMERIC_TYPES.has(c.pgType) && s.num)} style={{ display: "block" }}>{c.name}</span>
+            {headerProps(ids[j]!).aside}
           </span>
         ))}
       </div>

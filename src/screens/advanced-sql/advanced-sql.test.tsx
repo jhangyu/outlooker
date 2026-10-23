@@ -90,6 +90,17 @@ describe("Advanced SQL screen", () => {
     expect(screen.getByText("Row 1")).toBeTruthy();
   });
 
+  it("applies a stored column width by column name to the header and every row", async () => {
+    localStorage.setItem("outlooker.columnWidths.sql-result", JSON.stringify({ kind: 240 }));
+    vi.mocked(api.sqlExecute).mockResolvedValue(TABLE);
+    renderWithProviders(<AdvancedSqlScreen />, READY);
+    runSql("SELECT kind, n, note FROM t");
+    const rows = await screen.findAllByTestId("sql-table-row");
+    const head = screen.getAllByRole("row")[0]!;
+    expect(head.style.gridTemplateColumns).toBe("240px 160px 160px");
+    expect(rows[0]!.style.gridTemplateColumns).toBe("240px 160px 160px");
+  });
+
   it("Run is disabled while executing", async () => {
     let finish!: (r: SqlResult) => void;
     vi.mocked(api.sqlExecute).mockReturnValue(new Promise<SqlResult>((r) => (finish = r)));
