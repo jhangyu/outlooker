@@ -36,7 +36,7 @@ def main():
     if not shutil.which("cargo"):
         die("`cargo` not found on PATH (install Rust via rustup)")
     if not LIBPFF_ORIGIN.exists():
-        die("src-tauri/native/libpff is not vendored: run scripts/vendor-libpff.sh")
+        die("src-tauri/native/libpff is not vendored: run scripts/vendor-libpff.py")
 
     if not PG_DIR.is_dir() or not any(PG_DIR.iterdir()):
         run([mise, "exec", "--", "node", "scripts/fetch-postgres.mjs"])

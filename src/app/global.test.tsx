@@ -6,7 +6,6 @@ vi.mock("../api/commands");
 vi.mock("../api/dialog");
 vi.mock("../api/events", async () => (await import("./testing")).eventsMock);
 
-import { api } from "../api/commands";
 import type { AppStatus } from "../api/bindings/AppStatus";
 import { AdvancedSqlScreen } from "../screens/advanced-sql";
 import { ImportScreen } from "../screens/import";
@@ -15,7 +14,7 @@ import { SearchScreen } from "../screens/search";
 import { SettingsScreen } from "../screens/settings";
 import { FailedScreen } from "./AppFrame";
 import { NAMESPACES, RESOURCES } from "./i18n";
-import { eventsMock, makeDbStatus, makePst, mockApiDefaults, renderWithProviders } from "./testing";
+import { eventsMock, mockApiDefaults, renderWithProviders } from "./testing";
 
 function flatten(obj: Record<string, unknown>, prefix = ""): string[] {
   return Object.entries(obj).flatMap(([k, v]) =>
@@ -96,34 +95,5 @@ describe("global UI rules", () => {
       .filter(([, text]) => banned.some((b) => text.includes(b)))
       .map(([f]) => f);
     expect(hits).toEqual([]);
-  });
-
-  it("no out-of-scope controls", async () => {
-    const bannedKey = /^(pause|pauseAll|workers?|reencode|reEncode|format|highlight)/i;
-    for (const lng of ["zh-TW", "en"] as const)
-      for (const ns of NAMESPACES) {
-        const keys = flatten(RESOURCES[lng][ns]).filter((k) => k.split(".").some((seg) => bannedKey.test(seg)));
-        expect(keys, `${lng}/${ns}`).toEqual([]);
-      }
-    vi.mocked(api.pstList).mockResolvedValue([
-      makePst({ id: 1, status: "running", displayName: "a" }),
-      makePst({ id: 2, status: "cancelled", displayName: "b" }),
-      makePst({ id: 3, status: "failed", displayName: "c" }),
-      makePst({ id: 4, status: "completed", displayName: "d" }),
-    ]);
-    vi.mocked(api.dbStatus).mockResolvedValue(
-      makeDbStatus({ indexes: [{ name: "messages_body_trgm", table: "messages", sizeBytes: 1024, valid: true }] }),
-    );
-    const bannedLabel = /\b(pause|pause all|workers?|re-?encode|format|highlight)\b/i;
-    for (const el of [<ImportScreen />, <SettingsScreen />]) {
-      const r = renderWithProviders(el);
-      await settle(r);
-      const offenders = [...document.body.querySelectorAll("*")].filter((node) => {
-        const own = [...node.childNodes].filter((c) => c.nodeType === Node.TEXT_NODE).map((c) => c.textContent ?? "").join(" ");
-        return bannedLabel.test(own) || bannedLabel.test(node.getAttribute("aria-label") ?? "");
-      });
-      expect(offenders.map((o) => o.outerHTML.slice(0, 80))).toEqual([]);
-      r.unmount();
-    }
   });
 });

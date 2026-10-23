@@ -5,12 +5,13 @@ import { useEffect, useLayoutEffect, useMemo, useRef, type KeyboardEvent } from 
 import { useTranslation } from "react-i18next";
 import type { MailRow } from "../../api/bindings/MailRow";
 import { ellipsis, formatDay } from "../common";
+import { formatMonth } from "../common/display";
 
 export const ROW_HEIGHT = 32;
 /** Prototype `.mail-item.compact`: sender + date, subject, snippet on three lines. */
 // 56 px of text lines + 2 × 8 px padding + 1 px bottom border (border-box).
 const COMPACT_ROW_HEIGHT = 73;
-export const PREFETCH_ROWS = 50;
+const PREFETCH_ROWS = 50;
 
 export type Entry = { kind: "month"; key: string; label: string } | { kind: "mail"; key: string; row: MailRow };
 
@@ -30,14 +31,13 @@ export interface MailListProps {
 
 /** Rows arrive newest first (Part 03 §5.2); a header entry starts each local month, undated mail last. */
 export function buildEntries(rows: MailRow[], lng: string, undatedLabel: string): Entry[] {
-  const fmt = new Intl.DateTimeFormat(lng === "cimode" ? "en" : lng, { year: "numeric", month: "long" });
   const out: Entry[] = [];
   let current: string | null = null;
   for (const row of rows) {
     const d = row.sentAt ? new Date(row.sentAt) : null;
     const month = d ? `${d.getFullYear()}-${d.getMonth()}` : "undated";
     if (month !== current) {
-      out.push({ kind: "month", key: `m-${month}-${out.length}`, label: d ? fmt.format(d) : undatedLabel });
+      out.push({ kind: "month", key: `m-${month}-${out.length}`, label: d ? formatMonth(row.sentAt as string, lng) : undatedLabel });
       current = month;
     }
     out.push({ kind: "mail", key: `r-${row.id}`, row });

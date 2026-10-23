@@ -61,4 +61,19 @@ describe("mail paging", () => {
     expect(screen.getAllByTestId("mail-row").length).toBeLessThan(60);
     restore();
   }, 60_000);
+
+  it("a new seq evicts the superseded searchMail entry", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+    const { result, rerender } = renderHook(({ seq, q }) => useMailPages(q, seq), {
+      wrapper,
+      initialProps: { seq: 1, q: QUERY },
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    rerender({ seq: 2, q: { kind: "simple", text: "other" } });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const entries = qc.getQueryCache().findAll({ queryKey: ["searchMail"] });
+    expect(entries.length).toBe(1);
+    expect(entries[0]!.queryKey[1]).toBe(2);
+  });
 });

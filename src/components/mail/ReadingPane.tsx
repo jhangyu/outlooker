@@ -39,7 +39,7 @@ const fmt = (a: Address) => (a.name && a.address ? `${a.name} <${a.address}>` : 
 export function ReadingPane({ mailId }: { mailId: number | null }) {
   const { t, i18n } = useTranslation("search");
   const s = useStyles();
-  const q = useQuery({ queryKey: ["mailGet", mailId], queryFn: () => api.mailGet(mailId as number), enabled: mailId !== null });
+  const q = useQuery({ queryKey: ["mailGet", mailId], queryFn: () => api.mailGet(mailId as number), enabled: mailId !== null, gcTime: 30_000 });
 
   let content;
   if (mailId === null) {

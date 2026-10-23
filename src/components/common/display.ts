@@ -5,8 +5,21 @@ export const ellipsis = { overflow: "hidden", textOverflow: "ellipsis", whiteSpa
 const loc = (lng: string) => (lng === "cimode" ? "en" : lng);
 const UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 
+const cache = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat>();
+function formatter(kind: "n", lng: string, o?: Intl.NumberFormatOptions): Intl.NumberFormat;
+function formatter(kind: "d", lng: string, o?: Intl.DateTimeFormatOptions): Intl.DateTimeFormat;
+function formatter(kind: "n" | "d", lng: string, o?: object) {
+  const key = `${kind}|${loc(lng)}|${JSON.stringify(o)}`;
+  let f = cache.get(key);
+  if (!f) {
+    f = kind === "n" ? new Intl.NumberFormat(loc(lng), o) : new Intl.DateTimeFormat(loc(lng), o);
+    cache.set(key, f);
+  }
+  return f;
+}
+
 export function formatNumber(n: number, lng: string): string {
-  return new Intl.NumberFormat(loc(lng)).format(n);
+  return formatter("n", lng).format(n);
 }
 
 export function formatBytes(n: number, lng: string): string {
@@ -17,14 +30,18 @@ export function formatBytes(n: number, lng: string): string {
     unit += 1;
   }
   const digits = unit === 0 ? 0 : 1;
-  const text = new Intl.NumberFormat(loc(lng), { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
+  const text = formatter("n", lng, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
   return `${text} ${UNITS[unit]}`;
 }
 
 export function formatDateTime(iso: string | null, lng: string): string {
-  return iso ? new Intl.DateTimeFormat(loc(lng), { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso)) : "";
+  return iso ? formatter("d", lng, { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso)) : "";
 }
 
 export function formatDay(iso: string | null, lng: string): string {
-  return iso ? new Intl.DateTimeFormat(loc(lng), { dateStyle: "short" }).format(new Date(iso)) : "";
+  return iso ? formatter("d", lng, { dateStyle: "short" }).format(new Date(iso)) : "";
+}
+
+export function formatMonth(iso: string, lng: string): string {
+  return formatter("d", lng, { year: "numeric", month: "long" }).format(new Date(iso));
 }
