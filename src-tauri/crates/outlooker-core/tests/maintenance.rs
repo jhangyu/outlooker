@@ -84,7 +84,8 @@ async fn reindex_leaves_all_valid() {
     for want in ["messages_body_fts", "import_jobs_queue"] {
         assert!(listed.iter().any(|n| n == want), "{want} in {listed:?}");
     }
-    assert!(!listed.iter().any(|n| n.ends_with("_pkey")), "constraint indexes excluded: {listed:?}");
+    assert!(!listed.iter().any(|n| n.ends_with("_pkey") || n == "messages_dedupe_once"), "constraint indexes excluded: {listed:?}");
+    assert_eq!(listed.len(), 17, "{listed:?}");
     // damage: two search indexes missing, one invalid leftover of a failed concurrent rebuild
     a.batch_execute(
         "DROP INDEX messages_body_fts; DROP INDEX messages_sort;
