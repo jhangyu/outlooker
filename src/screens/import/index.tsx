@@ -15,7 +15,7 @@ import type { ImportStatus } from "../../api/bindings/ImportStatus";
 import type { PstSource } from "../../api/bindings/PstSource";
 import { useAppStatus } from "../../app/AppStatusContext";
 import {
-  EmptyState, ellipsis, formatBytes, formatDateTime, formatNumber, useAppToast, useEnqueuePst,
+  EmptyState, ellipsis, formatBytes, formatDateTime, formatNumber, useAppToast, useColumnWidths, useEnqueuePst,
 } from "../../components/common";
 import { RemoveDialog } from "./RemoveDialog";
 
@@ -26,6 +26,10 @@ const BADGE: Record<ImportStatus, BadgeProps["color"]> = {
   failed: "danger", completed: "success", removing: "warning",
 };
 type ColumnKey = "name" | "size" | "messages" | "new" | "date" | "status" | "remove";
+const FILE_COLUMNS: Record<ColumnKey, { width: number }> = {
+  name: { width: 220 }, size: { width: 88 }, messages: { width: 88 }, new: { width: 72 },
+  date: { width: 192 }, status: { width: 128 }, remove: { width: 48 },
+};
 const NUMERIC: ReadonlySet<TableColumnId> = new Set<ColumnKey>(["size", "messages", "new"]);
 const column = (columnId: ColumnKey, def: Omit<CreateTableColumnOptions<PstSource>, "columnId">) =>
   createTableColumn<PstSource>({ ...def, columnId });
@@ -59,19 +63,10 @@ const useStyles = makeStyles({
   paneFor: { ...ellipsis, color: tokens.colorNeutralForeground3 },
   scroll: { flex: 1, overflow: "auto", minHeight: 0 },
   full: { gridColumn: "1 / -1", borderLeft: "none" },
-  // Fixed column bases (sum 832px): the grid scrolls horizontally instead of squeezing every column to flex: 1 1 0.
-  grid: { minWidth: "832px" },
   cell: { whiteSpace: "nowrap" },
   num: { justifyContent: "flex-end", fontVariantNumeric: "tabular-nums" },
   // The sortable header label sits in a full-width flex button; right-align inside it too.
   numButton: { justifyContent: "flex-end" },
-  col_name: { flex: "1 0 220px", minWidth: 0 },
-  col_size: { flex: "0 0 88px" },
-  col_messages: { flex: "0 0 88px" },
-  col_new: { flex: "0 0 72px" },
-  col_date: { flex: "0 0 192px" },
-  col_status: { flex: "0 0 128px" },
-  col_remove: { flex: "0 0 44px" },
   rowSelected: { backgroundColor: tokens.colorBrandBackground2, ":hover": { backgroundColor: tokens.colorBrandBackground2 } },
   badge: { flexShrink: 0, whiteSpace: "nowrap" },
   path: {
@@ -124,6 +119,7 @@ export function ImportScreen() {
   const [selected, setSelected] = useState<number | null>(null);
   const [removing, setRemoving] = useState<PstSource | null>(null);
   const list = psts.data ?? [];
+  const sizing = useColumnWidths("import-files", FILE_COLUMNS);
 
   const enqueue = useEnqueuePst();
   const refresh = () => qc.invalidateQueries({ queryKey: pstListQuery.queryKey });
@@ -206,11 +202,7 @@ export function ImportScreen() {
     }),
   ];
 
-  const basis: Record<ColumnKey, string> = {
-    name: s.col_name, size: s.col_size, messages: s.col_messages, new: s.col_new, date: s.col_date, status: s.col_status, remove: s.col_remove,
-  };
-  // Every column is built by `column()`, so its id is a ColumnKey.
-  const colClass = (id: TableColumnId) => mergeClasses(s.cell, basis[id as ColumnKey], NUMERIC.has(id) && s.num);
+  const colClass = (id: TableColumnId) => mergeClasses(s.cell, NUMERIC.has(id) && s.num);
 
   const stat = (value: string, label: string) => (
     <span className={s.stat}>
@@ -254,7 +246,7 @@ export function ImportScreen() {
             </div>
             <div className={s.scroll}>
               <DataGrid
-                className={s.grid}
+                {...sizing}
                 items={list.filter((p) => IMPORTED.includes(p.status))}
                 columns={columns}
                 getRowId={(p) => p.id}
