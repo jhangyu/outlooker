@@ -188,7 +188,10 @@ async fn start_after_kill_recovers_jobs_then_heals_then_starts_worker() {
     assert!(probes.iter().all(|(_, valid)| *valid), "worker touched the job before the indexes were healed: {probes:?}");
 
     let admin = tc.admin().await;
-    assert_eq!(job_state(&admin, cancelling_pst).await, "cancelled");
+    // The recovered row itself: the scheduler's first run may already have added a newer job for the missing file.
+    let recovered: String =
+        admin.query_one("SELECT state FROM import_jobs WHERE id = $1", &[&cancelling_job]).await.unwrap().get(0);
+    assert_eq!(recovered, "cancelled");
     assert!(missing_or_invalid(&admin).await.unwrap().is_empty());
     let valid: bool = admin
         .query_one(
