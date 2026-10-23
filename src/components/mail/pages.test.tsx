@@ -76,4 +76,19 @@ describe("mail paging", () => {
     expect(entries.length).toBe(1);
     expect(entries[0]!.queryKey[1]).toBe(2);
   });
+
+  it("keeps the current search pages while no screen observes them", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+    const { result, unmount } = renderHook(() => useMailPages(QUERY, 1), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    vi.useFakeTimers(); // before unmount, so the cache's gc timer is a fake one
+    try {
+      unmount();
+      vi.advanceTimersByTime(6 * 60_000);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(qc.getQueryCache().find({ queryKey: ["searchMail", 1, QUERY] })).toBeDefined();
+  });
 });

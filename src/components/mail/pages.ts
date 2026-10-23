@@ -42,6 +42,7 @@ export function useMailPages(query: SearchQuery | null, seq: number): MailPages 
     getNextPageParam: (last, pages) => nextPageParam(last, pages),
     enabled: query !== null,
     staleTime: Infinity, // changes only through seq or reset()
+    gcTime: Infinity, // a hidden screen has no observer, and the effect below keeps one entry
   });
   // Each new composed query gets a new seq; drop the superseded entries so their pages do not pile up.
   useEffect(() => {

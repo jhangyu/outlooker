@@ -4,6 +4,8 @@
 SOURCE is a GitHub Actions run id of the fork's `build_wheels` workflow (artifact `cibw-sdist`,
 downloaded with `gh`) or a path to a local `libpff_python-*.tar.gz`.
 
+Requires Python 3.12+.
+
 CI artifacts expire. To get a new run id, re-run the fork's `build_wheels` workflow
 (workflow_dispatch) at commit bb5bcc0 and pass the new run id.
 """

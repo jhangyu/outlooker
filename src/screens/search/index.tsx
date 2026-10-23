@@ -99,7 +99,11 @@ export function SearchScreen() {
     queryFn: () => api.searchCount(query!),
     enabled: query !== null,
     staleTime: Infinity, // changes only through seq or refresh()
+    gcTime: Infinity, // a hidden screen has no observer, and the effect below keeps one entry
   });
+  useEffect(() => {
+    qc.removeQueries({ queryKey: ["searchCount"], predicate: (x) => x.queryKey[1] !== seq });
+  }, [qc, seq]);
   const filters = useQuery({ queryKey: ["filterOptions", status.counts.messages, status.counts.psts], queryFn: () => api.filterOptions(), placeholderData: keepPreviousData });
 
   const [picked, setPicked] = useState<{ seq: number; id: number } | null>(null);
