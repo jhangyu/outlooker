@@ -3,9 +3,10 @@
 import { availableParallelism, loadavg } from "node:os";
 
 export const TOLERANCE_S = 6;
-const BUSY = 0.25;
+const BUSY = 0.1;
 
-// ponytail: "busy" = 1-min load / cores >= 0.25 (quiet ~4, busy 15-32 on 28 cores, 2026-10-23). TEST_LOAD_OVERRIDE
+// ponytail: "busy" = 1-min load / cores >= 0.1 (2.8 on 28 cores). Normal load on this shared machine is 6-12 on 28
+// cores, so 0.1 keeps the strict 1 s cap only on a truly idle machine (user decision, 2026-10-23). TEST_LOAD_OVERRIDE
 // replaces the measured load average, for the red/green proofs only. Ceiling: load average lags ~1 min behind a burst.
 export function judge(name, seconds, capS) {
   const load = Number(process.env.TEST_LOAD_OVERRIDE ?? loadavg()[0]);

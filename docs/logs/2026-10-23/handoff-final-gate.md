@@ -125,3 +125,7 @@ Judging (same rules on both sides, `scripts/test-time-judge.mjs`):
 - After, for comparison (measure your own runs):
   - Rust run 1 by target: 205 executed (it 76 + others 129) plus 1 doctest. 16 ignored: 14 perf, plus 2 `warm_template`.
   - Frontend: 53 tests, 3.05–3.91 s duration on a quiet machine (fe-q-1..3.txt).
+
+## Busy threshold changed (2026-10-23)
+
+The busy threshold in `scripts/test-time-judge.mjs` changed from 0.25 to 0.1 (load / cores) by user decision. Normal load on this shared 28-core machine is 6-12, which sat at the old threshold, so tests near the 1 s cap flaked between FAIL and pass. Everything else is unchanged (1 s cap, 3 s for cluster_lifecycle, 6 s tolerance, WARNING lines). Re-proof with TEST_LOAD_OVERRIDE in `scripts/tmp/policy-impl/j3-rs-a/b/c.txt`: load/cores 0.05 → FAIL RC=1, 0.15 → WARNING RC=0, 7 s at 0.15 → FAIL RC=1.
