@@ -1,5 +1,6 @@
 import { makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { useRef, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { useTranslation } from "react-i18next";
 
 const STEP = 16;
 
@@ -38,6 +39,7 @@ export type SplitterProps = {
  */
 export function Splitter({ orientation, value, min, max, minOther = 0, onChange, onReset, reverse, measure, style, label }: SplitterProps) {
   const s = useStyles();
+  const { t } = useTranslation("common");
   const vertical = orientation === "vertical";
   const drag = useRef<{ from: number; start: number } | null>(null);
 
@@ -72,7 +74,7 @@ export function Splitter({ orientation, value, min, max, minOther = 0, onChange,
     <div
       role="separator"
       tabIndex={0}
-      aria-label={label}
+      aria-label={label ?? t("action.resize")}
       aria-orientation={orientation}
       aria-valuenow={value}
       aria-valuemin={min}
