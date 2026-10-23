@@ -9,8 +9,8 @@ use outlooker_core::importer::dedupe::format_utc_seconds;
 use outlooker_core::search::compile::Compiled;
 use outlooker_core::search::execute::{bind, ordered_sql, phase_a_sql, WINDOW};
 
-use crate::corpus::Corpus;
-use crate::root::LibraryRoot;
+use outlooker_loadgen::corpus::Corpus;
+use outlooker_loadgen::root::LibraryRoot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Log {
@@ -38,7 +38,7 @@ pub async fn open_library() -> LibraryRoot {
     let root = perf_root();
     assert!(
         root.join("outlooker-data.json").exists(),
-        "perf library missing at {}: run `cargo test -p outlooker-loadgen --release -- --ignored perf_generate` first",
+        "perf library missing at {}: run `cargo test --workspace --release --test perf -- --ignored --test-threads 1 perf_generate` first",
         root.display()
     );
     LibraryRoot::open(&root).await.expect("open perf library")
