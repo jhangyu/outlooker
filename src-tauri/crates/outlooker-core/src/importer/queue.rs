@@ -1,10 +1,9 @@
 //! Durable job queue (spec Part 03 §7.1 state machine): job state, SQL commands, list, errors, recovery, worker
 //! start / shutdown. The job runner is `runner.rs`, one import attempt is `pipeline.rs`.
-use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -22,18 +21,18 @@ use crate::dto::import::{
 };
 use crate::gate::{Activity, Gate};
 use crate::importer::inflight::Inflight;
+use crate::importer::probe::{Probe, probe};
 use crate::importer::progress::{BYTE_BUDGET, ByteBudget, Throughput};
 use crate::importer::runner::worker;
-use crate::importer::types::{FolderIn, RawItem};
+use crate::importer::types::{FolderIn, ItemError, RawItem};
 use crate::importer::writer::truncate_to_micros;
-use crate::importer::{ImportTuning, RecoveryReport};
+use crate::importer::{ImportTuning, RecoveryReport, SyncTarget};
 use crate::paths::Paths;
 use crate::sink::{CoreEvent, EventSink};
 
-pub const MAX_ENQUEUE_PATHS: usize = 100;
+pub const MAX_REGISTER_PATHS: usize = 100;
 pub const ERRORS_DEFAULT_LIMIT: u32 = 100;
 pub const ERRORS_MAX_LIMIT: u32 = 500;
-const PST_MAGIC: &[u8; 4] = b"!BDN";
 const DISPLAY_NAME_MAX: usize = 512;
 
 // ------------------------------------------------------------------------------------------------ state
@@ -104,6 +103,8 @@ pub(crate) struct Inner {
     pub(super) throughput: Mutex<Throughput>,
     pub(super) hold_used: AtomicBool,
     pub(crate) events: broadcast::Sender<(i64, ImportStatus)>,
+    /// Serializes `sync` calls (scheduler and a manual "sync now" never interleave).
+    sync_lock: tokio::sync::Mutex<()>,
 }
 
 impl Inner {
@@ -122,6 +123,7 @@ impl Inner {
             throughput: Mutex::new(Throughput::new()),
             hold_used: AtomicBool::new(false),
             events: broadcast::Sender::new(64),
+            sync_lock: tokio::sync::Mutex::new(()),
         }
     }
     pub(super) fn running(&self) -> Option<RunningJob> {
@@ -162,10 +164,12 @@ pub(crate) enum JobState {
     Cancelled,
     Failed,
     Completed,
+    /// Terminal: the PST was held by another program; finished_at = last seen locked.
+    Locked,
 }
 db_text!(JobState, "job state", {
     Queued => "queued", Running => "running", Cancelling => "cancelling",
-    Cancelled => "cancelled", Failed => "failed", Completed => "completed",
+    Cancelled => "cancelled", Failed => "failed", Completed => "completed", Locked => "locked",
 });
 
 /// Part 04 §2.1 table.
@@ -179,13 +183,19 @@ pub(crate) fn status_of(kind: JobKind, state: JobState) -> ImportStatus {
         (JobKind::Import, JobState::Cancelled) => ImportStatus::Cancelled,
         (JobKind::Import, JobState::Failed) => ImportStatus::Failed,
         (JobKind::Import, JobState::Completed) => ImportStatus::Completed,
+        (JobKind::Import, JobState::Locked) => ImportStatus::Locked,
     }
 }
 
 const LIST_SQL: &str = "SELECT s.id, s.path, s.display_name, s.file_size_bytes, j.kind, j.state, j.id, \
        to_char(j.created_at AT TIME ZONE 'UTC', $1), to_char(j.finished_at AT TIME ZONE 'UTC', $1), \
        c.phase, c.items_total, c.stored, c.duplicates, c.errors, c.skipped_non_mail, c.images_converted, \
-       (SELECT count(*) FROM import_errors e WHERE e.pst_id = s.id) \
+       (SELECT count(*) FROM import_errors e WHERE e.pst_id = s.id), \
+       s.sync_enabled, to_char(s.last_checked_at AT TIME ZONE 'UTC', $1), \
+       (SELECT to_char(d.finished_at AT TIME ZONE 'UTC', $1) FROM import_jobs d \
+         WHERE d.pst_id = s.id AND d.kind = 'import' AND d.state = 'completed' ORDER BY d.id DESC LIMIT 1), \
+       (SELECT e.message FROM import_errors e WHERE e.pst_id = s.id AND e.job_id = j.id AND e.severity = 'job_failed' \
+         ORDER BY e.id DESC LIMIT 1) \
   FROM pst_sources s \
   CROSS JOIN LATERAL (SELECT kind, state, id, created_at, finished_at FROM import_jobs j \
                       WHERE j.pst_id = s.id ORDER BY j.id DESC LIMIT 1) j \
@@ -210,7 +220,7 @@ pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSour
                 let items_done = stored + duplicates + errors + skipped_non_mail;
                 let live = running.as_ref().is_some_and(|j| j.pst_id == id) && status == ImportStatus::Running;
                 let tp = inner.throughput.lock().unwrap_or_else(|p| p.into_inner());
-                ImportProgress {
+                Box::new(ImportProgress {
                     pst_id: id,
                     phase,
                     items_total,
@@ -222,7 +232,7 @@ pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSour
                     images_converted: r.get(15),
                     bytes_per_sec: if live { tp.bytes_per_sec() } else { None },
                     eta_seconds: if live { tp.eta_seconds(items_total, items_done) } else { None },
-                }
+                })
             });
             let rank = match status {
                 ImportStatus::Running | ImportStatus::Cancelling => 0,
@@ -241,6 +251,10 @@ pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSour
                 error_count: r.get(16),
                 queued_at: r.get(7),
                 finished_at: r.get(8),
+                sync_enabled: r.get(17),
+                last_checked_at: r.get(18),
+                last_synced_at: r.get(19),
+                failure_reason: if status == ImportStatus::Failed { r.get(20) } else { None },
             };
             Ok((rank, job_id, src))
         })
@@ -261,26 +275,6 @@ pub(super) async fn emit_status(inner: &Inner, pst_id: i64) -> Option<PstSource>
 
 // ------------------------------------------------------------------------------------------------ commands
 
-/// Part 03 §7.2 path checks. Returns (size, mtime truncated to whole microseconds).
-pub fn check_file(path: &str) -> Result<(i64, SystemTime), AppError> {
-    let p = Path::new(path);
-    let fa = |reason: &str| AppError::FileAccess { path: path.to_owned(), reason: reason.to_owned() };
-    if !p.is_absolute() {
-        return Err(fa("notAbsolute"));
-    }
-    let meta = std::fs::metadata(p).map_err(|_| fa("notFound"))?;
-    if !meta.is_file() {
-        return Err(fa("notAFile"));
-    }
-    let mut magic = [0u8; 4];
-    std::fs::File::open(p).and_then(|mut f| f.read_exact(&mut magic)).map_err(|_| fa("unreadable"))?;
-    if &magic != PST_MAGIC {
-        return Err(AppError::NotAPst { path: path.to_owned() });
-    }
-    let mtime = meta.modified().map_err(|_| fa("unreadable"))?;
-    Ok((meta.len() as i64, truncate_to_micros(mtime)))
-}
-
 fn display_name(path: &str) -> String {
     let p = Path::new(path);
     let stem = p.file_stem().or(p.file_name()).map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -288,56 +282,171 @@ fn display_name(path: &str) -> String {
     stem.chars().take(DISPLAY_NAME_MAX).collect()
 }
 
-/// Source row + queued import job in one transaction. Err(AlreadyImported) when the identity exists.
-async fn insert_source(inner: &Inner, path: &str, size: i64, mtime: SystemTime) -> Result<i64, AppError> {
+/// Source row + its first import job (`queued`, or `locked` when the PST is held) in one transaction.
+/// Err(AlreadyImported) when the path is registered.
+async fn insert_source(inner: &Inner, path: &str, size: i64, state: JobState) -> Result<i64, AppError> {
     let mut c = inner.db.app_client().await?;
     let tx = c.transaction().await.map_err(db_err)?;
     let row = tx
         .query_opt(
-            "INSERT INTO pst_sources (path, display_name, file_size_bytes, file_mtime) VALUES ($1, $2, $3, $4) \
-             ON CONFLICT ON CONSTRAINT pst_sources_same_file_once DO NOTHING RETURNING id",
-            &[&path, &display_name(path), &size, &mtime],
+            "INSERT INTO pst_sources (path, display_name, file_size_bytes) VALUES ($1, $2, $3) \
+             ON CONFLICT ON CONSTRAINT pst_sources_path_once DO NOTHING RETURNING id",
+            &[&path, &display_name(path), &size],
         )
         .await
         .map_err(db_err)?;
     let Some(row) = row else {
-        let existing: i64 = tx
-            .query_one("SELECT id FROM pst_sources WHERE path = $1 AND file_size_bytes = $2 AND file_mtime = $3", &[&path, &size, &mtime])
-            .await
-            .map_err(db_err)?
-            .get(0);
+        let existing: i64 = tx.query_one("SELECT id FROM pst_sources WHERE path = $1", &[&path]).await.map_err(db_err)?.get(0);
         return Err(AppError::AlreadyImported { pst_id: existing });
     };
     let pst_id: i64 = row.get(0);
-    tx.execute("INSERT INTO import_jobs (pst_id, kind, state) VALUES ($1, 'import', 'queued')", &[&pst_id]).await.map_err(db_err)?;
+    tx.execute(
+        "INSERT INTO import_jobs (pst_id, kind, state, finished_at) VALUES ($1, 'import', $2, CASE WHEN $2 = 'locked' THEN now() END)",
+        &[&pst_id, &state.as_db()],
+    )
+    .await
+    .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
     Ok(pst_id)
 }
 
-pub(crate) async fn enqueue(inner: &Inner, paths: Vec<String>) -> Result<Vec<EnqueueResult>, AppError> {
+pub(crate) async fn register(inner: &Inner, paths: Vec<String>) -> Result<Vec<EnqueueResult>, AppError> {
     if paths.is_empty() {
         return Err(AppError::invalid("paths", "empty"));
     }
-    if paths.len() > MAX_ENQUEUE_PATHS {
+    if paths.len() > MAX_REGISTER_PATHS {
         return Err(AppError::invalid("paths", "tooMany"));
     }
     let mut out = Vec::with_capacity(paths.len());
     for path in paths {
-        let result = match check_file(&path) {
-            Err(error) => EnqueueResult::Rejected { path, error },
-            Ok((size, mtime)) => match insert_source(inner, &path, size, mtime).await {
-                Err(e @ AppError::AlreadyImported { .. }) => EnqueueResult::Rejected { path, error: e },
-                Err(e) => return Err(e),
-                Ok(pst_id) => {
-                    let pst = emit_status(inner, pst_id).await.ok_or_else(|| AppError::internal("enqueued source vanished"))?;
-                    EnqueueResult::Queued { pst }
-                }
-            },
+        let inserted = match probe(&path) {
+            Probe::Unavailable(error) => {
+                out.push(EnqueueResult::Rejected { path, error });
+                continue;
+            }
+            Probe::Ready { size, .. } => insert_source(inner, &path, size, JobState::Queued).await,
+            // ponytail: a held PST usually still stats (Windows sharing violations hit open, not stat); size 1 when it
+            // does not, the first unlocked attempt writes the real size
+            Probe::Locked => {
+                let size = std::fs::metadata(&path).map_or(1, |m| (m.len() as i64).max(1));
+                insert_source(inner, &path, size, JobState::Locked).await
+            }
+        };
+        let result = match inserted {
+            Err(e @ AppError::AlreadyImported { .. }) => EnqueueResult::Rejected { path, error: e },
+            Err(e) => return Err(e),
+            Ok(pst_id) => {
+                let pst = emit_status(inner, pst_id).await.ok_or_else(|| AppError::internal("registered source vanished"))?;
+                EnqueueResult::Queued { pst }
+            }
         };
         out.push(result);
     }
     inner.kick.notify_one();
     Ok(out)
+}
+
+pub(crate) async fn set_enabled(inner: &Inner, pst_id: i64, enabled: bool) -> Result<PstSource, AppError> {
+    let c = inner.db.app_client().await?;
+    let n = c.execute("UPDATE pst_sources SET sync_enabled = $2 WHERE id = $1", &[&pst_id, &enabled]).await.map_err(db_err)?;
+    if n == 0 {
+        return Err(AppError::not_found("pst", pst_id));
+    }
+    emit_status(inner, pst_id).await.ok_or_else(|| AppError::not_found("pst", pst_id))
+}
+
+/// What one sync step did to a path.
+#[derive(Debug, PartialEq, Eq)]
+enum SyncStep {
+    /// A job is active (queued, running, cancelling, removing) or the source vanished: nothing touched.
+    Skipped,
+    /// Unchanged since the last completed run, or still locked / unavailable: only timestamps moved.
+    Checked,
+    Queued,
+}
+
+/// One sync step for one path (spec 2026-10-24 PST scheduled sync; arch-2 §2–§4), in one transaction that holds the
+/// source row. Unchanged = stat size and mtime equal the checkpoint identity and the newest job is a completed
+/// import: no job, no open. Locked / unavailable streaks keep one job row (and one error row) per streak.
+async fn sync_one(inner: &Inner, pst_id: i64) -> Result<SyncStep, AppError> {
+    let mut c = inner.db.app_client().await?;
+    let tx = c.transaction().await.map_err(db_err)?;
+    let Some((job_id, kind, state)) = newest_job_for_update(&tx, pst_id).await? else {
+        return Ok(SyncStep::Skipped);
+    };
+    if matches!(state, JobState::Queued | JobState::Running | JobState::Cancelling) {
+        return Ok(SyncStep::Skipped);
+    }
+    let path: String = tx.query_one("SELECT path FROM pst_sources WHERE id = $1", &[&pst_id]).await.map_err(db_err)?.get(0);
+    let mut step = SyncStep::Checked;
+    let unchanged = (kind, state) == (JobKind::Import, JobState::Completed) && {
+        let cp = tx.query_opt("SELECT pst_file_size, pst_file_mtime FROM import_checkpoints WHERE pst_id = $1", &[&pst_id]).await.map_err(db_err)?;
+        let now = std::fs::metadata(&path).ok().and_then(|m| Some((m.len() as i64, truncate_to_micros(m.modified().ok()?))));
+        cp.is_some_and(|r| now == Some((r.get(0), r.get(1))))
+    };
+    if !unchanged {
+        match probe(&path) {
+            Probe::Ready { .. } => {
+                tx.execute("INSERT INTO import_jobs (pst_id, kind, state) VALUES ($1, 'import', 'queued')", &[&pst_id]).await.map_err(db_err)?;
+                step = SyncStep::Queued;
+            }
+            Probe::Locked if (kind, state) == (JobKind::Import, JobState::Locked) => {
+                tx.execute("UPDATE import_jobs SET finished_at = now() WHERE id = $1", &[&job_id]).await.map_err(db_err)?;
+            }
+            Probe::Locked => {
+                tx.execute("INSERT INTO import_jobs (pst_id, kind, state, finished_at) VALUES ($1, 'import', 'locked', now())", &[&pst_id])
+                    .await
+                    .map_err(db_err)?;
+            }
+            Probe::Unavailable(_) if (kind, state) == (JobKind::Import, JobState::Failed) => {}
+            Probe::Unavailable(e) => {
+                let failed: i64 = tx
+                    .query_one("INSERT INTO import_jobs (pst_id, kind, state, finished_at) VALUES ($1, 'import', 'failed', now()) RETURNING id", &[&pst_id])
+                    .await
+                    .map_err(db_err)?
+                    .get(0);
+                let e = ItemError::new(ImportErrorStage::Open, ImportErrorSeverity::JobFailed, "", 0, &e.to_string());
+                tx.execute(
+                    "INSERT INTO import_errors (pst_id, job_id, stage, severity, message) VALUES ($1, $2, 'open', 'job_failed', $3)",
+                    &[&pst_id, &failed, &e.message],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+        }
+    }
+    tx.execute("UPDATE pst_sources SET last_checked_at = now() WHERE id = $1", &[&pst_id]).await.map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    Ok(step)
+}
+
+/// `SyncTarget::All` = every enabled path; `One(id)` = that path even when disabled (explicit user action).
+pub(crate) async fn sync(inner: &Inner, target: SyncTarget) -> Result<(), AppError> {
+    let _serial = inner.sync_lock.lock().await;
+    let ids: Vec<i64> = {
+        let c = inner.db.app_client().await?;
+        let rows = match target {
+            SyncTarget::All => c.query("SELECT id FROM pst_sources WHERE sync_enabled ORDER BY id", &[]).await,
+            SyncTarget::One(id) => c.query("SELECT id FROM pst_sources WHERE id = $1", &[&id]).await,
+        }
+        .map_err(db_err)?;
+        if let (SyncTarget::One(id), true) = (target, rows.is_empty()) {
+            return Err(AppError::not_found("pst", id));
+        }
+        rows.iter().map(|r| r.get(0)).collect()
+    };
+    let mut queued = false;
+    for pst_id in ids {
+        let step = sync_one(inner, pst_id).await?;
+        if step != SyncStep::Skipped {
+            emit_status(inner, pst_id).await;
+        }
+        queued |= step == SyncStep::Queued;
+    }
+    if queued {
+        inner.kick.notify_one();
+    }
+    Ok(())
 }
 
 /// Newest job of a PST, locked for the rest of the transaction. None when the PST does not exist.
@@ -373,24 +482,6 @@ pub(crate) async fn cancel(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
         r.cancel.cancel(CancelReason::User);
     }
     emit_status(inner, pst_id).await;
-    Ok(())
-}
-
-pub(crate) async fn resume(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
-    let mut c = inner.db.app_client().await?;
-    let tx = c.transaction().await.map_err(db_err)?;
-    let Some((_, kind, state)) = newest_job_for_update(&tx, pst_id).await? else {
-        return Err(AppError::not_found("pst", pst_id));
-    };
-    if kind != JobKind::Import || !matches!(state, JobState::Cancelled | JobState::Failed) {
-        return Err(AppError::invalid("pstId", "notResumable"));
-    }
-    let path: String = tx.query_one("SELECT path FROM pst_sources WHERE id = $1", &[&pst_id]).await.map_err(db_err)?.get(0);
-    check_file(&path)?;
-    tx.execute("INSERT INTO import_jobs (pst_id, kind, state) VALUES ($1, 'import', 'queued')", &[&pst_id]).await.map_err(db_err)?;
-    tx.commit().await.map_err(db_err)?;
-    emit_status(inner, pst_id).await;
-    inner.kick.notify_one();
     Ok(())
 }
 
@@ -536,6 +627,10 @@ static SYNTHETIC: std::sync::LazyLock<Mutex<std::collections::HashMap<String, Sy
 pub(super) fn synthetic_items(path: &str) -> Option<(Vec<FolderIn>, Vec<RawItem>)> {
     SYNTHETIC.lock().unwrap_or_else(|p| p.into_inner()).get(path).cloned()
 }
+#[cfg(feature = "test-support")]
+pub(super) fn set_synthetic_items(path: &str, folders: Vec<FolderIn>, items: Vec<RawItem>) {
+    SYNTHETIC.lock().unwrap_or_else(|p| p.into_inner()).insert(path.to_owned(), (folders, items));
+}
 #[cfg(not(feature = "test-support"))]
 pub(super) fn synthetic_items(_path: &str) -> Option<(Vec<FolderIn>, Vec<RawItem>)> {
     None
@@ -543,9 +638,12 @@ pub(super) fn synthetic_items(_path: &str) -> Option<(Vec<FolderIn>, Vec<RawItem
 
 #[cfg(feature = "test-support")]
 pub(crate) async fn enqueue_synthetic(inner: &Inner, path: &str, folders: Vec<FolderIn>, items: Vec<RawItem>) -> Result<i64, AppError> {
-    let (size, mtime) = check_file(path).unwrap_or((1, truncate_to_micros(SystemTime::now())));
-    SYNTHETIC.lock().unwrap_or_else(|p| p.into_inner()).insert(path.to_owned(), (folders, items));
-    let pst_id = insert_source(inner, path, size, mtime).await?;
+    let size = match probe(path) {
+        Probe::Ready { size, .. } => size,
+        other => return Err(AppError::internal(format!("synthetic source {path} needs a file with the PST magic: {other:?}"))),
+    };
+    set_synthetic_items(path, folders, items);
+    let pst_id = insert_source(inner, path, size, JobState::Queued).await?;
     emit_status(inner, pst_id).await;
     inner.kick.notify_one();
     Ok(pst_id)
@@ -567,6 +665,7 @@ mod tests {
             (Import, JobState::Cancelled, ImportStatus::Cancelled),
             (Import, JobState::Failed, ImportStatus::Failed),
             (Import, JobState::Completed, ImportStatus::Completed),
+            (Import, JobState::Locked, ImportStatus::Locked),
             (Remove, JobState::Queued, ImportStatus::Removing),
             (Remove, JobState::Running, ImportStatus::Removing),
             (Remove, JobState::Failed, ImportStatus::Failed),

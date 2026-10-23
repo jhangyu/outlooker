@@ -207,6 +207,8 @@ enum EndAction {
     Requeue,
     /// Finalize (indexes, VACUUM, marker), then this final state and status.
     Finalize(JobState, ImportStatus),
+    /// PST held by another program: state `locked`, no finalize, no error row (nothing was read).
+    Locked,
 }
 
 /// End-of-attempt decision (Part 03 §7.1). A failure beats any cancel reason; `Paused` never gets here (the loop
@@ -214,6 +216,7 @@ enum EndAction {
 fn end_of_attempt(end: &AttemptEnd, reason: Option<CancelReason>) -> EndAction {
     match (end, reason) {
         (AttemptEnd::Crashed, _) => EndAction::Crash,
+        (AttemptEnd::Locked, _) => EndAction::Locked,
         (AttemptEnd::Failed(_), _) => EndAction::Finalize(JobState::Failed, ImportStatus::Failed),
         (_, Some(CancelReason::Shutdown)) => EndAction::Requeue,
         (_, Some(CancelReason::User)) => EndAction::Finalize(JobState::Cancelled, ImportStatus::Cancelled),
@@ -261,6 +264,13 @@ async fn run_import(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<J
             }
             return false;
         }
+        EndAction::Locked => {
+            if set_final(inner, job_id, pst_id, JobState::Locked, None).await.is_ok() {
+                emit_status(inner, pst_id).await;
+                let _ = inner.events.send((pst_id, ImportStatus::Locked));
+            }
+            return false;
+        }
         EndAction::Finalize(state, status) => (state, status),
     };
     let failure = match end {
@@ -281,18 +291,23 @@ async fn run_import(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<J
     false
 }
 
-/// Step 9: Finalizing phase, indexes (always; idempotent), after-job VACUUM, marker removed.
+/// Step 9: Finalizing phase, indexes (always; idempotent), after-job VACUUM when the run stored messages (a sync
+/// that found nothing new skips it), marker removed.
 async fn finalize(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
     let c = inner.db.app_client().await?;
+    let mut stored = 0;
     if Checkpoint::load(&c, pst_id).await?.is_some() {
         Checkpoint::set_phase(&c, pst_id, ImportPhase::Finalizing, None).await?;
         if let Some(cp) = Checkpoint::load(&c, pst_id).await? {
+            stored = cp.stored;
             inner.sink.emit(CoreEvent::ImportProgress(progress_event(&cp, None)));
         }
     }
     let admin = inner.db.connect_admin().await?;
     ensure_search_indexes(&admin, &|name: &str, done: usize, total: usize| log::info!("import finalize index {name} ({done}/{total})")).await?;
-    c.batch_execute(AFTER_JOB_VACUUM).await.map_err(db_err)?;
+    if stored > 0 {
+        c.batch_execute(AFTER_JOB_VACUUM).await.map_err(db_err)?;
+    }
     inner.inflight()?.clear();
     Ok(())
 }
@@ -304,7 +319,7 @@ mod tests {
     #[test]
     fn end_of_attempt_table() {
         use CancelReason::{Pause, Shutdown, User};
-        use EndAction::{Crash, Finalize, Requeue};
+        use EndAction::{Crash, Finalize, Locked, Requeue};
         let failed = || AttemptEnd::Failed(JobFailure { stage: ImportErrorStage::Store, message: "x".into() });
         let completed = Finalize(JobState::Completed, ImportStatus::Completed);
         let cancelled = Finalize(JobState::Cancelled, ImportStatus::Cancelled);
@@ -326,6 +341,9 @@ mod tests {
             (failed(), Some(Pause), &failure),
             (failed(), Some(User), &failure),
             (failed(), Some(Shutdown), &failure),
+            (AttemptEnd::Locked, None, &Locked),
+            (AttemptEnd::Locked, Some(User), &Locked),
+            (AttemptEnd::Locked, Some(Shutdown), &Locked),
         ];
         for (i, (end, reason, want)) in rows.iter().enumerate() {
             assert_eq!(&end_of_attempt(end, *reason), *want, "row {i}: {reason:?}");

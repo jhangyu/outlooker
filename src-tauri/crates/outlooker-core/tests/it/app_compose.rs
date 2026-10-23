@@ -114,7 +114,7 @@ async fn shutdown_during_import_requeues_job() {
     assert_eq!(report.steps, STEPS);
     let mut job_events = s.importer.job_events();
     let path = fixture.canonicalize().unwrap().display().to_string();
-    let pst_id = match &s.importer.enqueue(vec![path]).await.unwrap()[..] {
+    let pst_id = match &s.importer.register(vec![path]).await.unwrap()[..] {
         [EnqueueResult::Queued { pst }] => pst.id,
         other => panic!("enqueue: {other:?}"),
     };

@@ -3,6 +3,7 @@ pub mod dedupe;
 pub mod inflight;
 pub mod normalize;
 mod pipeline;
+pub mod probe;
 pub mod progress;
 pub mod pst_reader;
 pub mod queue;
@@ -41,6 +42,15 @@ pub struct ImportTuning {
 }
 
 
+/// Which registered paths one `ImportManager::sync` call looks at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncTarget {
+    /// Every path with `sync_enabled`.
+    All,
+    /// This path, even when disabled (explicit user action).
+    One(i64),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RecoveryReport {
     pub requeued: Vec<i64>,
@@ -59,14 +69,22 @@ impl ImportManager {
     pub async fn list(&self) -> Result<Vec<PstSource>, AppError> {
         queue::list(&self.inner, None).await
     }
-    pub async fn enqueue(&self, paths: Vec<String>) -> Result<Vec<EnqueueResult>, AppError> {
-        queue::enqueue(&self.inner, paths).await
+    /// Registers PST paths (one source row per path): readable → queued import, held by another program → `locked`
+    /// job, already registered → Rejected{AlreadyImported}, other probe errors → Rejected.
+    pub async fn register(&self, paths: Vec<String>) -> Result<Vec<EnqueueResult>, AppError> {
+        queue::register(&self.inner, paths).await
+    }
+    /// One sync step per target path: skip while a job is active, unchanged → only `last_checked_at`, else probe and
+    /// queue a job, or record the locked / unavailable streak. Serialized; kicks the worker when it queued a job.
+    pub async fn sync(&self, target: SyncTarget) -> Result<(), AppError> {
+        queue::sync(&self.inner, target).await
+    }
+    /// Disabled paths keep their mail; `SyncTarget::All` skips them. A queued or running job is not cancelled.
+    pub async fn set_enabled(&self, pst_id: i64, enabled: bool) -> Result<PstSource, AppError> {
+        queue::set_enabled(&self.inner, pst_id, enabled).await
     }
     pub async fn cancel(&self, pst_id: i64) -> Result<(), AppError> {
         queue::cancel(&self.inner, pst_id).await
-    }
-    pub async fn resume(&self, pst_id: i64) -> Result<(), AppError> {
-        queue::resume(&self.inner, pst_id).await
     }
     pub async fn remove(&self, pst_id: i64) -> Result<(), AppError> {
         queue::remove(&self.inner, pst_id).await
@@ -91,7 +109,7 @@ impl ImportManager {
     pub async fn shutdown(&self, timeout: std::time::Duration) -> Result<(), AppError> {
         queue::shutdown(&self.inner, timeout).await
     }
-    /// Every terminal job outcome as (pst_id, status): Completed, Cancelled, Failed, Queued (after shutdown),
+    /// Every terminal job outcome as (pst_id, status): Completed, Cancelled, Failed, Locked, Queued (after shutdown),
     /// Removing (the removal deleted the source row), Running (test seam `crash_after_batches` dropped the job).
     pub fn job_events(&self) -> broadcast::Receiver<(i64, ImportStatus)> {
         self.inner.events.subscribe()
@@ -115,10 +133,13 @@ impl ImportManager {
         }
     }
     /// Like `import_synthetic` but returns right after the job row is queued. The items are registered under
-    /// `path` for every ImportManager of this process, so a resumed or recovered job reads them again.
-    /// Source identity: `path`'s size and mtime when it is an existing file (enables resume and mtime tests),
-    /// else size 1 and mtime now.
+    /// `path` for every ImportManager of this process, so a re-synced or recovered job reads them again.
+    /// `path` must be a file starting with the PST magic: its size and mtime are the source identity.
     pub async fn enqueue_synthetic(&self, path: &str, folders: Vec<types::FolderIn>, items: Vec<types::RawItem>) -> Result<i64, AppError> {
         queue::enqueue_synthetic(&self.inner, path, folders, items).await
+    }
+    /// Replaces the synthetic items read for `path` by the next job (a changed PST for a sync test).
+    pub fn set_synthetic_items(path: &str, folders: Vec<types::FolderIn>, items: Vec<types::RawItem>) {
+        queue::set_synthetic_items(path, folders, items);
     }
 }

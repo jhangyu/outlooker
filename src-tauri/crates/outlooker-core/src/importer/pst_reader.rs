@@ -1,5 +1,6 @@
 //! Reader thread (spec Part 04 §5.1–§5.3, §5.8; Part 02 §6.3). The only code that calls libpff; it owns the
 //! `pff::File` (`!Send`) for the whole job.
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
@@ -50,6 +51,8 @@ pub struct ReaderParams {
     pub budget: Arc<ByteBudget>,
     /// Written into every inflight record.
     pub job_id: i64,
+    /// PST item ids that already have an occurrence under this source: sent as `RawContent::Known`, never read.
+    pub known: Arc<HashSet<i64>>,
 }
 
 /// One folder of the walk, in walk order.
@@ -299,6 +302,7 @@ fn run(p: ReaderParams, tx: SyncSender<ReaderMsg>) {
                     mark(pending.map_or(0, |r| r.pst_item_id));
                     match folder.item.sub_message(index).and_then(|m| Ok((i64::from(m.identifier()?), m))) {
                         Err(e) => base(0, RawContent::Unreadable { stage: ImportErrorStage::Parse, message: e.message }),
+                        Ok((id, _)) if p.known.contains(&id) => base(id, RawContent::Known),
                         Ok((id, message)) => {
                             mark(id); // same attempt, now with the PST item id for a later error row
                             let content = read_mail(&message)
@@ -333,7 +337,10 @@ pub fn spawn_synthetic(params: ReaderParams, folders: Vec<FolderIn>, items: Vec<
             if tx.send(ReaderMsg::Scanned(ScanResult { folders, items_total, scan_errors: Vec::new() })).is_err() {
                 return;
             }
-            for raw in items.into_iter().filter(|r| r.seq > params.cursor_seq) {
+            for mut raw in items.into_iter().filter(|r| r.seq > params.cursor_seq) {
+                if params.known.contains(&raw.pst_item_id) {
+                    raw.content = RawContent::Known;
+                }
                 if params.cancel.load(Ordering::SeqCst) || !send_item(&params, &tx, raw) {
                     return;
                 }

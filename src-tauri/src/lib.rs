@@ -84,7 +84,6 @@ pub fn run() {
             commands::import::pst_list,
             commands::import::import_enqueue,
             commands::import::import_cancel,
-            commands::import::import_resume,
             commands::import::pst_remove,
             commands::import::import_errors,
             commands::settings::settings_get,

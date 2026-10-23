@@ -16,7 +16,7 @@ async fn seed(tc: &TestCluster) {
     tc.admin()
         .await
         .batch_execute(
-            "INSERT INTO pst_sources (path, display_name, file_size_bytes, file_mtime) VALUES ('/seed.pst', 'seed', 1, now());
+            "INSERT INTO pst_sources (path, display_name, file_size_bytes) VALUES ('/seed.pst', 'seed', 1);
              INSERT INTO messages (dedupe_key, dedupe_kind, body_source, subject, body_text) VALUES
                (decode(repeat('01', 32), 'hex'), 'content_hash', 'text', 'first', 'body one'),
                (decode(repeat('02', 32), 'hex'), 'content_hash', 'text', 'second', 'body two');",

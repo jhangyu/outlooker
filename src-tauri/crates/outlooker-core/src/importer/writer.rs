@@ -289,7 +289,7 @@ pub fn staged_bytes(item: &NormalizedItem) -> usize {
                 + m.attachments.iter().map(|a| 64 + a.file_name.len() + a.mime_type.len()).sum::<usize>()
                 + m.inline_images.iter().map(|i| 64 + i.blob.as_ref().map_or(0, |b| b.webp.len())).sum::<usize>()
         }
-        Outcome::NonMail | Outcome::Skipped => 64,
+        Outcome::NonMail | Outcome::Skipped | Outcome::Known => 64,
     };
     mail + errors
 }
@@ -419,6 +419,7 @@ async fn commit_batch(
     let mails = items.iter().filter(|i| matches!(i.outcome, Outcome::Mail(_))).count() as i64;
     let skipped = items.iter().filter(|i| matches!(i.outcome, Outcome::Skipped)).count() as i64;
     let non_mail = items.iter().filter(|i| matches!(i.outcome, Outcome::NonMail)).count() as i64;
+    let known = items.iter().filter(|i| matches!(i.outcome, Outcome::Known)).count() as i64;
     let cursor = items.last().map_or(cp.cursor_seq, |i| i.seq);
     let row = tx
         .query_one(
@@ -431,7 +432,7 @@ async fn commit_batch(
                 &cp.file_size,
                 &cp.file_mtime,
                 &stored,
-                &(mails - stored),
+                &(mails - stored + known),
                 &skipped,
                 &non_mail,
                 &(new_hashes.len() as i64),

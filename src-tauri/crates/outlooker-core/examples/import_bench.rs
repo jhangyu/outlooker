@@ -66,7 +66,7 @@ async fn main() {
     let mgr = ImportManager::new(tc.db.clone(), Gate::new(), tc.paths.clone(), clock.clone(), rx, ImportTuning::default());
     let mut events = mgr.job_events();
     let start = Instant::now();
-    let res = mgr.enqueue(vec![path.clone()]).await.expect("enqueue");
+    let res = mgr.register(vec![path.clone()]).await.expect("register");
     let EnqueueResult::Queued { pst } = &res[0] else { panic!("rejected: {res:?}") };
     mgr.start_worker();
     let status = loop {

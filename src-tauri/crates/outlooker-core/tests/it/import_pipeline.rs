@@ -10,13 +10,14 @@ use std::time::{Duration, SystemTime};
 use outlooker_core::db::indexes::{SEARCH_INDEXES, missing_or_invalid};
 use outlooker_core::dto::app::AppPhase;
 use outlooker_core::dto::error::AppError;
-use outlooker_core::dto::import::{EnqueueResult, ImportStatus};
+use outlooker_core::dto::import::{EnqueueResult, ImportErrorStage, ImportStatus};
 use outlooker_core::gate::Gate;
 use outlooker_core::importer::inflight::{Inflight, InflightRecord};
+use outlooker_core::importer::probe::set_test_lock;
 use outlooker_core::importer::pst_reader::walk_ids;
 use outlooker_core::importer::types::{FolderIn, RawAttachment, RawContent, RawItem, RawMail, RawRecipient};
-use outlooker_core::importer::writer::{Checkpoint, WriterLimits};
-use outlooker_core::importer::{ImportManager, ImportTuning, RecoveryReport};
+use outlooker_core::importer::writer::{Checkpoint, WriterLimits, truncate_to_micros};
+use outlooker_core::importer::{ImportManager, ImportTuning, RecoveryReport, SyncTarget};
 use outlooker_core::sink::NullSink;
 use outlooker_core::test_support::{png, TestCluster};
 use tokio::sync::{broadcast, mpsc, watch};
@@ -91,8 +92,8 @@ fn s(p: &Path) -> String {
     p.to_str().expect("utf-8 path").to_owned()
 }
 
-/// Source file for synthetic items: 20 bytes starting with the PST magic, so enqueue identity (size + mtime) and
-/// the re-validation of `resume` work as for a real PST.
+/// Source file for synthetic items: 20 bytes starting with the PST magic, so the probe and the file identity
+/// (size + mtime) work as for a real PST.
 fn synthetic_path(tc: &TestCluster, name: &str) -> String {
     let p = tc.dir.path().join(name);
     std::fs::write(&p, b"!BDN0000000000000000").unwrap();
@@ -223,7 +224,7 @@ async fn outlook_pst_import() {
 
     let tc = TestCluster::start().await;
     let mut fx = manager(&tc, ImportTuning::default());
-    let res = fx.mgr.enqueue(vec![s(&pst)]).await.unwrap();
+    let res = fx.mgr.register(vec![s(&pst)]).await.unwrap();
     let EnqueueResult::Queued { pst: src } = &res[0] else { panic!("{res:?}") };
     assert_eq!(src.status, ImportStatus::Queued);
     fx.mgr.start_worker();
@@ -254,7 +255,7 @@ async fn byte_copy_dedupes_and_removal() {
     std::fs::copy(outlook_pst(), &copy).unwrap();
     let tc = TestCluster::start().await;
     let mut fx = manager(&tc, ImportTuning::default());
-    let res = fx.mgr.enqueue(vec![s(&outlook_pst()), s(&copy)]).await.unwrap();
+    let res = fx.mgr.register(vec![s(&outlook_pst()), s(&copy)]).await.unwrap();
     let ids: Vec<i64> = res.iter().map(|r| if let EnqueueResult::Queued { pst } = r { pst.id } else { panic!("{r:?}") }).collect();
     fx.mgr.start_worker();
     assert_eq!(wait_jobs(&mut fx.events, &ids).await, [ImportStatus::Completed, ImportStatus::Completed]);
@@ -299,7 +300,7 @@ async fn corrupt_copy_outcome() {
 
     let tc = TestCluster::start().await;
     let mut fx = manager(&tc, ImportTuning::default());
-    let res = fx.mgr.enqueue(vec![s(&corrupt)]).await.unwrap();
+    let res = fx.mgr.register(vec![s(&corrupt)]).await.unwrap();
     let EnqueueResult::Queued { pst } = &res[0] else { panic!("{res:?}") };
     fx.mgr.start_worker();
     assert_eq!(wait_job(&mut fx.events, pst.id).await, EXPECT_STATUS);
@@ -375,7 +376,7 @@ async fn index_policy_first_import_drops_and_rebuilds() {
     assert_eq!(missing(&tc).await, all_six());
     fx.mgr.cancel(pst_id).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Cancelled);
-    fx.mgr.resume(pst_id).await.unwrap();
+    fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
     assert_eq!(missing(&tc).await, Vec::<&str>::new(), "after Completed all six exist and are valid");
     let after = index_oids(&tc).await;
@@ -448,7 +449,7 @@ async fn resume_after_cancel_equals_uninterrupted() {
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Cancelled);
     let cursor = tc.count("SELECT cursor_seq FROM import_checkpoints").await;
     assert!((5..ITEMS).contains(&cursor), "cancelled mid-job: cursor {cursor}");
-    fx.mgr.resume(pst_id).await.unwrap();
+    fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
     assert_eq!(snapshot(&tc).await, expected(&corpus(ITEMS)));
 }
@@ -496,7 +497,7 @@ async fn mtime_change_resets_cursor() {
     let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
     f.set_modified(SystemTime::now() + Duration::from_secs(60)).unwrap();
     drop(f);
-    fx.mgr.resume(pst_id).await.unwrap();
+    fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
     let r = tc
         .admin()
@@ -505,7 +506,7 @@ async fn mtime_change_resets_cursor() {
         .await
         .unwrap();
     let (cursor, stored, dups, non_mail): (i64, i64, i64, i64) = (r.get(0), r.get(1), r.get(2), r.get(3));
-    assert_eq!(dups, before_resume, "cursor restarted at 0: every message stored before the touch was read again");
+    assert_eq!(dups, before_resume, "cursor restarted at 0: every message stored before the touch counts again (known id)");
     assert_eq!((cursor, stored + dups, non_mail), (ITEMS, MESSAGES, 1));
     assert_eq!(tc.count("SELECT count(*) FROM messages").await, MESSAGES);
     assert_eq!(tc.count("SELECT count(*) FROM message_occurrences").await, MESSAGES);
@@ -536,7 +537,7 @@ async fn run_with_marker(own_job: bool, seq: i64, pst_item_id: i64, folder: &str
         ImportTuning::default(),
     );
     let mut events = mgr.job_events();
-    let res = mgr.enqueue(vec![s(&outlook_pst())]).await.unwrap();
+    let res = mgr.register(vec![s(&outlook_pst())]).await.unwrap();
     let EnqueueResult::Queued { pst } = &res[0] else { panic!("{res:?}") };
     let job_id: i64 = tc.admin().await.query_one("SELECT id FROM import_jobs WHERE pst_id = $1", &[&pst.id]).await.unwrap().get(0);
     let marker = Inflight::new(tc.db.data_root().unwrap().join("import-inflight"));
@@ -613,6 +614,7 @@ async fn retry_rewrites_marker_before_reading() {
         hold_after: Some(1), // the reader stops after item 1 until cancelled
         budget: budget.clone(),
         job_id: 9,
+        known: Default::default(),
     });
     assert!(matches!(rx.recv().unwrap(), ReaderMsg::Scanned(_)));
     let ReaderMsg::Item(item) = rx.recv().unwrap() else { panic!("item 1 expected") };
@@ -655,7 +657,8 @@ async fn recover_after_crash_states() {
         ["Mail m11", "Mail m12", "Mail m13", "Mail m14", "Mail m15", "Mail m16", "Mail m17", "Mail m18", "Mail m19"];
     let tc = TestCluster::start().await;
     let mut fx = manager(&tc, small_batches());
-    let a = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "ra.pst"), folders(), corpus(20)).await.unwrap();
+    let path_a = synthetic_path(&tc, "ra.pst");
+    let a = fx.mgr.enqueue_synthetic(&path_a, folders(), corpus(20)).await.unwrap();
     let b = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "rb.pst"), folders(), corpus_tagged(20, "b")).await.unwrap();
     let adm = tc.admin().await;
     // states a crash leaves (one at a time: import_jobs_one_running allows one running / cancelling job)
@@ -663,10 +666,11 @@ async fn recover_after_crash_states() {
     assert_eq!(fx.mgr.recover_after_crash().await.unwrap(), RecoveryReport { requeued: vec![], cancelled: vec![b] });
     // a: running with a checkpoint at seq 10
     adm.execute("UPDATE import_jobs SET state = 'running', started_at = now() WHERE pst_id = $1", &[&a]).await.unwrap();
+    let meta = std::fs::metadata(&path_a).unwrap();
     adm.execute(
         "INSERT INTO import_checkpoints (pst_id, job_id, phase, items_total, cursor_seq, pst_file_size, pst_file_mtime) \
-         SELECT s.id, j.id, 'importing', 20, $2, s.file_size_bytes, s.file_mtime FROM pst_sources s JOIN import_jobs j ON j.pst_id = s.id WHERE s.id = $1",
-        &[&a, &CURSOR],
+         SELECT $1, j.id, 'importing', 20, $2, $3, $4 FROM import_jobs j WHERE j.pst_id = $1",
+        &[&a, &CURSOR, &(meta.len() as i64), &truncate_to_micros(meta.modified().unwrap())],
     )
     .await
     .unwrap();
@@ -715,7 +719,7 @@ async fn pst_list_status_derivation() {
 async fn insert_source(adm: &tokio_postgres::Client, n: usize, jobs: &[(&str, &str)]) -> i64 {
     let id: i64 = adm
         .query_one(
-            "INSERT INTO pst_sources (path, display_name, file_size_bytes, file_mtime) VALUES ($1, 'p', 1, now()) RETURNING id",
+            "INSERT INTO pst_sources (path, display_name, file_size_bytes) VALUES ($1, 'p', 1) RETURNING id",
             &[&format!("/status/{n}.pst")],
         )
         .await
@@ -749,33 +753,117 @@ async fn pst_remove_with_queued_job() {
     assert_eq!(tc.count("SELECT count(*) FROM messages").await, 0);
 }
 
+/// Registration identity is the path: a changed file at a registered path is rejected, not a second source.
+/// Probe rejections pass through (the classification itself: probe.rs unit tests); a held file registers as locked.
 #[tokio::test(flavor = "multi_thread")]
-async fn enqueue_validation() {
+async fn register_same_path_rejected() {
     let tc = TestCluster::start().await;
     let fx = manager(&tc, ImportTuning::default());
     let dir = tempfile::tempdir().unwrap();
-    let not_pst = dir.path().join("notes.pst");
-    std::fs::write(&not_pst, b"hello, not a PST").unwrap();
     let missing = s(&dir.path().join("missing.pst"));
-    let fa = |path: &str, reason: &str| AppError::FileAccess { path: path.into(), reason: reason.into() };
-    let res = fx.mgr.enqueue(vec!["relative/x.pst".into(), missing.clone(), s(&not_pst), s(dir.path()), s(&outlook_pst())]).await.unwrap();
-    let errors: Vec<Option<AppError>> =
-        res.iter().map(|r| if let EnqueueResult::Rejected { error, .. } = r { Some(error.clone()) } else { None }).collect();
-    assert_eq!(
-        errors,
-        [
-            Some(fa("relative/x.pst", "notAbsolute")),
-            Some(fa(&missing, "notFound")),
-            Some(AppError::NotAPst { path: s(&not_pst) }),
-            Some(fa(&s(dir.path()), "notAFile")),
-            None,
-        ]
-    );
-    let EnqueueResult::Queued { pst } = &res[4] else { panic!() };
-    let again = fx.mgr.enqueue(vec![s(&outlook_pst())]).await.unwrap();
+    let path = synthetic_path(&tc, "r.pst");
+    let held = synthetic_path(&tc, "held.pst");
+    set_test_lock(&held, true);
+    let res = fx.mgr.register(vec![missing.clone(), path.clone(), held.clone()]).await.unwrap();
+    set_test_lock(&held, false);
+    assert!(matches!(&res[0], EnqueueResult::Rejected { error: AppError::FileAccess { reason, .. }, .. } if reason == "notFound"), "{res:?}");
+    let EnqueueResult::Queued { pst } = &res[1] else { panic!("{res:?}") };
+    assert_eq!(pst.status, ImportStatus::Queued);
+    let EnqueueResult::Queued { pst: locked } = &res[2] else { panic!("{res:?}") };
+    assert_eq!(locked.status, ImportStatus::Locked, "registered while held: one locked job, retried by the next sync");
+    std::fs::write(&path, b"!BDN changed and longer").unwrap();
+    let again = fx.mgr.register(vec![path]).await.unwrap();
     assert!(matches!(&again[0], EnqueueResult::Rejected { error: AppError::AlreadyImported { pst_id }, .. } if *pst_id == pst.id), "{again:?}");
-    assert_eq!(fx.mgr.enqueue(vec![]).await.unwrap_err(), AppError::invalid("paths", "empty"));
-    assert_eq!(fx.mgr.enqueue(vec![missing; 101]).await.unwrap_err(), AppError::invalid("paths", "tooMany"));
+    assert_eq!(tc.count("SELECT count(*) FROM pst_sources").await, 2);
+    assert_eq!(fx.mgr.register(vec![]).await.unwrap_err(), AppError::invalid("paths", "empty"));
+    assert_eq!(fx.mgr.register(vec![missing; 101]).await.unwrap_err(), AppError::invalid("paths", "tooMany"));
+}
+
+// ------------------------------------------------------------------------------------------------ sync
+
+/// A changed PST is re-synced on the same source row; items whose PST item id already has an occurrence are not
+/// read (the second run serves them as unreadable: a re-read would leave item_skipped rows) and count as duplicates.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_changed_file_keeps_one_row_and_skips_known() {
+    const FIRST: i64 = 20; // 18 mails, 2 contacts
+    const SECOND: i64 = 25; // + 5 new mails
+    const NEW: i64 = 5;
+    const KNOWN: i64 = 18;
+    let tc = TestCluster::start().await;
+    let mut fx = manager(&tc, small_batches());
+    let path = synthetic_path(&tc, "sync.pst");
+    let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), corpus(FIRST)).await.unwrap();
+    fx.mgr.start_worker();
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
+    let oids = index_oids(&tc).await;
+    let mut second = corpus(SECOND);
+    for it in second.iter_mut().filter(|i| i.seq <= FIRST && matches!(i.content, RawContent::Mail(_))) {
+        it.content = RawContent::Unreadable { stage: ImportErrorStage::Parse, message: "known item was read".into() };
+    }
+    ImportManager::set_synthetic_items(&path, folders(), second);
+    std::fs::write(&path, b"!BDN the file grew in Outlook").unwrap();
+    fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
+    assert_eq!(tc.count("SELECT count(*) FROM pst_sources").await, 1);
+    assert_eq!(tc.count("SELECT count(*) FROM import_errors").await, 0, "no known item reached normalize");
+    let r = tc.admin().await.query_one("SELECT stored, duplicates, skipped_non_mail FROM import_checkpoints", &[]).await.unwrap();
+    assert_eq!((r.get::<_, i64>(0), r.get::<_, i64>(1), r.get::<_, i64>(2)), (NEW, KNOWN, 2));
+    let listed = &fx.mgr.list().await.unwrap()[0];
+    assert_eq!((listed.new_message_count, listed.message_count), (NEW, KNOWN + NEW));
+    assert!(listed.last_synced_at.is_some() && listed.last_checked_at.is_some());
+    assert_eq!(tc.count("SELECT count(*) FROM messages").await, KNOWN + NEW);
+    assert_eq!(index_oids(&tc).await, oids, "known items do not count as remaining: no index drop");
+}
+
+/// Unchanged file after a completed run: no job, only last_checked_at. A disabled path is skipped by `All`, not by `One`.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_unchanged_creates_no_job() {
+    const JOBS: &str = "SELECT count(*) FROM import_jobs";
+    let tc = TestCluster::start().await;
+    let mut fx = manager(&tc, ImportTuning::default());
+    let path = synthetic_path(&tc, "u.pst");
+    let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), corpus(3)).await.unwrap();
+    fx.mgr.start_worker();
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
+    assert_eq!(fx.mgr.list().await.unwrap()[0].last_checked_at, None);
+    fx.mgr.sync(SyncTarget::All).await.unwrap();
+    assert_eq!(tc.count(JOBS).await, 1, "unchanged: no job");
+    assert!(fx.mgr.list().await.unwrap()[0].last_checked_at.is_some());
+
+    assert!(!fx.mgr.set_enabled(pst_id, false).await.unwrap().sync_enabled);
+    std::fs::write(&path, b"!BDN changed").unwrap();
+    fx.mgr.sync(SyncTarget::All).await.unwrap();
+    assert_eq!(tc.count(JOBS).await, 1, "disabled: All skips it");
+    fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed, "One syncs a disabled path");
+    assert_eq!(tc.count(JOBS).await, 2);
+    assert_eq!(fx.mgr.sync(SyncTarget::One(pst_id + 1)).await.unwrap_err(), AppError::not_found("pst", pst_id + 1));
+}
+
+/// A held PST: the job-start probe ends the job `locked` before the checkpoint; later syncs while held keep that one
+/// job row; no error row and no finalize (no VACUUM) at any point. Unlocked, the next sync completes.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_locked_no_error_row_no_finalize() {
+    const VACUUMS: &str = "SELECT coalesce(sum(vacuum_count), 0)::bigint FROM pg_stat_user_tables WHERE relname = 'messages'";
+    let tc = TestCluster::start().await;
+    let mut fx = manager(&tc, ImportTuning::default());
+    let path = synthetic_path(&tc, "l.pst");
+    let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), corpus(3)).await.unwrap();
+    set_test_lock(&path, true); // locked while the job waited in the queue
+    fx.mgr.start_worker();
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Locked);
+    assert_eq!(tc.count("SELECT count(*) FROM import_checkpoints").await, 0, "checkpoint untouched");
+    fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
+    fx.mgr.sync(SyncTarget::All).await.unwrap();
+    assert_eq!(tc.count("SELECT count(*) FROM import_jobs").await, 1, "one job row per locked streak");
+    assert_eq!(tc.count("SELECT count(*) FROM import_jobs WHERE state = 'locked' AND finished_at IS NOT NULL").await, 1);
+    assert_eq!(tc.count("SELECT count(*) FROM import_errors").await, 0);
+    assert_eq!(tc.count(VACUUMS).await, 0, "no finalize");
+    assert_eq!(fx.mgr.list().await.unwrap()[0].status, ImportStatus::Locked);
+    set_test_lock(&path, false);
+    fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
+    assert_eq!(tc.count("SELECT count(*) FROM messages").await, 3);
 }
 
 // ------------------------------------------------------------------------------------------------ Outlook fixtures (W2)
@@ -815,7 +903,7 @@ mod fixtures {
         let paths: Vec<String> = names.iter().map(|n| fixture(n)).collect();
         let tc = TestCluster::start().await;
         let mut fx = manager(&tc, ImportTuning::default());
-        let res = fx.mgr.enqueue(paths).await.unwrap();
+        let res = fx.mgr.register(paths).await.unwrap();
         let ids: Vec<i64> = res.iter().map(|r| if let EnqueueResult::Queued { pst } = r { pst.id } else { panic!("{r:?}") }).collect();
         fx.mgr.start_worker();
         assert!(wait_jobs(&mut fx.events, &ids).await.iter().all(|s| *s == ImportStatus::Completed));

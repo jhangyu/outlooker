@@ -15,7 +15,7 @@ pub async fn new_source(client: &tokio_postgres::Client, path: &str) -> (i64, i6
     let name = path.rsplit('/').next().unwrap_or(path);
     let pst_id: i64 = client
         .query_one(
-            "INSERT INTO pst_sources (path, display_name, file_size_bytes, file_mtime) VALUES ($1, $2, 1, now()) RETURNING id",
+            "INSERT INTO pst_sources (path, display_name, file_size_bytes) VALUES ($1, $2, 1) RETURNING id",
             &[&path, &name],
         )
         .await
