@@ -15,7 +15,8 @@ import type { Language } from "../../api/bindings/Language";
 import type { MaintenanceTask } from "../../api/bindings/MaintenanceTask";
 import { useAppStatus } from "../../app/AppStatusContext";
 import {
-  formatBytes, formatDateTime, formatNumber, useAppToast, useColumnWidths, useLanguageSwitch, type ColumnDefaults,
+  Splitter, formatBytes, formatDateTime, formatNumber, useAppToast, useColumnWidths, useLanguageSwitch, useSplit,
+  type ColumnDefaults, type SplitDefaults,
 } from "../../components/common";
 import { MoveDialog } from "./MoveDialog";
 
@@ -27,21 +28,31 @@ type SectionId = "storage" | "language" | "content" | "db" | "index";
 const SECTIONS: SectionId[] = ["storage", "language", "content", "db", "index"];
 const INDEX_COLUMNS: ColumnDefaults = { name: { width: 260 }, table: { width: 180 }, size: { width: 96 }, state: { width: 120 } };
 
+const SPLITS: SplitDefaults = {
+  nav: { size: 220, min: 160, max: 400 },
+  c1: { min: 160, minOther: 320 },
+  c2: { min: 160, minOther: 320 },
+  r1: { min: 80, max: 1200 },
+  r2: { min: 80, max: 1200 },
+};
+// Centre a 6 px hit area in the grid gap after a grid area.
+const GAP_EDGE = `calc(${tokens.spacingHorizontalL} / -2 - 3px)`;
+
 const useStyles = makeStyles({
-  root: { display: "grid", gridTemplateColumns: "220px 1fr", height: "100%", minHeight: 0 },
+  root: { display: "grid", height: "100%", minHeight: 0 },
   nav: {
-    backgroundColor: tokens.colorNeutralBackground1, borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
+    position: "relative", backgroundColor: tokens.colorNeutralBackground1, borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalS}`, display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXXS,
   },
   // Mockup `h2 { margin: 0 0 8px 8px }`: the title lines up with the tab labels.
   navTitle: { marginLeft: tokens.spacingHorizontalS },
   tabs: { marginTop: tokens.spacingVerticalS },
   body: {
-    overflow: "auto", padding: tokens.spacingHorizontalL, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    position: "relative", overflow: "auto", padding: tokens.spacingHorizontalL, display: "grid",
     gridTemplateAreas: '"storage storage db" "language content db" "index index index"',
     gap: tokens.spacingHorizontalL, alignContent: "start",
   },
-  card: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalM, padding: tokens.spacingHorizontalL, minWidth: 0 },
+  card: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalM, padding: tokens.spacingHorizontalL, minWidth: 0, overflow: "auto" },
   storage: { gridArea: "storage" },
   language: { gridArea: "language" },
   content: { gridArea: "content" },
@@ -124,6 +135,8 @@ export function SettingsScreen() {
       <dd className={s.dd}>{value}</dd>
     </>
   );
+  const split = useSplit("settings", SPLITS);
+  const cardSize = (id: SectionId, dim: "offsetWidth" | "offsetHeight") => () => cards.current[id]?.[dim] ?? 0;
   const sizing = useColumnWidths("settings-indexes", INDEX_COLUMNS);
   const columns: TableColumnDefinition<IndexStatus>[] = [
     createTableColumn<IndexStatus>({ columnId: "name", renderHeaderCell: () => t("index.name"), renderCell: (x) => <span className={s.mono}>{x.name}</span> }),
@@ -141,7 +154,7 @@ export function SettingsScreen() {
   ];
 
   return (
-    <div className={s.root}>
+    <div className={s.root} style={{ gridTemplateColumns: `${split.track("nav", "220px")} minmax(0, 1fr)` }}>
       <nav className={s.nav} aria-label={t("title")}>
         <Title3 as="h1" className={s.navTitle}>{t("title")}</Title3>
         <TabList vertical className={s.tabs} onTabSelect={(_, d) => cards.current[d.value as SectionId]?.scrollIntoView({ block: "start" })}>
@@ -151,8 +164,19 @@ export function SettingsScreen() {
             </Tab>
           ))}
         </TabList>
+        <Splitter orientation="vertical" {...split.props("nav")} style={{ top: 0, bottom: 0, right: -3 }} />
       </nav>
-      <div className={s.body}>
+      <div
+        className={s.body}
+        style={{
+          gridTemplateColumns: `${split.track("c1", "minmax(0, 1fr)")} ${split.track("c2", "minmax(0, 1fr)")} minmax(0, 1fr)`,
+          gridTemplateRows: `${split.track("r1", "auto")} ${split.track("r2", "auto")} auto`,
+        }}
+      >
+        <Splitter orientation="vertical" {...split.props("c1")} measure={cardSize("language", "offsetWidth")} style={{ gridColumn: 1, gridRow: 2, top: 0, bottom: 0, right: GAP_EDGE }} />
+        <Splitter orientation="vertical" {...split.props("c2")} measure={cardSize("content", "offsetWidth")} style={{ gridColumn: 2, gridRow: "1 / 3", top: 0, bottom: 0, right: GAP_EDGE }} />
+        <Splitter orientation="horizontal" {...split.props("r1")} measure={cardSize("storage", "offsetHeight")} style={{ gridColumn: "1 / 3", gridRow: 1, left: 0, right: 0, bottom: GAP_EDGE }} />
+        <Splitter orientation="horizontal" {...split.props("r2")} measure={cardSize("language", "offsetHeight")} style={{ gridColumn: "1 / -1", gridRow: 2, left: 0, right: 0, bottom: GAP_EDGE }} />
         {card(
           "storage",
           <FolderRegular />,
