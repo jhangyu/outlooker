@@ -2,6 +2,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppStatus } from "./bindings/AppStatus";
 import type { ImportProgress } from "./bindings/ImportProgress";
 import type { ImportStatusChanged } from "./bindings/ImportStatusChanged";
+import type { SyncStatus } from "./bindings/SyncStatus";
 import type { LibraryChanged } from "./bindings/LibraryChanged";
 import type { DataDirMoveProgress } from "./bindings/DataDirMoveProgress";
 import type { MaintenanceState } from "./bindings/MaintenanceState";
@@ -10,6 +11,7 @@ export const EVENTS = {
   appStatusChanged: "app:status-changed",
   importProgress: "import:progress",
   importStatusChanged: "import:status-changed",
+  syncStatusChanged: "sync:status-changed",
   libraryChanged: "library:changed",
   dataDirMoveProgress: "data-dir:move-progress",
   maintenanceStatusChanged: "maintenance:status-changed",
@@ -21,6 +23,7 @@ export interface EventPayloads {
   "app:status-changed": AppStatus;
   "import:progress": ImportProgress;
   "import:status-changed": ImportStatusChanged;
+  "sync:status-changed": SyncStatus;
   "library:changed": LibraryChanged;
   "data-dir:move-progress": DataDirMoveProgress;
   "maintenance:status-changed": MaintenanceState;

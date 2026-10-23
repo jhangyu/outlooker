@@ -2,11 +2,9 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../api/commands");
-vi.mock("../../api/dialog");
 vi.mock("../../api/events", async () => (await import("../../app/testing")).eventsMock);
 
 import { api } from "../../api/commands";
-import { pickPstFiles } from "../../api/dialog";
 import type { ImportProgress } from "../../api/bindings/ImportProgress";
 import { makePst, mockApiDefaults, renderWithProviders } from "../../app/testing";
 import { ImportScreen } from ".";
@@ -42,15 +40,10 @@ describe("Import screen", () => {
     await waitFor(() => expect(api.pstRemove).toHaveBeenCalledWith(7));
   });
 
-  it("adds PST files through the picker and toasts rejected paths", async () => {
-    vi.mocked(pickPstFiles).mockResolvedValue(["/a.pst", "/b.txt"]);
-    vi.mocked(api.importEnqueue).mockResolvedValue([
-      { result: "queued", pst: makePst({ id: 9, status: "queued" }) },
-      { result: "rejected", path: "/b.txt", error: { kind: "notAPst", path: "/b.txt" } },
-    ]);
+  it("Save sends the edited schedule to syncScheduleSet", async () => {
     renderWithProviders(<ImportScreen />);
-    fireEvent.click(await screen.findByTestId("import-add"));
-    await waitFor(() => expect(api.importEnqueue).toHaveBeenCalledWith(["/a.pst", "/b.txt"]));
-    expect(await screen.findByText(/is not an Outlook PST file/)).toBeTruthy();
+    fireEvent.click(await screen.findByRole("radio", { name: /Daily/ }));
+    fireEvent.click(await screen.findByTestId("sched-save"));
+    await waitFor(() => expect(api.syncScheduleSet).toHaveBeenCalledWith({ mode: "daily", time: "08:30", weekdays: [1, 2, 3, 4, 5] }));
   });
 });

@@ -4,6 +4,8 @@ import type { DataDirMoveProgress } from "./bindings/DataDirMoveProgress";
 
 export const pstListQuery = queryOptions({ queryKey: ["pstList"], queryFn: () => api.pstList() });
 
+export const syncStatusQuery = queryOptions({ queryKey: ["syncStatus"], queryFn: () => api.syncStatus() });
+
 export const dbStatusQuery = queryOptions({ queryKey: ["dbStatus"], queryFn: () => api.dbStatus(), refetchInterval: 10_000 });
 
 /** Pseudo-query: boot writes `data-dir:move-progress` events into it. */

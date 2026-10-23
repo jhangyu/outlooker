@@ -4,5 +4,6 @@
   "import:status-changed",
   "library:changed",
   "data-dir:move-progress",
-  "maintenance:status-changed"
+  "maintenance:status-changed",
+  "sync:status-changed"
 ]

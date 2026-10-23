@@ -13,6 +13,8 @@ import type { SqlExecuteRequest } from "./bindings/SqlExecuteRequest";
 import type { SqlResult } from "./bindings/SqlResult";
 import type { PstSource } from "./bindings/PstSource";
 import type { EnqueueResult } from "./bindings/EnqueueResult";
+import type { SyncSchedule } from "./bindings/SyncSchedule";
+import type { SyncStatus } from "./bindings/SyncStatus";
 import type { ImportErrorsRequest } from "./bindings/ImportErrorsRequest";
 import type { ImportErrorPage } from "./bindings/ImportErrorPage";
 import type { Settings } from "./bindings/Settings";
@@ -36,9 +38,12 @@ export const api = {
   sqlExecute: (req: SqlExecuteRequest) => call<SqlResult>("sql_execute", { req }),
   sqlCancel: (executionId: string) => call<null>("sql_cancel", { executionId }),
   pstList: () => call<PstSource[]>("pst_list"),
-  importEnqueue: (paths: string[]) => call<EnqueueResult[]>("import_enqueue", { paths }),
+  pstRegister: (paths: string[]) => call<EnqueueResult[]>("pst_register", { paths }),
+  pstSetEnabled: (pstId: number, enabled: boolean) => call<PstSource>("pst_set_enabled", { pstId, enabled }),
+  syncNow: (pstId: number | null) => call<null>("sync_now", { pstId }),
+  syncStatus: () => call<SyncStatus>("sync_status"),
+  syncScheduleSet: (schedule: SyncSchedule) => call<SyncStatus>("sync_schedule_set", { schedule }),
   importCancel: (pstId: number) => call<null>("import_cancel", { pstId }),
-  importResume: (pstId: number) => call<null>("import_resume", { pstId }),
   pstRemove: (pstId: number) => call<null>("pst_remove", { pstId }),
   importErrors: (req: ImportErrorsRequest) => call<ImportErrorPage>("import_errors", { req }),
   settingsGet: () => call<Settings>("settings_get"),

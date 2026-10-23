@@ -38,15 +38,15 @@ export function useLanguageSwitch(): (lng: Language) => Promise<void> {
   );
 }
 
-/** Pick PST files and enqueue them, toasting each rejected row. Resolves true when the enqueue call succeeded. */
-export function useEnqueuePst(): () => Promise<boolean> {
+/** Pick PST files and register them, toasting each rejected row. Resolves true when the register call succeeded. */
+export function useRegisterPst(): () => Promise<boolean> {
   const { t } = useTranslation();
   const toast = useAppToast();
   return useCallback(async () => {
     const paths = await pickPstFiles();
     if (paths.length === 0) return false;
     try {
-      const results = await api.importEnqueue(paths);
+      const results = await api.pstRegister(paths);
       for (const r of results)
         if (r.result === "rejected") toast.notify(t("import:enqueue.rejected", { path: r.path, reason: formatAppError(r.error, t) }), "error");
       return true;

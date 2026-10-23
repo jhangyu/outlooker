@@ -2,4 +2,24 @@
 import type { ImportProgress } from "./ImportProgress";
 import type { ImportStatus } from "./ImportStatus";
 
-export type PstSource = { id: number, path: string, displayName: string, fileSizeBytes: number, status: ImportStatus, progress: ImportProgress | null, messageCount: number, newMessageCount: number, errorCount: number, queuedAt: string, finishedAt: string | null, };
+export type PstSource = { id: number, path: string, displayName: string, fileSizeBytes: number, status: ImportStatus, progress: ImportProgress | null, messageCount: number, newMessageCount: number, errorCount: number, 
+/**
+ * Newest job: created (for `locked`: locked since) and finished (for `locked`: last seen locked).
+ */
+queuedAt: string, finishedAt: string | null, 
+/**
+ * false: automatic sync and "sync all" skip this path.
+ */
+syncEnabled: boolean, 
+/**
+ * Last time a sync step looked at the path (also "unchanged" and "locked").
+ */
+lastCheckedAt: string | null, 
+/**
+ * finished_at of the newest completed import job.
+ */
+lastSyncedAt: string | null, 
+/**
+ * Message of the newest job's `job_failed` row; set only when status is `failed`.
+ */
+failureReason: string | null, };

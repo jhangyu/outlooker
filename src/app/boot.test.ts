@@ -13,6 +13,7 @@ const ALL_EVENTS = [
   "app:status-changed",
   "import:progress",
   "import:status-changed",
+  "sync:status-changed",
   "library:changed",
   "data-dir:move-progress",
   "maintenance:status-changed",
@@ -40,8 +41,8 @@ describe("boot", () => {
     });
     const sink = { status: vi.fn(), counts: vi.fn() };
     await boot(new QueryClient(), sink);
-    expect(order.slice(0, 6).sort()).toEqual([...ALL_EVENTS].sort());
-    expect(order.slice(6)).toEqual(["app_status", "pst_list"]);
+    expect(order.slice(0, ALL_EVENTS.length).sort()).toEqual([...ALL_EVENTS].sort());
+    expect(order.slice(ALL_EVENTS.length)).toEqual(["app_status", "pst_list"]);
   });
 
   it("does not call pst_list before the database is ready", async () => {

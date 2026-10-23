@@ -1,45 +1,50 @@
 import {
-  Badge, Body1, Button, Caption1, DataGrid, DataGridBody, DataGridCell, DataGridHeader, DataGridHeaderCell, DataGridRow,
-  Body1Strong, ProgressBar, Subtitle2, TableCellLayout, createTableColumn, makeStyles, mergeClasses, tokens,
-  buttonClassNames, type BadgeProps, type CreateTableColumnOptions, type TableColumnDefinition, type TableColumnId,
+  Badge, Body1Strong, Button, Caption1, DataGrid, DataGridBody, DataGridCell, DataGridHeader, DataGridHeaderCell, DataGridRow,
+  ProgressBar, Subtitle2, Switch, TableCellLayout, createTableColumn, makeStyles, mergeClasses, tokens, buttonClassNames,
+  type BadgeProps, type TableColumnDefinition, type TableColumnId,
 } from "@fluentui/react-components";
 import {
-  AddRegular, DeleteRegular, DismissRegular, DocumentRegular, ErrorCircleRegular, MailInboxRegular, PlayRegular, WarningRegular,
+  AddRegular, ArrowSyncRegular, CheckmarkCircleRegular, DeleteRegular, DismissCircleRegular, DocumentRegular, HourglassRegular,
+  LockClosedRegular, MailInboxRegular, PauseCircleRegular,
 } from "@fluentui/react-icons";
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
-import { dbStatusQuery, pstListQuery } from "../../api/queries";
-import type { ImportStatus } from "../../api/bindings/ImportStatus";
+import { dbStatusQuery, pstListQuery, syncStatusQuery } from "../../api/queries";
 import type { PstSource } from "../../api/bindings/PstSource";
 import { useAppStatus } from "../../app/AppStatusContext";
 import {
-  EmptyState, Splitter, ellipsis, formatBytes, formatDateTime, formatNumber, useAppToast, useColumnWidths, useEnqueuePst, useSplit,
-  type SplitDefaults,
+  EmptyState, ellipsis, formatBytes, formatDateTime, formatNumber, useAppToast, useColumnWidths, useRegisterPst,
 } from "../../components/common";
 import { RemoveDialog } from "./RemoveDialog";
+import { ActivityCard, ErrorLogCard, ScheduleCard, SidePanel } from "./SidePanel";
+import { rowState, type RowState } from "./syncState";
 
-const IMPORTED: ImportStatus[] = ["completed", "failed", "cancelled", "removing"];
-const QUEUED: ImportStatus[] = ["queued", "running", "cancelling", "cancelled", "failed"];
-const BADGE: Record<ImportStatus, BadgeProps["color"]> = {
-  queued: "informative", running: "brand", cancelling: "warning", cancelled: "subtle",
-  failed: "danger", completed: "success", removing: "warning",
+const BADGE: Record<RowState, { color: BadgeProps["color"]; appearance: BadgeProps["appearance"]; icon: ReactElement }> = {
+  completed: { color: "success", appearance: "tint", icon: <CheckmarkCircleRegular /> },
+  queued: { color: "informative", appearance: "outline", icon: <HourglassRegular /> },
+  running: { color: "brand", appearance: "tint", icon: <ArrowSyncRegular /> },
+  cancelling: { color: "warning", appearance: "tint", icon: <ArrowSyncRegular /> },
+  locked: { color: "warning", appearance: "tint", icon: <LockClosedRegular /> },
+  failed: { color: "danger", appearance: "tint", icon: <DismissCircleRegular /> },
+  cancelled: { color: "subtle", appearance: "tint", icon: <DismissCircleRegular /> },
+  removing: { color: "warning", appearance: "tint", icon: <DeleteRegular /> },
+  disabled: { color: "subtle", appearance: "tint", icon: <PauseCircleRegular /> },
 };
-type ColumnKey = "name" | "size" | "messages" | "new" | "date" | "status" | "remove";
-const FILE_COLUMNS: Record<ColumnKey, { width: number }> = {
-  name: { width: 220 }, size: { width: 88 }, messages: { width: 88 }, new: { width: 72 },
-  date: { width: 192 }, status: { width: 128 }, remove: { width: 48 },
+type ColumnKey = "name" | "size" | "messages" | "new" | "lastSync" | "nextSync" | "status" | "enabled" | "actions";
+const COLUMNS: Record<ColumnKey, { width: number }> = {
+  name: { width: 260 }, size: { width: 88 }, messages: { width: 88 }, new: { width: 88 }, lastSync: { width: 150 },
+  nextSync: { width: 150 }, status: { width: 230 }, enabled: { width: 72 }, actions: { width: 84 },
 };
 const NUMERIC: ReadonlySet<TableColumnId> = new Set<ColumnKey>(["size", "messages", "new"]);
-const column = (columnId: ColumnKey, def: Omit<CreateTableColumnOptions<PstSource>, "columnId">) =>
+const column = (columnId: ColumnKey, def: Omit<Parameters<typeof createTableColumn<PstSource>>[0], "columnId">) =>
   createTableColumn<PstSource>({ ...def, columnId });
 
-// Sized pane = the left pane of each border; the default is the 1.6:1:1 ratio (fr tracks).
-const SPLITS: SplitDefaults = { p1: { min: 320, group: "cols" }, p2: { min: 200, group: "cols" } };
-
 const useStyles = makeStyles({
-  root: { position: "relative", display: "grid", gridTemplateRows: "auto 1fr", height: "100%", minHeight: 0 },
+  root: {
+    display: "grid", gridTemplateRows: "auto 1fr", gridTemplateColumns: "minmax(0, 1fr) 360px", height: "100%", minHeight: 0,
+  },
   cmdbar: {
     gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`, backgroundColor: tokens.colorNeutralBackground1,
@@ -55,106 +60,85 @@ const useStyles = makeStyles({
   muted: { color: tokens.colorNeutralForeground3 },
   pane: {
     display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, overflow: "hidden",
-    backgroundColor: tokens.colorNeutralBackground1, borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
-    // The rail already draws the border left of the first pane (mockup `.pane + .pane`).
-    ":first-of-type": { borderLeft: "none" },
+    backgroundColor: tokens.colorNeutralBackground1,
   },
+  side: { backgroundColor: tokens.colorNeutralBackground2, borderLeft: `1px solid ${tokens.colorNeutralStroke2}` },
   paneHead: {
     display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS, minHeight: "44px", boxSizing: "border-box",
     padding: `0 ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  paneTitle: { flexShrink: 0 },
-  paneFor: { ...ellipsis, color: tokens.colorNeutralForeground3 },
   scroll: { flex: 1, overflow: "auto", minHeight: 0 },
-  full: { gridColumn: "1 / -1", borderLeft: "none" },
   cell: { whiteSpace: "nowrap" },
   num: { justifyContent: "flex-end", fontVariantNumeric: "tabular-nums" },
-  // The sortable header label sits in a full-width flex button; right-align inside it too.
   numButton: { justifyContent: "flex-end" },
   rowSelected: { backgroundColor: tokens.colorBrandBackground2, ":hover": { backgroundColor: tokens.colorBrandBackground2 } },
-  badge: { flexShrink: 0, whiteSpace: "nowrap" },
+  rowOff: { color: tokens.colorNeutralForeground4 },
   path: {
     fontFamily: tokens.fontFamilyMonospace, fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3,
     ...ellipsis, display: "block",
   },
-  card: {
-    display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS, padding: tokens.spacingHorizontalM,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke3}`, cursor: "pointer", position: "relative",
-  },
-  selected: { backgroundColor: tokens.colorBrandBackground2, boxShadow: `inset 3px 0 0 ${tokens.colorCompoundBrandStroke}` },
-  row: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS },
-  acts: { display: "flex", alignItems: "center", gap: tokens.spacingHorizontalXS },
+  when: { display: "flex", flexDirection: "column", lineHeight: "16px" },
+  statusCell: { display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS, minWidth: 0, whiteSpace: "normal", alignItems: "flex-start", width: "100%" },
+  badge: { flexShrink: 0, whiteSpace: "nowrap" },
+  cap: { color: tokens.colorNeutralForeground3 },
+  capWarn: { color: tokens.colorStatusWarningForeground1 },
+  capErr: { color: tokens.colorStatusDangerForeground1, overflowWrap: "anywhere", userSelect: "text" },
+  newPill: { color: tokens.colorStatusSuccessForeground1, fontWeight: tokens.fontWeightSemibold },
+  acts: { display: "flex", alignItems: "center" },
   danger: {
     ":enabled": { color: tokens.colorStatusDangerForeground1 },
     ":enabled:hover,:enabled:hover:active,:enabled:active:focus-visible": {
       color: tokens.colorStatusDangerForeground1, [`& .${buttonClassNames.icon}`]: { color: tokens.colorStatusDangerForeground1 },
     },
   },
-  name: { flex: 1, fontWeight: tokens.fontWeightSemibold, ...ellipsis },
-  sub: {
-    display: "flex", flexWrap: "wrap", gap: tokens.spacingHorizontalM, rowGap: "2px", color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200, "& > span": { whiteSpace: "nowrap" },
-  },
-  warn: { color: tokens.colorStatusWarningForeground1 },
-  warnInline: { display: "inline-flex", alignItems: "center", gap: tokens.spacingHorizontalXXS },
-  err: { color: tokens.colorStatusDangerForeground1 },
-  logEntry: {
-    // 168px fits the longest formatDateTime output at 12px mono ("2026年10月22日 中午12:30", "Oct 22, 2026, 12:30 PM").
-    display: "grid", gridTemplateColumns: "168px 20px 1fr", gap: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`, borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
-  },
-  logTime: { fontFamily: tokens.fontFamilyMonospace, color: tokens.colorNeutralForeground3, whiteSpace: "nowrap" },
-  logMsg: { minWidth: 0, overflowWrap: "anywhere", userSelect: "text" },
-  logLoc: {
-    gridColumn: "3", fontFamily: tokens.fontFamilyMonospace, wordBreak: "break-all", color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-  },
 });
 
 export function ImportScreen() {
   const s = useStyles();
-  const split = useSplit("import", SPLITS);
-  const root = useRef<HTMLDivElement>(null);
-  const hostCols = split.host("cols", "x");
-  const rootRef = useCallback((el: HTMLDivElement | null) => {
-    root.current = el;
-    return hostCols(el);
-  }, [hostCols]);
-  const paneWidth = (i: number) => root.current?.querySelectorAll<HTMLElement>(":scope > section")[i]?.offsetWidth ?? 0;
   const { t, i18n } = useTranslation("import");
   const lng = i18n.language;
   const status = useAppStatus();
   const qc = useQueryClient();
   const toast = useAppToast();
   const psts = useQuery(pstListQuery);
+  const sync = useQuery(syncStatusQuery);
   const db = useQuery(dbStatusQuery);
   const [selected, setSelected] = useState<number | null>(null);
   const [removing, setRemoving] = useState<PstSource | null>(null);
   const list = psts.data ?? [];
-  const sizing = useColumnWidths("import-files", FILE_COLUMNS);
+  const sizing = useColumnWidths("import-paths", COLUMNS);
 
-  const enqueue = useEnqueuePst();
-  const refresh = () => qc.invalidateQueries({ queryKey: pstListQuery.queryKey });
-  const addFiles = async () => {
+  const register = useRegisterPst();
+  const refresh = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: pstListQuery.queryKey }),
+      qc.invalidateQueries({ queryKey: syncStatusQuery.queryKey }),
+    ]);
+  const act = (f: () => Promise<unknown>) => async () => {
     try {
-      if (await enqueue()) await refresh();
-    } catch (e) {
-      toast.error(e);
-    }
-  };
-  const run = (f: (id: number) => Promise<unknown>, id: number) => async () => {
-    try {
-      await f(id);
+      await f();
       await refresh();
     } catch (e) {
       toast.error(e);
     }
   };
+  const addPaths = act(async () => {
+    await register();
+  });
+  const nextRunAt = sync.data?.nextRunAt ?? null;
+  const enabledCount = list.filter((p) => p.syncEnabled).length;
+  const live = (p: PstSource) => p.status === "running" || p.status === "queued" || p.status === "cancelling" || p.status === "removing";
+  const when = (iso: string | null, sub?: string) => (
+    <span className={s.when}>
+      <span>{iso ? formatDateTime(iso, lng) : "—"}</span>
+      {sub ? <Caption1 className={s.muted}>{sub}</Caption1> : null}
+    </span>
+  );
 
   const columns: TableColumnDefinition<PstSource>[] = [
     column("name", {
       compare: (a, b) => a.displayName.localeCompare(b.displayName),
-      renderHeaderCell: () => t("imported.name"),
+      renderHeaderCell: () => t("col.name"),
       renderCell: (p) => (
         <TableCellLayout truncate media={<DocumentRegular />} description={{ className: s.path, title: p.path, children: p.path }}>
           <strong>{p.displayName}</strong>
@@ -163,111 +147,163 @@ export function ImportScreen() {
     }),
     column("size", {
       compare: (a, b) => a.fileSizeBytes - b.fileSizeBytes,
-      renderHeaderCell: () => t("imported.size"),
+      renderHeaderCell: () => t("col.size"),
       renderCell: (p) => formatBytes(p.fileSizeBytes, lng),
     }),
     column("messages", {
       compare: (a, b) => a.messageCount - b.messageCount,
-      renderHeaderCell: () => t("imported.messages"),
+      renderHeaderCell: () => t("col.messages"),
       renderCell: (p) => formatNumber(p.messageCount, lng),
     }),
     column("new", {
       compare: (a, b) => a.newMessageCount - b.newMessageCount,
-      renderHeaderCell: () => t("imported.new"),
-      renderCell: (p) => formatNumber(p.newMessageCount, lng),
+      renderHeaderCell: () => t("col.new"),
+      renderCell: (p) =>
+        p.newMessageCount > 0 ? <span className={s.newPill}>+{formatNumber(p.newMessageCount, lng)}</span> : formatNumber(0, lng),
     }),
-    column("date", {
-      compare: (a, b) => (a.finishedAt ?? a.queuedAt).localeCompare(b.finishedAt ?? b.queuedAt),
-      renderHeaderCell: () => t("imported.date"),
-      renderCell: (p) => formatDateTime(p.finishedAt ?? p.queuedAt, lng),
+    column("lastSync", {
+      compare: (a, b) => (a.lastSyncedAt ?? "").localeCompare(b.lastSyncedAt ?? ""),
+      renderHeaderCell: () => t("col.lastSync"),
+      renderCell: (p) => when(p.lastSyncedAt),
+    }),
+    column("nextSync", {
+      renderHeaderCell: () => t("col.nextSync"),
+      renderCell: (p) => {
+        const st = rowState(p);
+        if (st === "running") return when(null, t("when.syncing"));
+        if (st === "queued") return when(null, t("when.thisRun"));
+        if (st === "disabled" || st === "removing") return when(null, t("when.notScheduled"));
+        return nextRunAt ? when(nextRunAt, st === "locked" ? t("when.retrying") : undefined) : when(null, t("when.notScheduled"));
+      },
     }),
     column("status", {
-      compare: (a, b) => a.status.localeCompare(b.status),
-      renderHeaderCell: () => t("imported.status"),
+      compare: (a, b) => rowState(a).localeCompare(rowState(b)),
+      renderHeaderCell: () => t("col.status"),
+      renderCell: (p) => {
+        const st = rowState(p);
+        const pr = p.progress;
+        const pct = pr?.itemsTotal ? Math.round((pr.itemsDone / pr.itemsTotal) * 100) : null;
+        return (
+          <span className={s.statusCell}>
+            <Badge appearance={BADGE[st].appearance} color={BADGE[st].color} icon={BADGE[st].icon} className={s.badge} data-testid="pst-status" data-state={st}>
+              {t(`status.${st}`)}
+              {st === "running" && pct !== null ? ` · ${pct}%` : ""}
+            </Badge>
+            {st === "running" ? (
+              <>
+                <ProgressBar value={pct === null ? undefined : pct / 100} aria-label={p.displayName} />
+                {pr ? (
+                  <Caption1 className={s.cap}>
+                    {t(`phase.${pr.phase}`)}
+                    {pr.itemsTotal ? ` · ${formatNumber(pr.itemsDone, lng)} / ${formatNumber(pr.itemsTotal, lng)}` : ""}
+                  </Caption1>
+                ) : null}
+              </>
+            ) : null}
+            {st === "queued" ? <Caption1 className={s.cap}>{t("cap.queued")}</Caption1> : null}
+            {st === "locked" ? <Caption1 className={s.capWarn}>{t("cap.locked")}</Caption1> : null}
+            {st === "failed" ? <Caption1 className={s.capErr}>{p.failureReason ?? t("cap.failed")}</Caption1> : null}
+            {st === "cancelled" ? <Caption1 className={s.cap}>{t("cap.cancelled")}</Caption1> : null}
+            {st === "disabled" ? <Caption1 className={s.cap}>{t("cap.disabled")}</Caption1> : null}
+          </span>
+        );
+      },
+    }),
+    column("enabled", {
+      renderHeaderCell: () => t("col.enabled"),
       renderCell: (p) => (
-        <span className={s.row}>
-          <Badge appearance="tint" color={BADGE[p.status]} className={s.badge} data-testid="pst-status">
-            {t(`status.${p.status}`)}
-          </Badge>
-          {p.errorCount > 0 ? (
-            <WarningRegular className={s.warn} aria-label={t("queue.errors", { n: formatNumber(p.errorCount, lng) })} />
-          ) : null}
-        </span>
+        <Switch
+          checked={p.syncEnabled}
+          aria-label={t("row.enable", { name: p.displayName })}
+          data-testid="pst-enabled"
+          onChange={(_, d) => void act(() => api.pstSetEnabled(p.id, d.checked))()}
+        />
       ),
     }),
-    column("remove", {
+    column("actions", {
       renderHeaderCell: () => "",
       renderCell: (p) => (
-        <Button
-          appearance="subtle"
-          className={s.danger}
-          icon={<DeleteRegular />}
-          aria-label={t("imported.remove", { name: p.displayName })}
-          disabled={p.status === "removing"}
-          data-testid="pst-remove"
-          onClick={(e) => {
-            e.stopPropagation();
-            setRemoving(p);
-          }}
-        />
+        <span className={s.acts}>
+          <Button
+            appearance="subtle"
+            icon={<ArrowSyncRegular />}
+            aria-label={t("row.syncNow", { name: p.displayName })}
+            title={t(p.status === "failed" || p.status === "locked" ? "row.retry" : "row.syncOnce")}
+            disabled={live(p)}
+            data-testid="pst-sync"
+            onClick={(e) => {
+              e.stopPropagation();
+              void act(() => api.syncNow(p.id))();
+            }}
+          />
+          <Button
+            appearance="subtle"
+            className={s.danger}
+            icon={<DeleteRegular />}
+            aria-label={t("row.remove", { name: p.displayName })}
+            disabled={p.status === "running" || p.status === "cancelling" || p.status === "removing"}
+            data-testid="pst-remove"
+            onClick={(e) => {
+              e.stopPropagation();
+              setRemoving(p);
+            }}
+          />
+        </span>
       ),
     }),
   ];
 
   const colClass = (id: TableColumnId) => mergeClasses(s.cell, NUMERIC.has(id) && s.num);
-
   const stat = (value: string, label: string) => (
     <span className={s.stat}>
       <span className={s.statValue}>{value}</span>
       <Caption1 className={s.muted}>{label}</Caption1>
     </span>
   );
+  const sel = list.find((p) => p.id === selected) ?? null;
+  const empty = psts.isSuccess && list.length === 0;
 
   return (
-    <div
-      ref={rootRef}
-      className={s.root}
-      style={{ gridTemplateColumns: `${split.track("p1", "1.6fr")} ${split.track("p2", "1fr")} ${split.rest("cols", "1fr")}` }}
-    >
+    <div className={s.root}>
       <div className={s.cmdbar}>
         <Subtitle2 as="h2" className={s.title}>
           {t("title")}
         </Subtitle2>
-        <Button appearance="primary" icon={<AddRegular />} onClick={addFiles} data-testid="import-add">
+        <Button appearance="primary" icon={<AddRegular />} onClick={addPaths} data-testid="import-add">
           {t("add")}
         </Button>
+        {empty ? null : (
+          <Button icon={<ArrowSyncRegular />} onClick={act(() => api.syncNow(null))} data-testid="sync-all">
+            {t("syncAll")}
+          </Button>
+        )}
         <span className={s.spacer} />
         {stat(formatNumber(status.counts.messages, lng), t("stats.messages"))}
         {stat(formatNumber(status.counts.psts, lng), t("stats.psts"))}
         {stat(db.data ? formatBytes(db.data.databaseSizeBytes, lng) : t("stats.unknown"), t("stats.size"))}
       </div>
-      {psts.isSuccess && list.length === 0 ? (
-        <div className={mergeClasses(s.pane, s.full)}>
+      <section className={s.pane} aria-label={t("paths.title")}>
+        {empty ? (
           <EmptyState
             icon={<MailInboxRegular />}
             title={t("empty.title")}
             body={t("empty.body")}
             action={
-              <Button appearance="primary" icon={<AddRegular />} onClick={addFiles}>
+              <Button appearance="primary" icon={<AddRegular />} onClick={addPaths}>
                 {t("add")}
               </Button>
             }
           />
-        </div>
-      ) : (
-        <>
-          <section className={s.pane} aria-label={t("imported.title")}>
+        ) : (
+          <>
             <div className={s.paneHead}>
-              <Body1Strong as="h3">{t("imported.title")}</Body1Strong>
+              <Body1Strong as="h3">{t("paths.title")}</Body1Strong>
+              <Caption1 className={s.muted}>{t("paths.summary", { n: formatNumber(list.length, lng), enabled: formatNumber(enabledCount, lng) })}</Caption1>
+              <span className={s.spacer} />
+              <Caption1 className={s.muted}>{t("paths.note")}</Caption1>
             </div>
             <div className={s.scroll}>
-              <DataGrid
-                {...sizing}
-                items={list.filter((p) => IMPORTED.includes(p.status))}
-                columns={columns}
-                getRowId={(p) => p.id}
-                sortable
-              >
+              <DataGrid {...sizing} items={list} columns={columns} getRowId={(p) => p.id} sortable>
                 <DataGridHeader>
                   <DataGridRow>
                     {({ renderHeaderCell, columnId }) => (
@@ -284,7 +320,7 @@ export function ImportScreen() {
                       data-testid="pst-row"
                       data-pst-name={item.displayName}
                       aria-selected={item.id === selected}
-                      className={item.id === selected ? s.rowSelected : undefined}
+                      className={mergeClasses(item.id === selected && s.rowSelected, rowState(item) === "disabled" && s.rowOff)}
                       onClick={() => setSelected(item.id)}
                     >
                       {({ renderCell, columnId }) => <DataGridCell className={colClass(columnId)}>{renderCell(item)}</DataGridCell>}
@@ -293,175 +329,19 @@ export function ImportScreen() {
                 </DataGridBody>
               </DataGrid>
             </div>
-          </section>
-          <section className={s.pane} aria-label={t("queue.title")}>
-            <div className={s.paneHead}>
-              <Body1Strong as="h3">{t("queue.title")}</Body1Strong>
-            </div>
-            <div className={s.scroll} role="listbox" aria-label={t("queue.title")}>
-              {list.filter((p) => QUEUED.includes(p.status)).length === 0 ? (
-                <EmptyState icon={<MailInboxRegular />} title={t("queue.empty")} body={t("queue.emptyBody")} />
-              ) : (
-                list
-                  .filter((p) => QUEUED.includes(p.status))
-                  .map((p) => (
-                    <QueueCard
-                      key={p.id}
-                      pst={p}
-                      selected={selected === p.id}
-                      onSelect={() => setSelected(p.id)}
-                      onCancel={run(api.importCancel, p.id)}
-                      onResume={run(api.importResume, p.id)}
-                      onRemove={() => setRemoving(p)}
-                    />
-                  ))
-              )}
-            </div>
-          </section>
-          <ErrorLog pst={list.find((p) => p.id === selected) ?? null} />
-          {(["p1", "p2"] as const).map((id, i) => (
-            <Splitter key={id} orientation="vertical" {...split.props(id)} measure={() => paneWidth(i)} style={{ gridColumn: i + 1, gridRow: 2, top: 0, bottom: 0, right: -3 }} />
-          ))}
-        </>
-      )}
+          </>
+        )}
+      </section>
+      <aside className={mergeClasses(s.pane, s.side)} aria-label={t("sched.title")}>
+          <div className={s.scroll}>
+            <SidePanel>
+              {sync.data ? <ScheduleCard key={JSON.stringify(sync.data.schedule)} status={sync.data} /> : null}
+              <ActivityCard list={list} status={sync.data} onCancel={(id) => void act(() => api.importCancel(id))()} />
+              {sel && (sel.errorCount > 0 || sel.status === "failed") ? <ErrorLogCard key={sel.id} pst={sel} /> : null}
+            </SidePanel>
+          </div>
+      </aside>
       {removing ? <RemoveDialog pst={removing} onClose={() => setRemoving(null)} /> : null}
     </div>
-  );
-}
-
-function QueueCard(props: {
-  pst: PstSource;
-  selected: boolean;
-  onSelect(): void;
-  onCancel(): void;
-  onResume(): void;
-  onRemove(): void;
-}) {
-  const s = useStyles();
-  const { t, i18n } = useTranslation("import");
-  const lng = i18n.language;
-  const { pst } = props;
-  const p = pst.progress;
-  const total = p?.itemsTotal ?? null;
-  const done = p?.itemsDone ?? 0;
-  const percent = total ? Math.round((done / total) * 100) : 0;
-  const running = pst.status === "running";
-  return (
-    <div
-      role="option"
-      aria-selected={props.selected}
-      tabIndex={0}
-      data-testid="queue-card"
-      data-pst-name={pst.displayName}
-      className={mergeClasses(s.card, props.selected && s.selected)}
-      onClick={props.onSelect}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && props.onSelect()}
-    >
-      <div className={s.row}>
-        <DocumentRegular />
-        <span className={s.name}>{pst.displayName}</span>
-        <Badge appearance="tint" color={BADGE[pst.status]}>
-          {t(`status.${pst.status}`)}
-        </Badge>
-      </div>
-      {(running && p) || total ? (
-        <div className={s.sub}>
-          {running && p ? <span>{t(`phase.${p.phase}`)}</span> : null}
-          <span className={s.spacer} />
-          {total ? <span>{t("queue.progress", { done: formatNumber(done, lng), total: formatNumber(total, lng), percent })}</span> : null}
-        </div>
-      ) : null}
-      {running || p ? (
-        <ProgressBar
-          value={running && total === null ? undefined : total ? done / total : 0}
-          color={pst.status === "failed" ? "error" : "brand"}
-          aria-label={pst.displayName}
-        />
-      ) : null}
-      <div className={s.sub}>
-        {running && p?.bytesPerSec ? <span>{t("queue.rate", { rate: formatBytes(p.bytesPerSec, lng) })}</span> : null}
-        {running && p?.etaSeconds ? <span>{t("queue.eta", { minutes: Math.max(1, Math.round(p.etaSeconds / 60)) })}</span> : null}
-        {pst.errorCount > 0 ? (
-          <span className={mergeClasses(s.warn, s.warnInline)}>
-            <WarningRegular />
-            {t("queue.errors", { n: formatNumber(pst.errorCount, lng) })}
-          </span>
-        ) : null}
-      </div>
-      <div className={s.acts} onClick={(e) => e.stopPropagation()}>
-        {pst.status === "running" || pst.status === "queued" || pst.status === "cancelling" ? (
-          <Button size="small" icon={<DismissRegular />} disabled={pst.status === "cancelling"} onClick={props.onCancel} data-testid="queue-cancel">
-            {t("queue.cancel")}
-          </Button>
-        ) : null}
-        {pst.status === "cancelled" ? (
-          <Button size="small" appearance="primary" icon={<PlayRegular />} onClick={props.onResume} data-testid="queue-resume">
-            {t("queue.resume")}
-          </Button>
-        ) : null}
-        {pst.status === "failed" ? (
-          <Button size="small" appearance="primary" icon={<PlayRegular />} onClick={props.onResume} data-testid="queue-retry">
-            {t("queue.retry")}
-          </Button>
-        ) : null}
-        {pst.status === "cancelled" || pst.status === "failed" ? (
-          <Button size="small" appearance="subtle" className={s.danger} icon={<DeleteRegular />} onClick={props.onRemove}>
-            {t("queue.remove")}
-          </Button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function ErrorLog({ pst }: { pst: PstSource | null }) {
-  const s = useStyles();
-  const { t, i18n } = useTranslation("import");
-  const errors = useInfiniteQuery({
-    queryKey: ["importErrors", pst?.id ?? null],
-    queryFn: ({ pageParam }) => api.importErrors({ pstId: pst!.id, cursor: pageParam, limit: 100 }),
-    initialPageParam: null as string | null,
-    getNextPageParam: (last) => last.nextCursor ?? undefined,
-    enabled: pst !== null,
-  });
-  const rows = errors.data?.pages.flatMap((p) => p.rows) ?? [];
-  return (
-    <section className={s.pane} aria-label={t("log.title")}>
-      <div className={s.paneHead}>
-        <Body1Strong as="h3" className={s.paneTitle}>
-          {t("log.title")}
-        </Body1Strong>
-        {pst ? (
-          <Caption1 className={s.paneFor} title={pst.displayName}>
-            — {pst.displayName}
-          </Caption1>
-        ) : null}
-      </div>
-      <div className={s.scroll}>
-        {pst === null ? (
-          <EmptyState icon={<DocumentRegular />} title={t("log.pick")} />
-        ) : errors.isSuccess && rows.length === 0 ? (
-          <EmptyState icon={<DocumentRegular />} title={t("log.none")} />
-        ) : (
-          rows.map((r) => (
-            <div key={r.id} className={s.logEntry}>
-              <Caption1 className={s.logTime}>{formatDateTime(r.occurredAt, i18n.language)}</Caption1>
-              {r.severity === "jobFailed" ? <ErrorCircleRegular className={s.err} /> : <WarningRegular className={s.warn} />}
-              <Body1 className={s.logMsg}>
-                {t(`stage.${r.stage}`)} · {r.message}
-              </Body1>
-              <span className={s.logLoc}>
-                {[r.folderPath, r.pstItemId !== null ? t("log.item", { id: r.pstItemId }) : null].filter(Boolean).join(" · ")}
-              </span>
-            </div>
-          ))
-        )}
-        {errors.hasNextPage ? (
-          <Button appearance="subtle" onClick={() => void errors.fetchNextPage()}>
-            {t("log.more")}
-          </Button>
-        ) : null}
-      </div>
-    </section>
   );
 }

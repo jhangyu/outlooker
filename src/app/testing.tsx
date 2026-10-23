@@ -45,6 +45,10 @@ export function makePst(p: Partial<PstSource> = {}): PstSource {
     errorCount: 0,
     queuedAt: "2026-10-01T08:00:00Z",
     finishedAt: "2026-10-01T08:10:00Z",
+    syncEnabled: true,
+    lastCheckedAt: "2026-10-01T08:10:00Z",
+    lastSyncedAt: "2026-10-01T08:10:00Z",
+    failureReason: null,
     ...p,
   };
 }
@@ -91,9 +95,12 @@ export function mockApiDefaults(): void {
   m.sqlExecute.mockResolvedValue({ mode: "command", tag: "SELECT 0", elapsedMs: 1 });
   m.sqlCancel.mockResolvedValue(null);
   m.pstList.mockResolvedValue([]);
-  m.importEnqueue.mockResolvedValue([]);
+  m.pstRegister.mockResolvedValue([]);
+  m.pstSetEnabled.mockRejectedValue({ kind: "notFound", entity: "pst", id: "0" });
+  m.syncNow.mockResolvedValue(null);
+  m.syncStatus.mockResolvedValue({ schedule: { mode: "interval", minutes: 60 }, lastRunAt: null, nextRunAt: null });
+  m.syncScheduleSet.mockResolvedValue({ schedule: { mode: "interval", minutes: 60 }, lastRunAt: null, nextRunAt: null });
   m.importCancel.mockResolvedValue(null);
-  m.importResume.mockResolvedValue(null);
   m.pstRemove.mockResolvedValue(null);
   m.importErrors.mockResolvedValue({ rows: [], nextCursor: null });
   m.settingsGet.mockResolvedValue({ language: "en", webpQuality: 80, dataDir: "/data" });

@@ -13,7 +13,7 @@ import type { AppError } from "../../api/bindings/AppError";
 import type { Language } from "../../api/bindings/Language";
 import { useAppStatus, useNavigation } from "../../app/AppStatusContext";
 import { BrandMark } from "../../components/brand/BrandMark";
-import { formatAppError, toAppError, useEnqueuePst, useLanguageSwitch } from "../../components/common";
+import { formatAppError, toAppError, useRegisterPst, useLanguageSwitch } from "../../components/common";
 
 type Step = 0 | 1 | 2 | 3;
 const STEP_KEYS = ["language", "location", "database", "import"] as const;
@@ -104,9 +104,9 @@ export function OnboardingScreen() {
       setDirChoice("other");
     }
   };
-  const enqueue = useEnqueuePst();
+  const register = useRegisterPst();
   const pickPst = async () => {
-    if (await enqueue()) go("import");
+    if (await register()) go("import");
   };
 
   const choice = (testId: string, selected: boolean, onClick: () => void, title: string, hint: string, extra?: JSX.Element) => (
