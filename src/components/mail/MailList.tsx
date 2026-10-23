@@ -16,8 +16,6 @@ const PREFETCH_ROWS = 50;
 // Sender gets Fluent's right-edge handle (sender|subject), date the shared Splitter on its left edge (subject|date).
 const COLUMN_DEFAULTS = { sender: { width: 110, minWidth: 96 } };
 const SPLITS: SplitDefaults = { date: { size: 88, min: 72, max: 320 } };
-// Splitter grows the pane before the border when dragged right, the date sits after it: hand it the mirrored width.
-const DATE_MIRROR = 72 + 320;
 
 export type Entry = { kind: "month"; key: string; label: string } | { kind: "mail"; key: string; row: MailRow };
 
@@ -158,8 +156,7 @@ export function MailList(p: MailListProps) {
           <span className={s.headCell}>
             <Caption1Strong className={s.ellipsis}>{t("list.col.date")}</Caption1Strong>
             <Splitter
-              orientation="vertical" label={t("list.col.date")} {...dateSplit}
-              value={DATE_MIRROR - dateWidth} onChange={(px) => dateSplit.onChange(DATE_MIRROR - px)}
+              orientation="vertical" reverse label={t("list.col.date")} {...dateSplit}
               style={{ top: 0, bottom: 0, left: "-7px" }}
             />
           </span>
