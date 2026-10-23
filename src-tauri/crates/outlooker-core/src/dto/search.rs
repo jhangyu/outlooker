@@ -48,6 +48,7 @@ pub enum RecipientKind {
     Cc,
     Bcc,
 }
+super::import::db_text!(RecipientKind, "recipient kind", { To => "to", Cc => "cc", Bcc => "bcc" });
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -168,6 +169,14 @@ pub struct Occurrence {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recipient_kind_db_round_trip() {
+        for &k in RecipientKind::ALL {
+            assert_eq!(RecipientKind::from_db(k.as_db()).unwrap(), k);
+        }
+        assert!(RecipientKind::from_db("bogus").is_err());
+    }
 
     /// Part 03 §5.1 worked example, built from Rust values.
     pub fn worked_example() -> SearchRequest {

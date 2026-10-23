@@ -4,12 +4,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use outlooker_core::db::Db;
+use outlooker_core::db::{db_err, Db};
 use outlooker_core::db::indexes::{drop_search_indexes, ensure_search_indexes};
 use outlooker_core::dto::error::AppError;
 use outlooker_core::importer::types::FolderIn;
 use outlooker_core::importer::writer::{
-    load_known_hashes, map_db_error, upsert_folders, Checkpoint, Writer, WriterConfig, WriterLimits, AFTER_JOB_VACUUM,
+    load_known_hashes, upsert_folders, Checkpoint, WriterConfig, WriterHandle, WriterLimits, AFTER_JOB_VACUUM,
 };
 use outlooker_core::test_support::import_fixtures::complete_job;
 use rayon::prelude::*;
@@ -36,7 +36,6 @@ pub fn source_path(s: u32) -> String {
 
 async fn create_source(db: &Db, s: u32) -> Result<(i64, i64), AppError> {
     let mut app = db.connect_app().await?;
-    let pg = |e| map_db_error(e, Path::new(""));
     let path = source_path(s);
     let name = format!("source-{s:02}.pst");
     let mtime = UNIX_EPOCH + Duration::from_secs(1_767_225_600 + s as u64);
@@ -46,12 +45,12 @@ async fn create_source(db: &Db, s: u32) -> Result<(i64, i64), AppError> {
             &[&path, &name, &mtime],
         )
         .await
-        .map_err(pg)?
+        .map_err(db_err)?
         .get(0);
     let job_id: i64 = app
         .query_one("INSERT INTO import_jobs (pst_id, kind, state, started_at) VALUES ($1, 'import', 'running', now()) RETURNING id", &[&pst_id])
         .await
-        .map_err(pg)?
+        .map_err(db_err)?
         .get(0);
     let mut folders = vec![FolderIn { pst_folder_id: 1, parent_pst_folder_id: None, name: "Inbox".into(), path: "Inbox".into() }];
     for year in 2015..=2025 {
@@ -77,7 +76,7 @@ pub async fn load_sources(db: &Db, cfg: &GenConfig, sources: Range<u32>, defer_i
         let app = db.connect_app().await?;
         let (start, _) = Checkpoint::begin(&app, pst_id, job_id, 1, SystemTime::now()).await?;
         let wcfg = WriterConfig { pst_id, data_root: db.data_root()?, start, limits: WriterLimits::default(), known: known.clone() };
-        let writer = Writer::spawn(db.connect_app().await?, wcfg, Box::new(|_| {})).await?;
+        let writer = WriterHandle::spawn(db.connect_app().await?, wcfg, Box::new(|_| {})).await?;
         let n = cfg.per_source(s);
         let mut i = 0;
         'generate: while i < n {
@@ -100,7 +99,7 @@ pub async fn load_sources(db: &Db, cfg: &GenConfig, sources: Range<u32>, defer_i
     }
     let write_elapsed = started.elapsed();
     let app = db.connect_app().await?;
-    app.batch_execute(AFTER_JOB_VACUUM).await.map_err(|e| map_db_error(e, Path::new("")))?;
+    app.batch_execute(AFTER_JOB_VACUUM).await.map_err(db_err)?;
     let t = Instant::now();
     if defer_indexes {
         ensure_search_indexes(&admin, &|name: &str, done: usize, total: usize| log_progress(name, done, total)).await?;
@@ -108,7 +107,7 @@ pub async fn load_sources(db: &Db, cfg: &GenConfig, sources: Range<u32>, defer_i
     let index_elapsed = t.elapsed();
     let count = |sql: &'static str| {
         let admin = &admin;
-        async move { admin.query_one(sql, &[]).await.map(|r| r.get::<_, i64>(0)).map_err(|e| map_db_error(e, Path::new(""))) }
+        async move { admin.query_one(sql, &[]).await.map(|r| r.get::<_, i64>(0)).map_err(db_err) }
     };
     Ok(LoadReport {
         messages_submitted: submitted,

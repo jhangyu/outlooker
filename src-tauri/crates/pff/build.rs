@@ -24,24 +24,21 @@ fn main() {
     let vendored = manifest.join("../../native/libpff");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed={}", vendored.join("ORIGIN").display());
-    assert!(vendored.join("ORIGIN").exists(), "src-tauri/native/libpff is missing: run scripts/vendor-libpff.sh");
+    assert!(vendored.join("ORIGIN").exists(), "src-tauri/native/libpff is missing: run scripts/vendor-libpff.py");
 
     let msvc = env::var("CARGO_CFG_TARGET_ENV").unwrap() == "msvc";
     let src = PathBuf::from(env::var("OUT_DIR").unwrap()).join("libpff-src");
-    if !src.join(".prepared").exists() {
-        let _ = fs::remove_dir_all(&src);
-        copy_dir(&vendored, &src);
-        if !msvc {
-            // Configure in the copy: the sdist ships a Linux common/config.h that common/common.h
-            // includes from its own directory first (spec Part 01 §4.3).
-            let status = Command::new("sh")
-                .args(["configure", "--disable-nls", "--disable-shared-libs", "--with-zlib=no"])
-                .current_dir(&src)
-                .status()
-                .expect("failed to run libpff configure");
-            assert!(status.success(), "libpff configure failed, see {}", src.join("config.log").display());
-        }
-        fs::write(src.join(".prepared"), b"ok").unwrap();
+    let _ = fs::remove_dir_all(&src);
+    copy_dir(&vendored, &src);
+    if !msvc {
+        // Configure in the copy: the sdist ships a Linux common/config.h that common/common.h
+        // includes from its own directory first (spec Part 01 §4.3).
+        let status = Command::new("sh")
+            .args(["configure", "--disable-nls", "--disable-shared-libs", "--with-zlib=no"])
+            .current_dir(&src)
+            .status()
+            .expect("failed to run libpff configure");
+        assert!(status.success(), "libpff configure failed, see {}", src.join("config.log").display());
     }
 
     let mut dirs = vec!["libpff"];

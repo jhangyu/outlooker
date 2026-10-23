@@ -88,7 +88,7 @@ export function SqlEditor({ value, onChange, onRun, errorPosition, ariaLabel }: 
       view.current = null;
     };
     // The view is created once per mount; `value` and `errorPosition` are synced by the effects below.
-  }, [ariaLabel]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ariaLabel]);
 
   useEffect(() => {
     const v = view.current;

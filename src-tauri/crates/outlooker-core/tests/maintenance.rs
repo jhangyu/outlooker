@@ -1,4 +1,4 @@
-//! R2-12 Maintenance Service integration tests (spec Part 03 §8.3, Part 04 §9.1).
+//! Maintenance Service integration tests (spec Part 03 §8.3, Part 04 §9.1).
 #![cfg(feature = "test-support")]
 use std::sync::Arc;
 
@@ -7,7 +7,7 @@ use outlooker_core::dto::error::{AppError, BusyReason};
 use outlooker_core::dto::events::MaintenanceRunState;
 use outlooker_core::dto::settings::MaintenanceTask;
 use outlooker_core::gate::{Activity, Gate};
-use outlooker_core::maintenance::{Maintenance, REINDEX_INDEXES};
+use outlooker_core::maintenance::{Maintenance, REINDEX_LIST_SQL};
 use outlooker_core::sink::{CoreEvent, RecordingSink};
 use outlooker_core::test_support::TestCluster;
 
@@ -80,22 +80,12 @@ async fn vacuum_removes_orphans() {
 async fn reindex_leaves_all_valid() {
     let tc = TestCluster::start().await;
     let a = tc.admin().await;
-    // REINDEX_INDEXES is exactly the set of non-constraint indexes of the migrated schema (Part 04 §3)
-    let mut plain: Vec<String> = a
-        .query(
-            "SELECT c.relname FROM pg_index x JOIN pg_class c ON c.oid = x.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace
-             WHERE n.nspname = 'public' AND NOT EXISTS (SELECT 1 FROM pg_constraint k WHERE k.conindid = x.indexrelid)",
-            &[],
-        )
-        .await
-        .unwrap()
-        .iter()
-        .map(|r| r.get(0))
-        .collect();
-    plain.sort();
-    let mut listed: Vec<String> = REINDEX_INDEXES.iter().map(|s| s.to_string()).collect();
-    listed.sort();
-    assert_eq!(plain, listed);
+    let listed: Vec<String> = a.query(REINDEX_LIST_SQL, &[]).await.unwrap().iter().map(|r| r.get(0)).collect();
+    for want in ["messages_body_fts", "import_jobs_queue"] {
+        assert!(listed.iter().any(|n| n == want), "{want} in {listed:?}");
+    }
+    assert!(!listed.iter().any(|n| n.ends_with("_pkey") || n == "messages_dedupe_once"), "constraint indexes excluded: {listed:?}");
+    assert_eq!(listed.len(), 17, "{listed:?}");
     // damage: two search indexes missing, one invalid leftover of a failed concurrent rebuild
     a.batch_execute(
         "DROP INDEX messages_body_fts; DROP INDEX messages_sort;

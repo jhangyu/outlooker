@@ -3,8 +3,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sysinfo::Disks;
-
 use crate::dto::error::AppError;
 use crate::dto::events::{DataDirMovePhase, DataDirMoveProgress};
 use crate::gate::Activity;
@@ -12,6 +10,7 @@ use crate::lifecycle::pg::{PgController, StopMode};
 use crate::lifecycle::supervisor::Supervisor;
 use crate::paths::Paths;
 use crate::sink::{CoreEvent, EventSink};
+use crate::sys::free_space;
 
 fn tree_stats(dir: &Path) -> std::io::Result<(u64, u64)> {
     let (mut files, mut bytes) = (0, 0);
@@ -46,24 +45,6 @@ fn copy_tree(src: &Path, dst: &Path, copied: &mut u64, on_progress: &mut dyn FnM
     Ok(())
 }
 
-/// Free bytes on the volume that will hold `path` (nearest existing ancestor, longest mount-point match).
-pub fn free_space(path: &Path) -> Result<u64, AppError> {
-    let mut probe = path.to_path_buf();
-    while !probe.exists() {
-        if !probe.pop() {
-            return Err(AppError::file_access(path, "noExistingAncestor"));
-        }
-    }
-    let probe = probe.canonicalize().map_err(|e| AppError::file_access(path, &e.to_string()))?;
-    let disks = Disks::new_with_refreshed_list();
-    disks
-        .iter()
-        .filter(|d| probe.starts_with(d.mount_point()))
-        .max_by_key(|d| d.mount_point().as_os_str().len())
-        .map(|d| d.available_space())
-        .ok_or_else(|| AppError::file_access(path, "unknownVolume"))
-}
-
 /// Canonical form of a path that may not exist yet: canonical nearest existing ancestor + the remaining components.
 fn resolve_path(path: &Path) -> Result<PathBuf, AppError> {
     let mut rest = Vec::new();
@@ -76,6 +57,21 @@ fn resolve_path(path: &Path) -> Result<PathBuf, AppError> {
     let mut out = probe.canonicalize().map_err(|e| AppError::file_access(path, &e.to_string()))?;
     out.extend(rest.iter().rev());
     Ok(out)
+}
+
+/// Rollback of the copy: delete a target the move created; empty a pre-existing one and restore its mode.
+fn undo_target(target: &Path, pre_existing: Option<std::fs::Permissions>) -> std::io::Result<()> {
+    let Some(mode) = pre_existing else {
+        return match std::fs::remove_dir_all(target) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            r => r,
+        };
+    };
+    for e in std::fs::read_dir(target)? {
+        let e = e?;
+        if e.file_type()?.is_dir() { std::fs::remove_dir_all(e.path())? } else { std::fs::remove_file(e.path())? }
+    }
+    std::fs::set_permissions(target, mode)
 }
 
 fn emit(sink: &Arc<dyn EventSink>, phase: DataDirMovePhase, copied: u64, total: u64, error: Option<AppError>) {
@@ -112,9 +108,13 @@ impl Supervisor {
 
     async fn run_move(&self, old: Paths, target: PathBuf, files: u64, bytes: u64) {
         let sink = self.inner.sink.clone();
+        // A pre-existing target was checked empty: rollback empties it and restores its mode, never deletes it.
+        let pre_existing = std::fs::metadata(&target).ok().map(|m| m.permissions());
         emit(&sink, DataDirMovePhase::StoppingDb, 0, bytes, None);
         if let Err(e) = self.shutdown_db().await {
-            let _ = self.start_cluster().await;
+            if let Err(e2) = self.start_cluster().await {
+                log::error!("data dir move: restart after failed stop: {e2}");
+            }
             emit(&sink, DataDirMovePhase::Failed, 0, bytes, Some(e));
             return;
         }
@@ -152,16 +152,26 @@ impl Supervisor {
         .await;
         match moved {
             Ok(()) => {
-                let _ = tokio::fs::remove_dir_all(old.data_root()).await;
+                if let Err(e) = tokio::fs::remove_dir_all(old.data_root()).await {
+                    log::warn!("data dir move: cannot remove old data root {}: {e}", old.data_root().display());
+                }
                 emit(&sink, DataDirMovePhase::Done, bytes, bytes, None);
             }
             Err(e) => {
                 let at_target = old.with_data_root(target.clone());
-                let _ = PgController::new(at_target.clone()).stop(&at_target.pgdata(), StopMode::Immediate).await;
-                let _ = tokio::fs::remove_dir_all(&target).await;
-                let _ = self.inner.settings.set_data_dir(&old.data_root().display().to_string());
+                if let Err(e) = PgController::new(at_target.clone()).stop(&at_target.pgdata(), StopMode::Immediate).await {
+                    log::error!("data dir move rollback: stop cluster at {}: {e}", target.display());
+                }
+                if let Err(e) = undo_target(&target, pre_existing) {
+                    log::error!("data dir move rollback: clean {}: {e}", target.display());
+                }
+                if let Err(e) = self.inner.settings.set_data_dir(&old.data_root().display().to_string()) {
+                    log::error!("data dir move rollback: restore data dir setting: {e}");
+                }
                 self.set_paths(old.clone());
-                let _ = self.start_cluster().await;
+                if let Err(e) = self.start_cluster().await {
+                    log::error!("data dir move rollback: restart cluster: {e}");
+                }
                 emit(&sink, DataDirMovePhase::Failed, 0, bytes, Some(e));
             }
         }

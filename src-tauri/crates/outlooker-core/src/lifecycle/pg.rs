@@ -5,15 +5,15 @@ use std::path::Path;
 use std::process::Output;
 use std::sync::{Arc, Mutex};
 
-use sysinfo::{MemoryRefreshKind, Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use tokio::process::Command;
 
+use crate::db::{connect, ADMIN_ROLE, CJK_SELF_CHECK};
 use crate::dto::error::AppError;
 use crate::paths::Paths;
+use crate::sys::total_ram_bytes;
 
 pub const HBA_CONF: &str = "host all all 127.0.0.1/32 scram-sha-256\n";
-pub const CJK_SELF_CHECK: &str = "SELECT similarity('測試測試','測試') > 0";
-pub const ADMIN_ROLE: &str = "outlooker_admin";
 const MB: u64 = 1024 * 1024;
 
 #[cfg(windows)]
@@ -68,11 +68,6 @@ pub fn auto_conf(ram_bytes: u64) -> String {
     )
 }
 
-pub fn total_ram_bytes() -> u64 {
-    let sys = System::new_with_specifics(RefreshKind::nothing().with_memory(MemoryRefreshKind::nothing().with_ram()));
-    sys.total_memory()
-}
-
 fn io_err(context: &str, e: std::io::Error) -> AppError {
     AppError::internal(format!("{context}: {e}"))
 }
@@ -105,22 +100,6 @@ fn initdb_detail(stderr: &str) -> String {
     if lines.is_empty() { last_line(stderr) } else { lines.join("; ") }
 }
 
-/// One connection for the self-check and role setup. `db::connect` re-exports this.
-pub async fn connect(port: u16, user: &str, password: &str, dbname: &str) -> Result<tokio_postgres::Client, AppError> {
-    let mut cfg = tokio_postgres::Config::new();
-    cfg.host("127.0.0.1").port(port).user(user).password(password).dbname(dbname).application_name("outlooker");
-    let (client, conn) = cfg
-        .connect(tokio_postgres::NoTls)
-        .await
-        .map_err(|e| AppError::internal(format!("connect as {user}: {e}")))?;
-    tokio::spawn(async move {
-        if let Err(e) = conn.await {
-            log::debug!("postgres connection closed: {e}");
-        }
-    });
-    Ok(client)
-}
-
 /// What owns the PID in `postmaster.pid`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PidOwner {
@@ -150,29 +129,14 @@ fn pid_owner(pid: u32, our_postgres: &Path) -> PidOwner {
     }
 }
 
-/// Create `path` owner-only (0600 on Unix) before any secret is written.
-/// A leftover file is removed first: the mode only applies on creation.
-fn write_private(path: &Path, content: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    match std::fs::remove_file(path) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
-        _ => {}
-    }
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
-    opts.open(path)?.write_all(content.as_bytes())
-}
-
-fn newest_server_log(log_dir: &Path) -> String {
-    let newest = std::fs::read_dir(log_dir)
+fn newest_server_log(log_dir: &Path) -> Option<std::path::PathBuf> {
+    std::fs::read_dir(log_dir)
         .into_iter()
         .flatten()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_name() != "startup.log")
-        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
-    newest.and_then(|e| std::fs::read_to_string(e.path()).ok()).unwrap_or_default()
+        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
+        .map(|e| e.path())
 }
 
 fn read_pid(pgdata: &Path) -> Option<u32> {
@@ -191,9 +155,9 @@ impl PgController {
         PgController { paths, forced_ports: Arc::new(Mutex::new(Vec::new())) }
     }
 
-    /// Test seam (named in the plan): the next `start` tries these ports first, in order.
+    /// Test seam: the next `start` tries these ports first, in order.
     pub fn with_ports(self, ports: Vec<u16>) -> PgController {
-        *self.forced_ports.lock().unwrap() = ports;
+        *self.forced_ports.lock().unwrap_or_else(|p| p.into_inner()) = ports;
         self
     }
 
@@ -223,7 +187,7 @@ impl PgController {
     }
 
     fn next_port(&self) -> Result<u16, AppError> {
-        if let Some(p) = self.forced_ports.lock().unwrap().pop() {
+        if let Some(p) = self.forced_ports.lock().unwrap_or_else(|p| p.into_inner()).pop() {
             return Ok(p);
         }
         let l = TcpListener::bind("127.0.0.1:0").map_err(|e| io_err("bind 127.0.0.1:0", e))?;
@@ -269,9 +233,9 @@ impl PgController {
         let parent = pgdata.parent().ok_or_else(|| AppError::internal("pgdata has no parent"))?;
         tokio::fs::create_dir_all(parent).await.map_err(|e| io_err("create data root", e))?;
         let pwfile = parent.join(".initdb-pw");
-        if let Err(e) = write_private(&pwfile, pw) {
+        if let Err(e) = crate::fsutil::write_atomic(&pwfile, pw.as_bytes(), true) {
             let _ = std::fs::remove_file(&pwfile);
-            return Err(io_err("write pwfile", e).into());
+            return Err(e.into());
         }
         let args: Vec<OsString> = vec![
             "-D".into(), pgdata.into(), "-U".into(), ADMIN_ROLE.into(),
@@ -291,7 +255,8 @@ impl PgController {
         tokio::fs::write(pgdata.join("pg_hba.conf"), HBA_CONF).await.map_err(|e| io_err("write pg_hba.conf", e))?;
         let port = self.start(pgdata).await?;
         let check = async {
-            let postgres = connect(port, ADMIN_ROLE, pw, "postgres").await?;            postgres.batch_execute("CREATE DATABASE outlooker").await.map_err(|e| AppError::internal(e.to_string()))?;
+            let postgres = connect(port, ADMIN_ROLE, pw, "postgres").await?;
+            postgres.batch_execute("CREATE DATABASE outlooker").await.map_err(|e| AppError::internal(e.to_string()))?;
             drop(postgres);
             let db = connect(port, ADMIN_ROLE, pw, "outlooker").await?;
             db.batch_execute("CREATE EXTENSION IF NOT EXISTS pg_trgm").await.map_err(|e| AppError::internal(e.to_string()))?;
@@ -342,7 +307,7 @@ impl PgController {
                 String::from_utf8_lossy(&out.stdout),
                 String::from_utf8_lossy(&out.stderr),
                 tokio::fs::read_to_string(&startup_log).await.unwrap_or_default(),
-                newest_server_log(&log_dir)
+                newest_server_log(&log_dir).and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default()
             );
             if text.contains("could not bind") || text.contains("Address already in use") {
                 bind_attempts += 1;
@@ -397,11 +362,8 @@ impl PgController {
 
     /// Last non-empty line of the newest server log in `pgdata/log` (for `AppError.detail`).
     pub fn last_log_line(&self, pgdata: &Path) -> Option<String> {
-        let newest = std::fs::read_dir(pgdata.join("log"))
-            .ok()?
-            .filter_map(|e| e.ok())
-            .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())?;
-        Some(last_line(&std::fs::read_to_string(newest.path()).ok()?))
+        let newest = newest_server_log(&pgdata.join("log"))?;
+        Some(last_line(&std::fs::read_to_string(newest).ok()?))
     }
 }
 
@@ -409,17 +371,17 @@ impl PgController {
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
-    fn pwfile_is_owner_only() {
-        use std::os::unix::fs::PermissionsExt;
+    fn last_log_line_skips_startup_log() {
         let dir = tempfile::tempdir().unwrap();
-        let f = dir.path().join("pw");
-        std::fs::write(&f, "old").unwrap(); // leftover from a crashed run
-        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
-        write_private(&f, "secret").unwrap();
-        assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), "secret");
+        let log = dir.path().join("log");
+        std::fs::create_dir(&log).unwrap();
+        std::fs::write(log.join("postgresql.log"), "old\nserver line\n").unwrap();
+        std::fs::write(log.join("startup.log"), "startup noise\n").unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+        std::fs::File::options().write(true).open(log.join("startup.log")).unwrap().set_modified(later).unwrap();
+        let c = PgController::new(Paths::new(dir.path().join("a"), dir.path().join("l"), dir.path().join("pg")));
+        assert_eq!(c.last_log_line(dir.path()).as_deref(), Some("server line"));
     }
 
     #[test]

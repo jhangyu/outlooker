@@ -12,8 +12,7 @@ const MULTIPLE_COMMANDS: &str = "cannot insert multiple commands into a prepared
 /// pass `true` for errors raised by `prepare` itself. `cancelled` = `cancel` was called for this execution.
 pub fn map_sql_error(e: &tokio_postgres::Error, has_columns: bool, cancelled: bool) -> AppError {
     match e.as_db_error() {
-        // Closed connection or I/O error: no SQLSTATE.
-        None => AppError::DbNotReady,
+        None => crate::db::no_sqlstate_err(e),
         Some(db) => {
             let position = match db.position() {
                 Some(ErrorPosition::Original(n)) => Some(*n),

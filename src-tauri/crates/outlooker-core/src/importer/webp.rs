@@ -22,9 +22,9 @@ pub struct KnownHashes { inner: RwLock<HashSet<[u8; 32]>> }
 
 impl KnownHashes {
     pub fn new() -> KnownHashes { KnownHashes::default() }
-    pub fn contains(&self, h: &[u8; 32]) -> bool { self.inner.read().unwrap().contains(h) }
-    pub fn insert_all<I: IntoIterator<Item = [u8; 32]>>(&self, hashes: I) { self.inner.write().unwrap().extend(hashes) }
-    pub fn len(&self) -> usize { self.inner.read().unwrap().len() }
+    pub fn contains(&self, h: &[u8; 32]) -> bool { self.inner.read().unwrap_or_else(|p| p.into_inner()).contains(h) }
+    pub fn insert_all<I: IntoIterator<Item = [u8; 32]>>(&self, hashes: I) { self.inner.write().unwrap_or_else(|p| p.into_inner()).extend(hashes) }
+    pub fn len(&self) -> usize { self.inner.read().unwrap_or_else(|p| p.into_inner()).len() }
     pub fn is_empty(&self) -> bool { self.len() == 0 }
 }
 

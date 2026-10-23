@@ -245,6 +245,21 @@ async fn move_verify_failure_rolls_back() {
 }
 
 #[tokio::test]
+async fn move_rollback_keeps_pre_existing_empty_target() {
+    let mut r = rig();
+    ready(&r).await;
+    let target = r.root.with_file_name("chosen");
+    std::fs::create_dir_all(&target).unwrap();
+    r.sup.fail_next_move_verify();
+    r.sup.move_data_dir(target.display().to_string()).await.unwrap();
+    assert_eq!(next_move_end(&mut r.events).await, DataDirMovePhase::Failed);
+    wait_phase(&r.sup, AppPhase::Ready).await;
+    assert!(target.is_dir(), "pre-existing target kept");
+    assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0, "pre-existing target emptied");
+    r.sup.shutdown_db().await.unwrap();
+}
+
+#[tokio::test]
 async fn move_into_non_empty_is_invalid() {
     let r = rig();
     ready(&r).await;

@@ -1,4 +1,4 @@
-//! C9 data types shared by the reader (R2-09), normalize (R1-05) and the writer (R2-10).
+//! Data types shared by the reader, normalize and the writer.
 use std::time::SystemTime;
 
 use crate::dto::import::{ImportErrorSeverity, ImportErrorStage};

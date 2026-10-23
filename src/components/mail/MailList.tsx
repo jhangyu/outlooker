@@ -1,16 +1,16 @@
 import { Avatar, Caption1Strong, CounterBadge, Spinner, makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
 import { AttachRegular } from "@fluentui/react-icons";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useMemo, useRef, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { MailRow } from "../../api/bindings/MailRow";
-import { ellipsis, formatDay } from "../common";
+import { ellipsis, formatDay, formatMonth } from "../common";
 
 export const ROW_HEIGHT = 32;
 /** Prototype `.mail-item.compact`: sender + date, subject, snippet on three lines. */
 // 56 px of text lines + 2 × 8 px padding + 1 px bottom border (border-box).
 const COMPACT_ROW_HEIGHT = 73;
-export const PREFETCH_ROWS = 50;
+const PREFETCH_ROWS = 50;
 
 export type Entry = { kind: "month"; key: string; label: string } | { kind: "mail"; key: string; row: MailRow };
 
@@ -30,14 +30,13 @@ export interface MailListProps {
 
 /** Rows arrive newest first (Part 03 §5.2); a header entry starts each local month, undated mail last. */
 export function buildEntries(rows: MailRow[], lng: string, undatedLabel: string): Entry[] {
-  const fmt = new Intl.DateTimeFormat(lng === "cimode" ? "en" : lng, { year: "numeric", month: "long" });
   const out: Entry[] = [];
   let current: string | null = null;
   for (const row of rows) {
     const d = row.sentAt ? new Date(row.sentAt) : null;
     const month = d ? `${d.getFullYear()}-${d.getMonth()}` : "undated";
     if (month !== current) {
-      out.push({ kind: "month", key: `m-${month}-${out.length}`, label: d ? fmt.format(d) : undatedLabel });
+      out.push({ kind: "month", key: `m-${month}-${out.length}`, label: d ? formatMonth(row.sentAt as string, lng) : undatedLabel });
       current = month;
     }
     out.push({ kind: "mail", key: `r-${row.id}`, row });
@@ -80,13 +79,19 @@ const useStyles = makeStyles({
 });
 
 /**
- * Prototype `#resList` `.mail-item`, one line per mail at 32 px (plan Decision "Fixed-height virtual rows").
+ * Prototype `#resList` `.mail-item`, one line per mail at 32 px.
  * `compact` mail rows are three lines at COMPACT_ROW_HEIGHT; month headers stay 32 px.
  */
 export function MailList(p: MailListProps) {
   const { t, i18n } = useTranslation("search");
   const s = useStyles();
   const ref = useRef<HTMLDivElement>(null);
+  // A hidden <Activity> (display:none) can lose scrollTop in the webview: remember it and restore on re-show.
+  const lastTop = useRef(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && el.scrollTop !== lastTop.current) el.scrollTop = lastTop.current;
+  }, []);
   const lng = i18n.language;
   const undated = t("list.undated");
   const entries = useMemo<Entry[]>(
@@ -120,7 +125,7 @@ export function MailList(p: MailListProps) {
   };
 
   return (
-    <div ref={ref} className={s.scroll} role="listbox" aria-label={p.ariaLabel} tabIndex={0} onKeyDown={onKeyDown} data-testid="mail-list">
+    <div ref={ref} className={s.scroll} role="listbox" aria-label={p.ariaLabel} tabIndex={0} onKeyDown={onKeyDown} onScroll={(e) => (lastTop.current = e.currentTarget.scrollTop)} data-testid="mail-list">
       <div className={s.block} style={{ height: `${v.getTotalSize()}px` }}>
         {items.map((it) => {
           const en = entries[it.index]!;

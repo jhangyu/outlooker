@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { Activity, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../api/commands");
@@ -91,5 +92,28 @@ describe("mail components", () => {
       <MailList {...listProps} rows={Array.from({ length: 60 }, (_, i) => makeMailRow(i + 1))} hasMore monthHeaders={false} onEndReached={near} />,
     );
     expect(near).toHaveBeenCalled();
+  });
+
+  it("restores scrollTop after the list is hidden and shown again", () => {
+    const rows = Array.from({ length: 200 }, (_, i) => makeMailRow(i + 1));
+    function Host() {
+      const [hidden, setHidden] = useState(false);
+      return (
+        <>
+          <button data-testid="toggle" onClick={() => setHidden((h) => !h)} />
+          <Activity mode={hidden ? "hidden" : "visible"}>
+            <MailList {...listProps} rows={rows} monthHeaders={false} />
+          </Activity>
+        </>
+      );
+    }
+    renderWithProviders(<Host />);
+    const list = screen.getByTestId("mail-list");
+    list.scrollTop = 640;
+    fireEvent.scroll(list);
+    fireEvent.click(screen.getByTestId("toggle"));
+    list.scrollTop = 0; // the webview drops scrollTop of a display:none subtree
+    fireEvent.click(screen.getByTestId("toggle"));
+    expect(screen.getByTestId("mail-list").scrollTop).toBe(640);
   });
 });

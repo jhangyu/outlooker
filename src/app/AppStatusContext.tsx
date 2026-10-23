@@ -74,7 +74,7 @@ export function useNavigation(): { screen: ScreenId; go(screen: ScreenId): void 
   return { screen, go };
 }
 
-/** R1-06 internal: true while the first-run wizard owns the window. */
+/** True while the first-run wizard owns the window, so AppFrame renders it instead of the screens. */
 export function useOnboardingActive(): boolean {
   return useCtx().onboarding;
 }

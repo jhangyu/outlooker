@@ -1,4 +1,4 @@
-//! R2-12 SQL Console integration tests (spec Part 02 §10 bypass list, Part 04 §8.1, §12.2 row Read-only role).
+//! SQL Console integration tests (spec Part 02 §10 bypass list, Part 04 §8.1, §12.2 row Read-only role).
 #![cfg(feature = "test-support")]
 use std::time::{Duration, Instant};
 

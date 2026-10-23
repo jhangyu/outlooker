@@ -1,17 +1,15 @@
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
+use deadpool_postgres::{Manager, ManagerConfig, Object, Pool, RecyclingMethod};
 use tokio_postgres::NoTls;
 
 use super::credentials::Credentials;
-use super::{connect, connect_admin, DB_NAME};
+use super::{base_config, connect, connect_admin, pool_err, DB_NAME};
 use crate::dto::error::AppError;
 
 fn pool(port: u16, user: &str, password: &str, max: usize) -> Result<Pool, AppError> {
-    let mut cfg = tokio_postgres::Config::new();
-    cfg.host("127.0.0.1").port(port).user(user).password(password).dbname(DB_NAME).application_name("outlooker");
-    let mgr = Manager::from_config(cfg, NoTls, ManagerConfig { recycling_method: RecyclingMethod::Fast });
+    let mgr = Manager::from_config(base_config(port, user, password, DB_NAME), NoTls, ManagerConfig { recycling_method: RecyclingMethod::Fast });
     Pool::builder(mgr).max_size(max).build().map_err(|e| AppError::internal(format!("pool {user}: {e}")))
 }
 
@@ -60,14 +58,16 @@ impl Db {
     pub fn conn(&self) -> Result<DbConn, AppError> {
         self.inner.read().unwrap_or_else(|p| p.into_inner()).clone().ok_or(AppError::DbNotReady)
     }
-    pub fn is_connected(&self) -> bool {
-        self.conn().is_ok()
-    }
     pub fn app_pool(&self) -> Result<Pool, AppError> {
         Ok(self.conn()?.pools.app)
     }
-    pub fn ro_pool(&self) -> Result<Pool, AppError> {
-        Ok(self.conn()?.pools.ro)
+    /// A pooled outlooker_app connection; errors mapped by `pool_err`.
+    pub async fn app_client(&self) -> Result<Object, AppError> {
+        self.conn()?.pools.app.get().await.map_err(pool_err)
+    }
+    /// A pooled outlooker_ro connection; errors mapped by `pool_err`.
+    pub async fn ro_client(&self) -> Result<Object, AppError> {
+        self.conn()?.pools.ro.get().await.map_err(pool_err)
     }
     pub async fn connect_admin(&self) -> Result<tokio_postgres::Client, AppError> {
         let c = self.conn()?;

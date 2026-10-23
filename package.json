@@ -8,8 +8,8 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit -p . && vite build",
-    "typecheck": "tsc --noEmit -p .",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tests/e2e",
     "test": "vitest run",
     "e2e": "node tests/e2e/build.mjs && node tests/e2e/run.mjs",
     "e2e:build": "node tests/e2e/build.mjs",
@@ -25,7 +25,6 @@
     "@tanstack/react-virtual": "3.14.21",
     "@tauri-apps/api": "2.12.4",
     "@tauri-apps/plugin-dialog": "2.8.3",
-    "@tauri-apps/plugin-log": "2.10.1",
     "codemirror": "6.0.2",
     "i18next": "26.5.4",
     "react": "19.3.1",

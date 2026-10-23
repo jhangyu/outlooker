@@ -1,4 +1,4 @@
-//! R2-09 Import Manager integration tests (spec Part 02 §4, §6.1–§6.3; Part 03 §7; Part 04 §2.1, §5, §6.4, §6.5, §12.2).
+//! Import Manager integration tests (spec Part 02 §4, §6.1–§6.3; Part 03 §7; Part 04 §2.1, §5, §6.4, §6.5, §12.2).
 //! Every test pre-registers its expected values as constants before it runs the import.
 #![cfg(feature = "test-support")]
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,7 +18,7 @@ use outlooker_core::importer::types::{FolderIn, RawAttachment, RawContent, RawIt
 use outlooker_core::importer::writer::{Checkpoint, WriterLimits};
 use outlooker_core::importer::{ImportManager, ImportTuning, RecoveryReport};
 use outlooker_core::sink::NullSink;
-use outlooker_core::test_support::TestCluster;
+use outlooker_core::test_support::{png, TestCluster};
 use tokio::sync::{broadcast, mpsc, watch};
 
 /// libyal testdata `pst/outlook.pst`, relative to this crate.
@@ -97,10 +97,6 @@ fn synthetic_path(tc: &TestCluster, name: &str) -> String {
     let p = tc.dir.path().join(name);
     std::fs::write(&p, b"!BDN0000000000000000").unwrap();
     s(&p)
-}
-
-async fn count(tc: &TestCluster, sql: &str) -> i64 {
-    tc.admin().await.query_one(sql, &[]).await.unwrap().get(0)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -200,14 +196,7 @@ async fn reference(items: Vec<RawItem>) -> Snapshot {
     snapshot(&tc).await
 }
 
-fn png(w: u32, h: u32) -> Vec<u8> {
-    let img = image::RgbaImage::from_fn(w, h, |x, y| image::Rgba([(x % 256) as u8, (y % 256) as u8, 90, 255]));
-    let mut out = std::io::Cursor::new(Vec::new());
-    img.write_to(&mut out, image::ImageFormat::Png).unwrap();
-    out.into_inner()
-}
-
-/// The R1-05 sanitizer acceptance patterns (spec Part 04 §12.2 row Sanitizer), matched without a regex crate.
+/// The sanitizer acceptance patterns (spec Part 04 §12.2 row Sanitizer), matched without a regex crate.
 fn hostile_violations(out: &str) -> Vec<String> {
     let lower = out.to_ascii_lowercase();
     let mut found: Vec<String> =
@@ -252,8 +241,8 @@ async fn outlook_pst_import() {
     let a = tc.admin().await;
     let paths: Vec<String> = a.query("SELECT path FROM folders", &[]).await.unwrap().iter().map(|r| r.get(0)).collect();
     assert!(paths.iter().any(|p| p == "Inbox") && paths.iter().any(|p| p == "Sent Items"), "{paths:?}");
-    assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, MESSAGES);
-    assert_eq!(count(&tc, "SELECT count(*) FROM message_occurrences").await, OCCURRENCES);
+    assert_eq!(tc.count("SELECT count(*) FROM messages").await, MESSAGES);
+    assert_eq!(tc.count("SELECT count(*) FROM message_occurrences").await, OCCURRENCES);
     let m = a.query_one("SELECT body_source, has_attachments, body_html IS NOT NULL FROM messages", &[]).await.unwrap();
     assert_eq!((m.get::<_, &str>(0), m.get::<_, bool>(1), m.get::<_, bool>(2)), ("html", true, true));
     let att = a.query("SELECT file_name, mime_type, attach_method FROM attachments ORDER BY attachment_index", &[]).await.unwrap();
@@ -278,20 +267,20 @@ async fn byte_copy_dedupes_and_removal() {
     let ids: Vec<i64> = res.iter().map(|r| if let EnqueueResult::Queued { pst } = r { pst.id } else { panic!("{r:?}") }).collect();
     fx.mgr.start_worker();
     assert_eq!(wait_jobs(&mut fx.events, &ids).await, [ImportStatus::Completed, ImportStatus::Completed]);
-    assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, MESSAGES);
-    assert_eq!(count(&tc, "SELECT count(*) FROM message_occurrences").await, OCCURRENCES_BOTH);
-    assert_eq!(count(&tc, "SELECT count(*) FROM messages WHERE dedupe_kind = 'content_hash'").await, 1, "no Message-ID → fallback hash");
+    assert_eq!(tc.count("SELECT count(*) FROM messages").await, MESSAGES);
+    assert_eq!(tc.count("SELECT count(*) FROM message_occurrences").await, OCCURRENCES_BOTH);
+    assert_eq!(tc.count("SELECT count(*) FROM messages WHERE dedupe_kind = 'content_hash'").await, 1, "no Message-ID → fallback hash");
 
     fx.mgr.remove(ids[0]).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, ids[0]).await, ImportStatus::Removing);
-    assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, MESSAGES, "removing one source keeps the shared message");
-    assert_eq!(count(&tc, "SELECT count(*) FROM message_occurrences").await, OCCURRENCES_ONE);
-    assert!(count(&tc, "SELECT count(*) FROM addresses").await > 0);
+    assert_eq!(tc.count("SELECT count(*) FROM messages").await, MESSAGES, "removing one source keeps the shared message");
+    assert_eq!(tc.count("SELECT count(*) FROM message_occurrences").await, OCCURRENCES_ONE);
+    assert!(tc.count("SELECT count(*) FROM addresses").await > 0);
 
     fx.mgr.remove(ids[1]).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, ids[1]).await, ImportStatus::Removing);
     for table in ["pst_sources", "messages", "message_occurrences", "attachments", "addresses", "message_recipients"] {
-        assert_eq!(count(&tc, &format!("SELECT count(*) FROM {table}")).await, 0, "{table} after removing both");
+        assert_eq!(tc.count(&format!("SELECT count(*) FROM {table}")).await, 0, "{table} after removing both");
     }
 }
 
@@ -323,9 +312,9 @@ async fn corrupt_copy_outcome() {
     let EnqueueResult::Queued { pst } = &res[0] else { panic!("{res:?}") };
     fx.mgr.start_worker();
     assert_eq!(wait_job(&mut fx.events, pst.id).await, EXPECT_STATUS);
-    let skipped = count(&tc, "SELECT count(*) FROM import_errors WHERE severity = 'item_skipped' AND stage = 'parse'").await;
+    let skipped = tc.count("SELECT count(*) FROM import_errors WHERE severity = 'item_skipped' AND stage = 'parse'").await;
     assert!(skipped >= EXPECT_MIN_SKIPPED_PARSE, "item_skipped/parse rows: {skipped}");
-    assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, EXPECT_MESSAGES);
+    assert_eq!(tc.count("SELECT count(*) FROM messages").await, EXPECT_MESSAGES);
 }
 
 // ------------------------------------------------------------------------------------------------ synthetic items
@@ -391,13 +380,12 @@ async fn synthetic_inline_images() {
     let tc = TestCluster::start().await;
     let fx = manager(&tc, ImportTuning::default());
     fx.mgr.import_synthetic(&synthetic_path(&tc, "inline.pst"), folders(), items).await.unwrap();
-    assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, MAILS);
-    assert_eq!(count(&tc, "SELECT count(*) FROM image_blobs").await, BLOBS, "the repeated logo is stored once");
-    assert_eq!(count(&tc, "SELECT count(*) FROM inline_images").await, MAILS);
-    assert_eq!(count(&tc, "SELECT count(*) FROM messages WHERE body_html LIKE '%outlooker-inline:0%'").await, MAILS);
+    assert_eq!(tc.count("SELECT count(*) FROM messages").await, MAILS);
+    assert_eq!(tc.count("SELECT count(*) FROM image_blobs").await, BLOBS, "the repeated logo is stored once");
+    assert_eq!(tc.count("SELECT count(*) FROM inline_images").await, MAILS);
+    assert_eq!(tc.count("SELECT count(*) FROM messages WHERE body_html LIKE '%outlooker-inline:0%'").await, MAILS);
     // every outlooker-inline:n reference has its inline_images row
-    let dangling = count(
-        &tc,
+    let dangling = tc.count(
         "SELECT count(*) FROM messages m, regexp_matches(m.body_html, 'outlooker-inline:([0-9]+)', 'g') x \
           WHERE NOT EXISTS (SELECT 1 FROM inline_images i WHERE i.message_id = m.id AND i.ordinal = x[1]::int)",
     )
@@ -469,7 +457,7 @@ async fn synthetic_message_id_dedupe() {
     let fx = manager(&tc, ImportTuning::default());
     let pa = fx.mgr.import_synthetic(&synthetic_path(&tc, "a.pst"), folders(), a).await.unwrap();
     let pb = fx.mgr.import_synthetic(&synthetic_path(&tc, "b.pst"), folders(), b).await.unwrap();
-    assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, MESSAGES);
+    assert_eq!(tc.count("SELECT count(*) FROM messages").await, MESSAGES);
     let adm = tc.admin().await;
     for (id, occ) in OCCURRENCES_PER_SHARED {
         let r = adm
@@ -554,7 +542,7 @@ async fn index_policy_incremental_keeps_indexes() {
     let before = index_oids(&tc).await;
     assert_eq!(before.len(), 6);
     fx.mgr.import_synthetic(&synthetic_path(&tc, "small.pst"), folders(), corpus_tagged(SECOND, "s")).await.unwrap();
-    assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, 18 + 4);
+    assert_eq!(tc.count("SELECT count(*) FROM messages").await, 18 + 4);
     assert_eq!(index_oids(&tc).await, before, "no DROP INDEX: OIDs unchanged");
 }
 
@@ -562,10 +550,10 @@ async fn index_policy_incremental_keeps_indexes() {
 async fn after_job_vacuum_ran() {
     const SQL: &str = "SELECT count(*) FROM pg_stat_user_tables WHERE relname = 'messages' AND coalesce(last_vacuum, last_autovacuum) IS NOT NULL";
     let tc = TestCluster::start().await;
-    assert_eq!(count(&tc, SQL).await, 0, "fresh database: never vacuumed");
+    assert_eq!(tc.count(SQL).await, 0, "fresh database: never vacuumed");
     let fx = manager(&tc, ImportTuning::default());
     fx.mgr.import_synthetic(&synthetic_path(&tc, "v.pst"), folders(), corpus(3)).await.unwrap();
-    assert_eq!(count(&tc, SQL).await, 1);
+    assert_eq!(tc.count(SQL).await, 1);
 }
 
 // ------------------------------------------------------------------------------------------------ resume, crash, poison
@@ -584,7 +572,7 @@ async fn resume_after_cancel_equals_uninterrupted() {
     wait_batch(&mut batches, 1).await;
     fx.mgr.cancel(pst_id).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Cancelled);
-    let cursor = count(&tc, "SELECT cursor_seq FROM import_checkpoints").await;
+    let cursor = tc.count("SELECT cursor_seq FROM import_checkpoints").await;
     assert!((5..ITEMS).contains(&cursor), "cancelled mid-job: cursor {cursor}");
     fx.mgr.resume(pst_id).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
@@ -604,7 +592,7 @@ async fn resume_after_kill_equals_uninterrupted() {
     let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), corpus(ITEMS)).await.unwrap();
     fx.mgr.start_worker();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Running, "crash seam: job dropped like a process kill");
-    assert_eq!(count(&tc, "SELECT count(*) FROM import_jobs WHERE state = 'running'").await, 1);
+    assert_eq!(tc.count("SELECT count(*) FROM import_jobs WHERE state = 'running'").await, 1);
     drop(fx);
     // next process start
     let mut fx = manager(&tc, small_batches());
@@ -629,7 +617,7 @@ async fn mtime_change_resets_cursor() {
     wait_batch(&mut batches, 1).await;
     fx.mgr.cancel(pst_id).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Cancelled);
-    let before_resume = count(&tc, "SELECT count(*) FROM messages").await;
+    let before_resume = tc.count("SELECT count(*) FROM messages").await;
     assert!(before_resume > 0);
     // touch: mtime + 60 s
     let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
@@ -646,8 +634,8 @@ async fn mtime_change_resets_cursor() {
     let (cursor, stored, dups, non_mail): (i64, i64, i64, i64) = (r.get(0), r.get(1), r.get(2), r.get(3));
     assert_eq!(dups, before_resume, "cursor restarted at 0: every message stored before the touch was read again");
     assert_eq!((cursor, stored + dups, non_mail), (ITEMS, MESSAGES, 2));
-    assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, MESSAGES);
-    assert_eq!(count(&tc, "SELECT count(*) FROM message_occurrences").await, MESSAGES);
+    assert_eq!(tc.count("SELECT count(*) FROM messages").await, MESSAGES);
+    assert_eq!(tc.count("SELECT count(*) FROM message_occurrences").await, MESSAGES);
 }
 
 type ErrorRow = (String, String, Option<i64>, Option<String>, String);
@@ -691,8 +679,8 @@ async fn run_with_marker(own_job: bool, seq: i64, pst_item_id: i64, folder: &str
     let rows = tc.admin().await.query("SELECT stage, severity, pst_item_id, folder_path, message FROM import_errors", &[]).await.unwrap();
     MarkerRun {
         errors: rows.iter().map(|r| (r.get(0), r.get(1), r.get(2), r.get(3), r.get(4))).collect(),
-        messages: count(&tc, "SELECT count(*) FROM messages").await,
-        occurrences: count(&tc, "SELECT count(*) FROM message_occurrences").await,
+        messages: tc.count("SELECT count(*) FROM messages").await,
+        occurrences: tc.count("SELECT count(*) FROM message_occurrences").await,
     }
 }
 
@@ -781,7 +769,7 @@ async fn pg_crash_mid_import_resumes() {
     fx.phase.send_replace(AppPhase::Ready);
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
     assert_eq!(snapshot(&tc).await, want);
-    let dup = count(&tc, "SELECT count(*) FROM (SELECT 1 FROM message_occurrences GROUP BY pst_id, pst_item_id HAVING count(*) > 1) d").await;
+    let dup = tc.count("SELECT count(*) FROM (SELECT 1 FROM message_occurrences GROUP BY pst_id, pst_item_id HAVING count(*) > 1) d").await;
     assert_eq!(dup, 0);
 }
 
@@ -917,8 +905,8 @@ async fn pst_remove_with_queued_job() {
     assert!(matches!(fx.mgr.remove(pst_id).await, Err(AppError::Busy { .. })));
     fx.mgr.start_worker();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Removing);
-    assert_eq!(count(&tc, "SELECT count(*) FROM pst_sources").await, 0);
-    assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, 0);
+    assert_eq!(tc.count("SELECT count(*) FROM pst_sources").await, 0);
+    assert_eq!(tc.count("SELECT count(*) FROM messages").await, 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -979,29 +967,28 @@ mod fixtures {
         let ids = walk_ids(Path::new(&fixture("basic"))).unwrap();
         assert_eq!(ids, walk_ids(Path::new(&fixture("basic"))).unwrap(), "deterministic order");
         let (tc, _fx, _) = import(&["basic"]).await;
-        assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, 50);
-        assert!(count(&tc, "SELECT count(*) FROM folders WHERE path = 'Inbox/Projects'").await == 1);
-        assert!(count(&tc, "SELECT count(DISTINCT body_source) FROM messages WHERE body_source IN ('html', 'rtf_html', 'rtf_text')").await >= 2);
+        assert_eq!(tc.count("SELECT count(*) FROM messages").await, 50);
+        assert!(tc.count("SELECT count(*) FROM folders WHERE path = 'Inbox/Projects'").await == 1);
+        assert!(tc.count("SELECT count(DISTINCT body_source) FROM messages WHERE body_source IN ('html', 'rtf_html', 'rtf_text')").await >= 2);
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn fixtures_cjk() {
         let (tc, _fx, _) = import(&["cjk"]).await;
-        assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, 30);
-        assert_eq!(count(&tc, "SELECT count(*) FROM messages WHERE body_text ~ '[一-鿿]'").await, 30);
+        assert_eq!(tc.count("SELECT count(*) FROM messages").await, 30);
+        assert_eq!(tc.count("SELECT count(*) FROM messages WHERE body_text ~ '[一-鿿]'").await, 30);
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn fixtures_inline() {
         let (tc, _fx, _) = import(&["inline"]).await;
-        assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, 20);
+        assert_eq!(tc.count("SELECT count(*) FROM messages").await, 20);
         assert_eq!(
-            count(&tc, "SELECT count(*) FROM (SELECT image_blob_id FROM inline_images GROUP BY 1 HAVING count(DISTINCT message_id) = 10) l").await,
+            tc.count("SELECT count(*) FROM (SELECT image_blob_id FROM inline_images GROUP BY 1 HAVING count(DISTINCT message_id) = 10) l").await,
             1,
             "the logo of 10 mails is one blob"
         );
-        let dangling = count(
-            &tc,
+        let dangling = tc.count(
             "SELECT count(*) FROM messages m, regexp_matches(m.body_html, 'outlooker-inline:([0-9]+)', 'g') x \
               WHERE NOT EXISTS (SELECT 1 FROM inline_images i WHERE i.message_id = m.id AND i.ordinal = x[1]::int)",
         )
@@ -1012,18 +999,18 @@ mod fixtures {
     #[tokio::test(flavor = "multi_thread")]
     async fn fixtures_attach() {
         let (tc, _fx, _) = import(&["attach"]).await;
-        assert!(count(&tc, "SELECT count(*) FROM attachments WHERE file_name LIKE '%.msg' AND mime_type = 'application/vnd.ms-outlook'").await >= 1);
-        assert!(count(&tc, "SELECT count(*) FROM attachments WHERE length(file_name) > 255").await >= 1);
+        assert!(tc.count("SELECT count(*) FROM attachments WHERE file_name LIKE '%.msg' AND mime_type = 'application/vnd.ms-outlook'").await >= 1);
+        assert!(tc.count("SELECT count(*) FROM attachments WHERE length(file_name) > 255").await >= 1);
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn fixtures_dup() {
         let (tc, mut fx, ids) = import(&["dup-a", "dup-b"]).await;
-        assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, 50);
-        assert_eq!(count(&tc, "SELECT count(*) FROM message_occurrences").await, 81);
+        assert_eq!(tc.count("SELECT count(*) FROM messages").await, 50);
+        assert_eq!(tc.count("SELECT count(*) FROM message_occurrences").await, 81);
         fx.mgr.remove(ids[0]).await.unwrap();
         assert_eq!(wait_job(&mut fx.events, ids[0]).await, ImportStatus::Removing);
-        assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, 40, "shared messages remain");
+        assert_eq!(tc.count("SELECT count(*) FROM messages").await, 40, "shared messages remain");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1040,7 +1027,7 @@ mod fixtures {
     #[tokio::test(flavor = "multi_thread")]
     async fn fixtures_corrupt() {
         let (tc, _fx, _) = import(&["corrupt"]).await;
-        assert!(count(&tc, "SELECT count(*) FROM import_errors WHERE severity = 'item_skipped'").await >= 1);
-        assert_eq!(count(&tc, "SELECT count(*) FROM messages").await, 49);
+        assert!(tc.count("SELECT count(*) FROM import_errors WHERE severity = 'item_skipped'").await >= 1);
+        assert_eq!(tc.count("SELECT count(*) FROM messages").await, 49);
     }
 }

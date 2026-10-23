@@ -6,14 +6,10 @@ use std::time::{Duration, SystemTime};
 use outlooker_core::dto::error::AppError;
 use outlooker_core::importer::types::{AttachmentOut, NormalizedItem};
 use outlooker_core::importer::webp::KnownHashes;
-use outlooker_core::importer::writer::{prepare_session, Checkpoint, Writer, WriterConfig, WriterHandle, WriterLimits};
+use outlooker_core::importer::writer::{prepare_session, Checkpoint, WriterConfig, WriterHandle, WriterLimits};
 use outlooker_core::test_support::import_fixtures::{complete_job, item, mail, new_source, seed_mails};
-use outlooker_core::test_support::TestCluster;
+use outlooker_core::test_support::{count, TestCluster};
 use tokio::sync::mpsc;
-
-async fn count(c: &tokio_postgres::Client, sql: &str) -> i64 {
-    c.query_one(sql, &[]).await.unwrap().get(0)
-}
 
 /// New source + checkpoint + writer with `limits`; commits are forwarded on the returned channel.
 async fn start_writer(tc: &TestCluster, path: &str, limits: WriterLimits) -> (WriterHandle, mpsc::UnboundedReceiver<Checkpoint>, i64, i64) {
@@ -22,7 +18,7 @@ async fn start_writer(tc: &TestCluster, path: &str, limits: WriterLimits) -> (Wr
     let (start, _) = Checkpoint::begin(&app, pst_id, job_id, 1, SystemTime::now()).await.unwrap();
     let cfg = WriterConfig { pst_id, data_root: tc.db.data_root().unwrap(), start, limits, known: Arc::new(KnownHashes::new()) };
     let (tx, rx) = mpsc::unbounded_channel();
-    let w = Writer::spawn(tc.app().await, cfg, Box::new(move |cp: &Checkpoint| { let _ = tx.send(cp.clone()); })).await.unwrap();
+    let w = WriterHandle::spawn(tc.app().await, cfg, Box::new(move |cp: &Checkpoint| { let _ = tx.send(cp.clone()); })).await.unwrap();
     (w, rx, pst_id, job_id)
 }
 
@@ -116,7 +112,7 @@ async fn batch_cut_by_time() {
 async fn synchronous_commit_off_only_on_writer() {
     let tc = TestCluster::start().await;
     let writer_conn = tc.db.connect_app().await.unwrap();
-    prepare_session(&writer_conn).await.unwrap(); // the session setup Writer::spawn runs
+    prepare_session(&writer_conn).await.unwrap(); // the session setup WriterHandle::spawn runs
     assert_eq!(show_sync(&writer_conn).await, "off");
     seed_mails(&tc.db, "/p/a.pst", mails(2, "body")).await; // a real writer ran
     let pooled = tc.db.app_pool().unwrap().get().await.unwrap();

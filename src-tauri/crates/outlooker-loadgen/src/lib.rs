@@ -3,6 +3,5 @@ pub mod corpus;
 pub mod generate;
 pub mod images;
 pub mod load;
-pub mod perf;
 pub mod rng;
 pub mod root;

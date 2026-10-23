@@ -89,7 +89,7 @@ pub fn sanitize(html: &str, cid_map: &HashMap<String, usize>) -> Sanitized {
         .filter_style_properties(STYLE_PROPERTIES.iter().copied().collect())
         .attribute_filter(move |element, attribute, value| filter(element, attribute, value, &cids, &filter_state));
     let html = b.clean(html).to_string().trim().to_string();
-    let refs = std::mem::take(&mut state.lock().unwrap().refs);
+    let refs = std::mem::take(&mut state.lock().unwrap_or_else(|p| p.into_inner()).refs);
     Sanitized { html, refs }
 }
 
@@ -112,7 +112,7 @@ fn filter<'u>(
         ("img", "src") => {
             let v = value.trim();
             let lower = v.to_ascii_lowercase();
-            let mut st = state.lock().unwrap();
+            let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(rest) = lower.strip_prefix("cid:") {
                 let cid = normalize_cid(rest);
                 if let Some(&ordinal) = st.by_cid.get(&cid) {
@@ -155,7 +155,7 @@ mod tests {
         std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("missing golden file {}: {e}", p.display()))
     }
 
-    /// The forbidden patterns of the R1-05 acceptance, matched without a regex crate.
+    /// The forbidden patterns of the sanitizer acceptance, matched without a regex crate.
     pub(crate) fn hostile_violations(out: &str) -> Vec<String> {
         let lower = out.to_ascii_lowercase();
         let mut found = Vec::new();

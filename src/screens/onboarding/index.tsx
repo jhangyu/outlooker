@@ -8,11 +8,11 @@ import {
 import { useState, type JSX } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
-import { pickFolder, pickPstFiles } from "../../api/dialog";
+import { pickFolder } from "../../api/dialog";
 import type { AppError } from "../../api/bindings/AppError";
 import type { Language } from "../../api/bindings/Language";
 import { useAppStatus, useNavigation } from "../../app/AppStatusContext";
-import { formatAppError, toAppError, useAppToast, useLanguageSwitch } from "../../components/common";
+import { formatAppError, toAppError, useEnqueuePst, useLanguageSwitch } from "../../components/common";
 
 type Step = 0 | 1 | 2 | 3;
 const STEP_KEYS = ["language", "location", "database", "import"] as const;
@@ -74,7 +74,6 @@ export function OnboardingScreen() {
   const { t, i18n } = useTranslation("onboarding");
   const status = useAppStatus();
   const { go } = useNavigation();
-  const toast = useAppToast();
   const setLanguage = useLanguageSwitch();
   const [step, setStep] = useState<Step>(status.phase === "needsSetup" ? 0 : 2);
   const [dirChoice, setDirChoice] = useState<"default" | "other">("default");
@@ -108,17 +107,9 @@ export function OnboardingScreen() {
       setDirChoice("other");
     }
   };
+  const enqueue = useEnqueuePst();
   const pickPst = async () => {
-    const paths = await pickPstFiles();
-    if (paths.length === 0) return;
-    try {
-      const results = await api.importEnqueue(paths);
-      for (const r of results)
-        if (r.result === "rejected") toast.notify(t("import:enqueue.rejected", { path: r.path, reason: formatAppError(r.error, t) }), "error");
-      go("import");
-    } catch (e) {
-      toast.error(e);
-    }
+    if (await enqueue()) go("import");
   };
 
   const choice = (testId: string, selected: boolean, onClick: () => void, title: string, hint: string, extra?: JSX.Element) => (

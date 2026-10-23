@@ -7,7 +7,7 @@ use crate::dto::error::AppError;
 use crate::lifecycle::pg::{PgController, StopMode};
 use crate::lifecycle::supervisor::Supervisor;
 use crate::paths::Paths;
-use crate::settings::write_atomic;
+use crate::fsutil::write_atomic;
 
 /// RFC 3339 UTC for a SystemTime (days-from-civil inverse, Howard Hinnant), so no date crate is needed.
 pub fn rfc3339_utc(t: SystemTime) -> String {
@@ -32,7 +32,7 @@ fn write_marker(paths: &Paths, locale: &str) -> Result<(), AppError> {
         "pg_major": 18,
         "locale": locale,
     });
-    write_atomic(&paths.marker(), &serde_json::to_vec_pretty(&body).expect("marker serializes"))
+    write_atomic(&paths.marker(), &serde_json::to_vec_pretty(&body).expect("marker serializes"), false)
 }
 
 fn is_empty_dir(dir: &Path) -> bool {

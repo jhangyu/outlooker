@@ -1,4 +1,4 @@
-use crate::db::{cjk_self_check, connect_admin, migrate, pg_err, Credentials, DbConn, Pools};
+use crate::db::{cjk_self_check, connect_admin, db_err, migrate, Credentials, DbConn, Pools};
 use crate::dto::app::AppPhase;
 use crate::dto::error::AppError;
 use crate::lifecycle::pg::{PgController, StopMode};
@@ -39,7 +39,7 @@ impl Supervisor {
         let connected = async {
             let creds = Credentials::load(&paths.credentials())?;
             let mut admin = connect_admin(port, &creds).await?;
-            admin.query_one("SELECT 1", &[]).await.map_err(pg_err)?;
+            admin.query_one("SELECT 1", &[]).await.map_err(db_err)?;
             migrate(&mut admin, &creds).await?;
             cjk_self_check(&admin).await?;
             let pools = Pools::build(port, &creds)?;

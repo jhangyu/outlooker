@@ -4,11 +4,7 @@ use outlooker_core::importer::remove::{self, RemoveStats};
 use outlooker_core::importer::types::{EncodedImage, InlineImageOut, NormalizedMail};
 use outlooker_core::importer::webp::source_hash;
 use outlooker_core::test_support::import_fixtures::{item, mail, seed_mails};
-use outlooker_core::test_support::TestCluster;
-
-async fn count(c: &tokio_postgres::Client, sql: &str) -> i64 {
-    c.query_one(sql, &[]).await.unwrap().get(0)
-}
+use outlooker_core::test_support::{count, TestCluster};
 
 fn with_image(mut m: NormalizedMail, bytes: &[u8]) -> NormalizedMail {
     m.body_source = outlooker_core::importer::types::BodySource::Html;

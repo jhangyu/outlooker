@@ -12,13 +12,20 @@ export const APP_DATA = {
   seeded: path.join(E2E_ROOT, "seeded"),
   big: path.join(E2E_ROOT, "big"),
 };
-export const GROUPS = ["smoke", "flow", "seeded", "scroll"];
-export const GROUP_APP_DATA = { smoke: APP_DATA.fresh, flow: APP_DATA.fresh, seeded: APP_DATA.seeded, scroll: APP_DATA.big };
+export const TARGET_DIR = path.resolve(REPO_ROOT, "src-tauri", process.env.CARGO_TARGET_DIR ?? "target");
+export const GROUPS = ["flow", "seeded", "scroll"];
+export const GROUP_APP_DATA = { flow: APP_DATA.fresh, seeded: APP_DATA.seeded, scroll: APP_DATA.big };
 
 const LIBRARIES = {
   [APP_DATA.seeded]: { root: path.join(E2E_ROOT, "seeded-root"), language: "zh-TW", messages: 2000 },
   [APP_DATA.big]: { root: path.join(E2E_ROOT, "big-root"), language: "en", messages: 120000 },
 };
+
+/** Data root of the group's app (its PostgreSQL cluster is `<root>/pgdata`). */
+export function groupDataRoot(group) {
+  const appData = GROUP_APP_DATA[group];
+  return appData === APP_DATA.fresh ? path.join(appData, "data") : LIBRARIES[appData].root;
+}
 
 function fail(step, detail) {
   console.error(`prepare: ${step} failed: ${detail}`);
@@ -30,9 +37,12 @@ function prepareLibrary(appData) {
   const lib = LIBRARIES[appData];
   if (!fs.existsSync(path.join(lib.root, "outlooker-data.json"))) {
     fs.rmSync(lib.root, { recursive: true, force: true });
-    const args = ["run", "--release", "--locked", "-p", "outlooker-loadgen", "--", "seed",
-      "--data-root", lib.root, "--messages", String(lib.messages)];
-    const r = spawnSync("cargo", args, { cwd: path.join(REPO_ROOT, "src-tauri"), stdio: "inherit", shell: process.platform === "win32" });
+    const cwd = path.join(REPO_ROOT, "src-tauri");
+    const shell = process.platform === "win32";
+    const build = spawnSync("cargo", ["build", "--release", "--locked", "--workspace", "--bin", "outlooker-loadgen"], { cwd, stdio: "inherit", shell });
+    if (build.status !== 0) fail("build outlooker-loadgen", `exit ${build.status ?? build.signal}`);
+    const loadgen = path.join(TARGET_DIR, "release", shell ? "outlooker-loadgen.exe" : "outlooker-loadgen");
+    const r = spawnSync(loadgen, ["seed", "--data-root", lib.root, "--messages", String(lib.messages)], { stdio: "inherit" });
     if (r.status !== 0) fail(`seed ${path.basename(lib.root)}`, `exit ${r.status ?? r.signal}`);
   }
   fs.mkdirSync(appData, { recursive: true });

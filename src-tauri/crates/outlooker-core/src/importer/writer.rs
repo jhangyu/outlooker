@@ -13,12 +13,12 @@ use tokio_postgres::binary_copy::BinaryCopyInWriter;
 use tokio_postgres::types::Type;
 use tokio_postgres::{Client, Row, Transaction};
 
+use crate::db::db_err;
 use crate::dto::error::AppError;
-use crate::dto::import::{ImportErrorSeverity, ImportErrorStage, ImportPhase};
-use crate::dto::search::RecipientKind;
+use crate::dto::import::ImportPhase;
 use crate::importer::types::{FolderIn, NormalizedItem, Outcome};
 use crate::importer::webp::KnownHashes;
-use crate::lifecycle::move_dir::free_space;
+use crate::sys::free_space;
 
 /// Batch limits and the disk guard threshold (spec Part 04 §6.2, §5.1). Tests override them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,41 +84,6 @@ const CP_BATCH: &str = concat!(
     cp_cols!()
 );
 
-pub fn phase_db(p: ImportPhase) -> &'static str {
-    match p {
-        ImportPhase::Scanning => "scanning",
-        ImportPhase::Importing => "importing",
-        ImportPhase::Finalizing => "finalizing",
-    }
-}
-
-pub fn stage_db(s: ImportErrorStage) -> &'static str {
-    match s {
-        ImportErrorStage::Open => "open",
-        ImportErrorStage::Scan => "scan",
-        ImportErrorStage::Parse => "parse",
-        ImportErrorStage::Html => "html",
-        ImportErrorStage::Image => "image",
-        ImportErrorStage::Store => "store",
-    }
-}
-
-pub fn severity_db(s: ImportErrorSeverity) -> &'static str {
-    match s {
-        ImportErrorSeverity::ItemSkipped => "item_skipped",
-        ImportErrorSeverity::Degraded => "degraded",
-        ImportErrorSeverity::JobFailed => "job_failed",
-    }
-}
-
-fn kind_db(k: RecipientKind) -> &'static str {
-    match k {
-        RecipientKind::To => "to",
-        RecipientKind::Cc => "cc",
-        RecipientKind::Bcc => "bcc",
-    }
-}
-
 /// The value PostgreSQL stores for `t` in a `timestamptz` column (postgres-types 0.2.14 truncates toward
 /// 2000-01-01 to whole microseconds). Compare file mtimes only after this truncation.
 pub fn truncate_to_micros(t: SystemTime) -> SystemTime {
@@ -130,12 +95,7 @@ pub fn truncate_to_micros(t: SystemTime) -> SystemTime {
 }
 
 fn cp_from_row(r: &Row) -> Result<Checkpoint, AppError> {
-    let phase = match r.get::<_, &str>(2) {
-        "scanning" => ImportPhase::Scanning,
-        "importing" => ImportPhase::Importing,
-        "finalizing" => ImportPhase::Finalizing,
-        other => return Err(AppError::internal(format!("unknown checkpoint phase {other}"))),
-    };
+    let phase = ImportPhase::from_db(r.get(2))?;
     Ok(Checkpoint {
         pst_id: r.get(0),
         job_id: r.get(1),
@@ -153,17 +113,13 @@ fn cp_from_row(r: &Row) -> Result<Checkpoint, AppError> {
     })
 }
 
-fn pg(e: tokio_postgres::Error) -> AppError {
-    map_db_error(e, Path::new(""))
-}
-
 impl Checkpoint {
     pub fn items_done(&self) -> i64 {
         self.stored + self.duplicates + self.errors + self.skipped_non_mail
     }
 
     pub async fn load(client: &Client, pst_id: i64) -> Result<Option<Checkpoint>, AppError> {
-        match client.query_opt(CP_SELECT, &[&pst_id]).await.map_err(pg)? {
+        match client.query_opt(CP_SELECT, &[&pst_id]).await.map_err(db_err)? {
             Some(r) => Ok(Some(cp_from_row(&r)?)),
             None => Ok(None),
         }
@@ -176,16 +132,16 @@ impl Checkpoint {
         let mtime = truncate_to_micros(file_mtime);
         let old = Checkpoint::load(client, pst_id).await?;
         if old.as_ref().is_some_and(|cp| cp.file_size == file_size && cp.file_mtime == mtime) {
-            let r = client.query_one(CP_KEEP, &[&pst_id, &job_id]).await.map_err(pg)?;
+            let r = client.query_one(CP_KEEP, &[&pst_id, &job_id]).await.map_err(db_err)?;
             return Ok((cp_from_row(&r)?, false));
         }
-        let r = client.query_one(CP_RESET, &[&pst_id, &job_id, &file_size, &mtime]).await.map_err(pg)?;
+        let r = client.query_one(CP_RESET, &[&pst_id, &job_id, &file_size, &mtime]).await.map_err(db_err)?;
         Ok((cp_from_row(&r)?, old.is_some()))
     }
 
     /// `items_total: None` keeps the stored value.
     pub async fn set_phase(client: &Client, pst_id: i64, phase: ImportPhase, items_total: Option<i64>) -> Result<(), AppError> {
-        client.execute(CP_SET_PHASE, &[&pst_id, &phase_db(phase), &items_total]).await.map_err(pg)?;
+        client.execute(CP_SET_PHASE, &[&pst_id, &phase.as_db(), &items_total]).await.map_err(db_err)?;
         Ok(())
     }
 }
@@ -193,7 +149,7 @@ impl Checkpoint {
 /// Upsert the scanned folder tree of one PST in one transaction. `folders` must list parents before children
 /// (the scan order of the reader).
 pub async fn upsert_folders(client: &mut Client, pst_id: i64, folders: &[FolderIn]) -> Result<(), AppError> {
-    let tx = client.transaction().await.map_err(pg)?;
+    let tx = client.transaction().await.map_err(db_err)?;
     let stmt = tx
         .prepare(
             "INSERT INTO folders (pst_id, pst_folder_id, parent_id, name, path) \
@@ -201,15 +157,15 @@ pub async fn upsert_folders(client: &mut Client, pst_id: i64, folders: &[FolderI
              ON CONFLICT (pst_id, pst_folder_id) DO UPDATE SET parent_id = EXCLUDED.parent_id, name = EXCLUDED.name, path = EXCLUDED.path",
         )
         .await
-        .map_err(pg)?;
+        .map_err(db_err)?;
     for f in folders {
-        tx.execute(&stmt, &[&pst_id, &f.pst_folder_id, &f.parent_pst_folder_id, &f.name, &f.path]).await.map_err(pg)?;
+        tx.execute(&stmt, &[&pst_id, &f.pst_folder_id, &f.parent_pst_folder_id, &f.name, &f.path]).await.map_err(db_err)?;
     }
-    tx.commit().await.map_err(pg)
+    tx.commit().await.map_err(db_err)
 }
 
 pub async fn load_known_hashes(client: &Client) -> Result<KnownHashes, AppError> {
-    let rows = client.query("SELECT source_hash FROM image_blobs", &[]).await.map_err(pg)?;
+    let rows = client.query("SELECT source_hash FROM image_blobs", &[]).await.map_err(db_err)?;
     let known = KnownHashes::new();
     known.insert_all(rows.iter().filter_map(|r| <[u8; 32]>::try_from(r.get::<_, &[u8]>(0)).ok()));
     Ok(known)
@@ -219,16 +175,13 @@ pub async fn load_known_hashes(client: &Client) -> Result<KnownHashes, AppError>
 pub const AFTER_JOB_VACUUM: &str =
     "VACUUM (ANALYZE) messages, message_recipients, message_occurrences, attachments, inline_images, image_blobs, addresses";
 
-/// Connection closed / I/O → `DbNotReady`; SQLSTATE 53100 (disk full) → `FileAccess{insufficientSpace}`;
-/// any other database error → `Internal`.
-pub fn map_db_error(e: tokio_postgres::Error, data_root: &Path) -> AppError {
-    match e.as_db_error() {
-        Some(db) if db.code().code() == "53100" => AppError::file_access(data_root, "insufficientSpace"),
-        Some(db) => AppError::internal(format!("{}: {}", db.code().code(), db.message())),
-        None if e.is_closed() => AppError::DbNotReady,
-        None if std::error::Error::source(&e).is_some_and(|s| s.is::<std::io::Error>()) => AppError::DbNotReady,
-        None => AppError::internal(e.to_string()),
-    }
+/// SQLSTATE 53100 (disk full) → `FileAccess{data_root, insufficientSpace}`, else `db_err`.
+fn map_db_error(e: tokio_postgres::Error, data_root: &Path) -> AppError {
+    disk_full(e.code().map(|c| c.code()), data_root).unwrap_or_else(|| db_err(e))
+}
+
+fn disk_full(sqlstate: Option<&str>, data_root: &Path) -> Option<AppError> {
+    (sqlstate == Some("53100")).then(|| AppError::file_access(data_root, "insufficientSpace"))
 }
 
 const SESSION_SETUP: &str = "SET synchronous_commit = off;
@@ -247,7 +200,7 @@ CREATE TEMP TABLE stage_errors (stage text, severity text, folder_path text, pst
 CREATE TEMP TABLE stage_new_ids (message_id bigint, dedupe_key bytea) ON COMMIT DELETE ROWS;";
 
 /// Session setup of the writer connection: `synchronous_commit = off` (spec Part 04 §6.2) and the seven staging
-/// tables (§6.1). Called only by `Writer::spawn`; public so the test can check the session setting.
+/// tables (§6.1). Called only by `WriterHandle::spawn`; public so the test can check the session setting.
 pub async fn prepare_session(client: &Client) -> Result<(), tokio_postgres::Error> {
     client.batch_execute(SESSION_SETUP).await
 }
@@ -351,23 +304,18 @@ pub struct WriterConfig {
 
 pub type OnCommit = Box<dyn Fn(&Checkpoint) + Send + Sync>;
 
-pub struct Writer;
-
 pub struct WriterHandle {
     tx: mpsc::Sender<NormalizedItem>,
     join: tokio::task::JoinHandle<Result<Checkpoint, AppError>>,
 }
 
-impl Writer {
+impl WriterHandle {
     pub async fn spawn(client: Client, cfg: WriterConfig, on_commit: OnCommit) -> Result<WriterHandle, AppError> {
         prepare_session(&client).await.map_err(|e| map_db_error(e, &cfg.data_root))?;
         let (tx, rx) = mpsc::channel(256);
         let join = tokio::spawn(run(client, cfg, rx, on_commit));
         Ok(WriterHandle { tx, join })
     }
-}
-
-impl WriterHandle {
     pub fn sender(&self) -> mpsc::Sender<NormalizedItem> {
         self.tx.clone()
     }
@@ -538,7 +486,7 @@ async fn copy_batch(tx: &Transaction<'_>, items: &[NormalizedItem]) -> Result<()
             let email = r.address.as_ref().map(|a| a.email.as_str());
             let atype = r.address.as_ref().map(|a| a.address_type.as_db());
             w.as_mut()
-                .write(&[&it.seq, &&m.dedupe_key[..], &r.ordinal, &kind_db(r.kind), &email, &atype, &r.display_name, &r.search_text])
+                .write(&[&it.seq, &&m.dedupe_key[..], &r.ordinal, &r.kind.as_db(), &email, &atype, &r.display_name, &r.search_text])
                 .await?;
         }
     }
@@ -584,9 +532,22 @@ async fn copy_batch(tx: &Transaction<'_>, items: &[NormalizedItem]) -> Result<()
     let mut w = pin!(BinaryCopyInWriter::new(sink, &[T::TEXT, T::TEXT, T::TEXT, T::INT8, T::TEXT]));
     for it in items {
         for e in &it.errors {
-            w.as_mut().write(&[&stage_db(e.stage), &severity_db(e.severity), &e.folder_path, &e.pst_item_id, &e.message]).await?;
+            w.as_mut().write(&[&e.stage.as_db(), &e.severity.as_db(), &e.folder_path, &e.pst_item_id, &e.message]).await?;
         }
     }
     w.finish().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disk_full_names_the_data_root() {
+        let root = Path::new("/data/root");
+        assert_eq!(disk_full(Some("53100"), root), Some(AppError::file_access(root, "insufficientSpace")));
+        assert_eq!(disk_full(Some("23505"), root), None);
+        assert_eq!(disk_full(None, root), None);
+    }
 }

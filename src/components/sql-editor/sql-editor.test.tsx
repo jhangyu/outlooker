@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { SQL_SCHEMA, SqlEditor, VIEW_COLUMNS, codePointOffsetToUtf16 } from ".";
+import { SqlEditor, codePointOffsetToUtf16 } from ".";
 
 const props = { onChange: vi.fn(), onRun: vi.fn(), errorPosition: null, ariaLabel: "SQL editor" };
 
@@ -12,12 +12,6 @@ describe("SQL editor", () => {
     expect(codePointOffsetToUtf16(text, 9)).toBe(9);
     expect(codePointOffsetToUtf16(text, 10)).toBe(10);
     expect(codePointOffsetToUtf16(text, 99)).toBe(11);
-  });
-
-  it("the static schema lists the six views of Part 04 §8.2", () => {
-    expect(Object.keys(VIEW_COLUMNS).sort()).toEqual(["v_attachments", "v_folders", "v_mail", "v_occurrences", "v_pst_sources", "v_recipients"]);
-    expect(SQL_SCHEMA.v_mail).toContain("body_text");
-    expect(SQL_SCHEMA.v_occurrences).toEqual(["message_id", "pst_id", "pst_path", "pst_name", "folder_path", "pst_item_id"]);
   });
 
   it("renders the document, replaces it from props and runs on Mod-Enter", () => {

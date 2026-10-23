@@ -9,6 +9,7 @@ import { useRef, useState, type JSX, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
 import { pickFolder } from "../../api/dialog";
+import { dbStatusQuery } from "../../api/queries";
 import type { IndexStatus } from "../../api/bindings/IndexStatus";
 import type { Language } from "../../api/bindings/Language";
 import type { MaintenanceTask } from "../../api/bindings/MaintenanceTask";
@@ -69,7 +70,7 @@ export function SettingsScreen() {
   const toast = useAppToast();
   const setLanguage = useLanguageSwitch();
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => api.settingsGet() });
-  const db = useQuery({ queryKey: ["dbStatus"], queryFn: () => api.dbStatus(), refetchInterval: 10_000 });
+  const db = useQuery(dbStatusQuery);
   const [draft, setDraft] = useState<number | null>(null);
   const [invalid, setInvalid] = useState(false);
   const [moveTarget, setMoveTarget] = useState<string | null>(null);
@@ -95,7 +96,7 @@ export function SettingsScreen() {
     try {
       await api.maintenanceRun(task);
       toast.notify(t("maintenance.started", { task: t(`maintenance.task.${task}`) }));
-      await qc.invalidateQueries({ queryKey: ["dbStatus"] });
+      await qc.invalidateQueries({ queryKey: dbStatusQuery.queryKey });
     } catch (e) {
       toast.error(e);
     }

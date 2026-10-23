@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-use crate::db::{pg_err, Db};
+use crate::db::{library_counts, Db};
 use crate::dto::app::{AppPhase, AppStatus, LibraryCounts};
 use crate::dto::error::AppError;
 use crate::gate::Gate;
@@ -80,27 +80,22 @@ impl Supervisor {
     }
 
     pub(crate) fn paths(&self) -> Paths {
-        self.inner.paths.lock().unwrap().clone()
+        self.inner.paths.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
     pub(crate) fn set_paths(&self, paths: Paths) {
-        *self.inner.paths.lock().unwrap() = paths;
+        *self.inner.paths.lock().unwrap_or_else(|p| p.into_inner()) = paths;
     }
 
     pub(crate) async fn set_phase(&self, phase: AppPhase, error: Option<AppError>) {
-        *self.inner.error.lock().unwrap() = error;
+        *self.inner.error.lock().unwrap_or_else(|p| p.into_inner()) = error;
         self.inner.phase_tx.send_replace(phase);
         let status = self.status().await;
         self.inner.sink.emit(CoreEvent::AppStatusChanged(status));
     }
 
     async fn counts(&self) -> Result<LibraryCounts, AppError> {
-        let c = self.inner.db.app_pool()?.get().await.map_err(|e| AppError::internal(e.to_string()))?;
-        let r = c
-            .query_one("SELECT (SELECT count(*) FROM messages), (SELECT count(*) FROM pst_sources)", &[])
-            .await
-            .map_err(pg_err)?;
-        Ok(LibraryCounts { messages: r.get(0), psts: r.get(1) })
+        library_counts(&*self.inner.db.app_client().await?).await
     }
 
     pub async fn status(&self) -> AppStatus {
@@ -108,7 +103,7 @@ impl Supervisor {
         let boot = self.inner.settings.bootstrap();
         let data_dir = boot.data_dir.clone().unwrap_or_else(|| self.paths().default_data_root().display().to_string());
         let counts = if phase == AppPhase::Ready { self.counts().await.unwrap_or_default() } else { LibraryCounts::default() };
-        AppStatus { phase, data_dir, language: boot.language, counts, error: self.inner.error.lock().unwrap().clone() }
+        AppStatus { phase, data_dir, language: boot.language, counts, error: self.inner.error.lock().unwrap_or_else(|p| p.into_inner()).clone() }
     }
 
     /// App start (spec Part 02 §2.2 steps 2–7).
@@ -130,7 +125,7 @@ impl Supervisor {
         if self.phase() != AppPhase::Failed {
             return Err(AppError::invalid("phase", "notFailed"));
         }
-        self.inner.restarts.lock().unwrap().clear();
+        self.inner.restarts.lock().unwrap_or_else(|p| p.into_inner()).clear();
         if self.paths().pgdata().exists() {
             self.set_phase(AppPhase::StartingDb, None).await;
             let me = self.clone();

@@ -251,7 +251,7 @@ fn assemble(
     }
 }
 
-/// UTC calendar year of `t` (uses the R1-05 RFC 3339 formatter: "YYYY-…").
+/// UTC calendar year of `t` (uses the RFC 3339 formatter: "YYYY-…").
 pub fn year_of(t: SystemTime) -> i64 {
     dedupe::format_utc_seconds(t)[..4].parse().expect("four-digit year")
 }

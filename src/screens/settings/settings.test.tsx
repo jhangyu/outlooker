@@ -32,7 +32,7 @@ describe("Settings screen", () => {
     expect(isValidQuality(1) && isValidQuality(100) && !isValidQuality(Number.NaN)).toBe(true);
   });
 
-  it("maintenance buttons run tasks and are disabled while one runs", async () => {
+  it("maintenance button runs the task", async () => {
     renderWithProviders(<SettingsScreen />);
     fireEvent.click(await screen.findByTestId("maint-vacuum"));
     await waitFor(() => expect(api.maintenanceRun).toHaveBeenCalledWith("vacuum"));

@@ -12,6 +12,8 @@ export interface RefineState {
 
 export const EMPTY_REFINE: RefineState = { pstId: null, folderPath: null, hasAttachment: false, last90Days: false };
 const MAX_TERMS = 10;
+/** Leaves one search term expands to (termGroup). */
+export const LEAVES_PER_TERM = 4;
 
 export type ComposeResult = { query: SearchQuery | null; leaves: number; problem: null | "tooManyTerms" | "tooManyConditions" };
 
@@ -49,12 +51,12 @@ export function splitTerms(text: string): string[] {
   return text.trim().split(/\s+/).filter((t) => t.length > 0);
 }
 
-/** Search box + refine pane + builder → one SearchQuery (plan Decision "Search query composition in the frontend"). */
+/** Search box + refine pane + builder → one SearchQuery (spec §0.5 "Search query composition in the frontend"). */
 export function composeQuery(text: string, refine: RefineState, builder: ConditionGroup | null, now: Date = new Date()): ComposeResult {
   const terms = splitTerms(text);
-  if (terms.length > MAX_TERMS) return { query: null, leaves: 4 * terms.length, problem: "tooManyTerms" };
+  if (terms.length > MAX_TERMS) return { query: null, leaves: LEAVES_PER_TERM * terms.length, problem: "tooManyTerms" };
   const refined = refineNodes(refine, now);
-  const leaves = 4 * terms.length + refined.length + (builder ? leafCount(builder.children) : 0);
+  const leaves = LEAVES_PER_TERM * terms.length + refined.length + (builder ? leafCount(builder.children) : 0);
   if (leaves > MAX_LEAVES) return { query: null, leaves, problem: "tooManyConditions" };
   if (refined.length === 0 && builder === null) {
     return { query: terms.length > 0 ? { kind: "simple", text: text.trim() } : null, leaves, problem: null };

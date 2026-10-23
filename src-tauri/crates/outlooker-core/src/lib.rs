@@ -2,6 +2,7 @@
 pub mod app;
 pub mod db;
 pub mod dto;
+pub mod fsutil;
 pub mod gate;
 pub mod importer;
 pub mod lifecycle;
@@ -11,5 +12,6 @@ pub mod search;
 pub mod settings;
 pub mod sink;
 pub mod sql_console;
+pub mod sys;
 #[cfg(feature = "test-support")]
 pub mod test_support;

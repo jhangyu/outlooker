@@ -3,16 +3,15 @@ import {
   makeStyles, tokens,
 } from "@fluentui/react-components";
 import { ChevronDownRegular, ChevronUpRegular, MailInboxRegular, SearchRegular } from "@fluentui/react-icons";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api/commands";
-import { onEvent } from "../../api/events";
 import { useAppStatus, useNavigation } from "../../app/AppStatusContext";
 import { EmptyState, formatAppError, formatNumber } from "../../components/common";
-import { DslBuilder, countLeaves, newGroup, toConditionGroup, type GroupDraft } from "../../components/dsl";
+import { DslBuilder, MAX_LEAVES, countLeaves, newGroup, toConditionGroup, type GroupDraft } from "../../components/dsl";
 import { MailList, ReadingPane, useMailPages } from "../../components/mail";
-import { EMPTY_REFINE, composeQuery, refineNodes, splitTerms, type RefineState } from "./compose";
+import { EMPTY_REFINE, LEAVES_PER_TERM, composeQuery, refineNodes, splitTerms, type RefineState } from "./compose";
 import { RefinePane } from "./RefinePane";
 
 const DEBOUNCE_MS = 300;
@@ -74,7 +73,6 @@ export function SearchScreen() {
     return () => clearTimeout(h);
   }, [inputs]);
   const [dslOpen, setDslOpen] = useState(false);
-  const [newMail, setNewMail] = useState(false);
 
   const composed = useMemo(
     () => composeQuery(debounced.text, debounced.refine, toConditionGroup(debounced.draft)),
@@ -86,44 +84,35 @@ export function SearchScreen() {
   // Part 03 §5.2 stale requests: every new composed query gets the next sequence number.
   const key = JSON.stringify(query);
   const [seqState, setSeqState] = useState({ key, seq: 0 });
-  if (seqState.key !== key) setSeqState({ key, seq: seqState.seq + 1 });
+  // Library counts when the shown list was loaded: a different count later means new mail (Part 03 §9, no list reload).
+  const [baseline, setBaseline] = useState(status.counts);
+  if (seqState.key !== key) {
+    setSeqState({ key, seq: seqState.seq + 1 });
+    setBaseline(status.counts);
+  }
   const seq = seqState.seq;
+  const newMail = query !== null && (status.counts.messages !== baseline.messages || status.counts.psts !== baseline.psts);
 
   const pages = useMailPages(query, seq);
   const count = useQuery({
     queryKey: ["searchCount", seq, query],
     queryFn: () => api.searchCount(query!),
     enabled: query !== null,
+    staleTime: Infinity, // changes only through seq or refresh()
+    gcTime: Infinity, // a hidden screen has no observer, and the effect below keeps one entry
   });
-  const filters = useQuery({ queryKey: ["filterOptions"], queryFn: () => api.filterOptions() });
+  useEffect(() => {
+    qc.removeQueries({ queryKey: ["searchCount"], predicate: (x) => x.queryKey[1] !== seq });
+  }, [qc, seq]);
+  const filters = useQuery({ queryKey: ["filterOptions", status.counts.messages, status.counts.psts], queryFn: () => api.filterOptions(), placeholderData: keepPreviousData });
 
   const [picked, setPicked] = useState<{ seq: number; id: number } | null>(null);
   const firstId = pages.rows[0]?.id ?? null;
   const selectedId = picked && picked.seq === seq ? picked.id : firstId;
 
-  const showingRef = useRef(false);
-  useEffect(() => {
-    showingRef.current = query !== null;
-  }, [query]);
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    let alive = true;
-    void onEvent("library:changed", () => {
-      void qc.invalidateQueries({ queryKey: ["filterOptions"] });
-      if (showingRef.current) setNewMail(true); // never refetches searchMail (Part 03 §9)
-    }).then((u) => {
-      if (alive) unlisten = u;
-      else u();
-    });
-    return () => {
-      alive = false;
-      unlisten?.();
-    };
-  }, [qc]);
-
   const terms = splitTerms(inputs.text).length;
   const builderLeaves = countLeaves(inputs.draft);
-  const leafBudget = 50 - 4 * terms - refineNodes(inputs.refine, new Date()).length;
+  const leafBudget = MAX_LEAVES - LEAVES_PER_TERM * terms - refineNodes(inputs.refine, new Date()).length;
 
   const clearAll = () => {
     const cleared = { text: "", refine: EMPTY_REFINE, draft: newGroup("and", []) };
@@ -133,7 +122,7 @@ export function SearchScreen() {
   const refresh = () => {
     pages.reset();
     void qc.invalidateQueries({ queryKey: ["searchCount", seq] });
-    setNewMail(false);
+    setBaseline(status.counts);
   };
 
   let countText: string | null = null;

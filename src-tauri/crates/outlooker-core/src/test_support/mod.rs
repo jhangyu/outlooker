@@ -17,7 +17,24 @@ pub struct TestCluster {
     ctl: PgController,
 }
 
+/// `SELECT count(*)`-style single-integer query.
+pub async fn count(c: &tokio_postgres::Client, sql: &str) -> i64 {
+    c.query_one(sql, &[]).await.unwrap().get(0)
+}
+
+/// Deterministic gradient PNG of `w` x `h` pixels.
+pub fn png(w: u32, h: u32) -> Vec<u8> {
+    let img = image::RgbaImage::from_fn(w, h, |x, y| image::Rgba([(x % 256) as u8, (y % 256) as u8, 128, 255]));
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
 impl TestCluster {
+    pub async fn count(&self, sql: &str) -> i64 {
+        count(&self.admin().await, sql).await
+    }
+
     pub async fn start() -> TestCluster {
         assert!(dev_pg_dir().join("bin").exists(), "PostgreSQL binaries missing: run node scripts/fetch-postgres.mjs");
         let dir = tempfile::tempdir().expect("temp dir");

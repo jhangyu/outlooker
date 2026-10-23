@@ -10,7 +10,7 @@ Never use `-p` / `--package`, per-package `--features`, `--all-features`, or `ca
 Why: cargo unifies features only over the selected packages and `check` and `clippy` hash differently, so every
 variant (`-p X`, `--features Y`, check vs clippy) recompiles shared deps (serde_json, url, time) and downstream crates
 as a full extra copy in `target/`. Narrow to one test with `--test NAME` or a name filter, which does not change the
-resolved features. `docs/**` plans that show `cargo ... -p ...` are superseded by this rule.
+resolved features.
 
 Allowed exceptions (separate artifacts, different profile or binary config):
 - `tests/e2e/build.mjs`: `tauri build --debug --no-bundle --features e2e` (e2e + tauri custom-protocol binary).
