@@ -43,7 +43,7 @@ All acceptance criteria pass.
 
 ## Parking lot
 - New WARNING lines in round 1 of the `it` run (load 16.6/28): `search::count_capped` 3.998 s, `search::null_sent_at_last_and_paged` 1.476 s, `search::two_phase_dense_phase_a_only` 1.245 s. Round 2 had no WARNING.
-- `cargo test --workspace` in one command exceeds the 40 s foreground cap. A gate must split by test target.
+- The first one-command `cargo test --workspace` hit the 40 s foreground cap while partly recompiling at load 8-19. On a warm build (HEAD d3a88ce, load 2.7-3.4) it ran in 15 s, RC=0, 14 `test result: ok`, no WARNING (scripts/tmp/followup-gate/full-1.txt).
 - `scripts/vitest-capped.mjs:2` comment still says "(1000 ms)".
 - `app_compose::shutdown_during_import_requeues_job`: ~0.39 s of its run is the ImportManager shutdown drain. Exact wait not found. Now 0.2-0.3 s alone.
 - fs4 free space on Windows not run.
