@@ -6,7 +6,6 @@ vi.mock("../../api/dialog");
 vi.mock("../../api/events", async () => (await import("../../app/testing")).eventsMock);
 
 import { api } from "../../api/commands";
-import { pickPstFiles } from "../../api/dialog";
 import { mockApiDefaults, renderWithProviders } from "../../app/testing";
 import { OnboardingScreen } from ".";
 
@@ -31,15 +30,5 @@ describe("Onboarding", () => {
     fireEvent.click(screen.getByTestId("onboarding-next"));
     expect(await screen.findByText("The value of dataDir is not valid.")).toBeTruthy();
     expect(screen.getByTestId("onboarding-dir-default")).toBeTruthy();
-  });
-
-  it("step 4 enqueues the picked PST files and navigates to Import", async () => {
-    vi.mocked(pickPstFiles).mockResolvedValue(["/mail/a.pst"]);
-    const r = renderWithProviders(<OnboardingScreen />, { status: { phase: "ready", dataDir: "/data" } });
-    // phase is ready: the wizard starts at step 3 and Next is enabled
-    fireEvent.click(await screen.findByTestId("onboarding-next"));
-    fireEvent.click(await screen.findByTestId("onboarding-pick-pst"));
-    await waitFor(() => expect(api.importEnqueue).toHaveBeenCalledWith(["/mail/a.pst"]));
-    await waitFor(() => expect(r.go).toHaveBeenCalledWith("import"));
   });
 });

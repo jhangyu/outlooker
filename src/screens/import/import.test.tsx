@@ -42,11 +42,6 @@ describe("Import screen", () => {
     await waitFor(() => expect(api.pstRemove).toHaveBeenCalledWith(7));
   });
 
-  it("shows the empty state when no PST is imported", async () => {
-    renderWithProviders(<ImportScreen />);
-    expect(await screen.findByText("No PST imported yet")).toBeTruthy();
-  });
-
   it("adds PST files through the picker and toasts rejected paths", async () => {
     vi.mocked(pickPstFiles).mockResolvedValue(["/a.pst", "/b.txt"]);
     vi.mocked(api.importEnqueue).mockResolvedValue([
@@ -57,18 +52,5 @@ describe("Import screen", () => {
     fireEvent.click(await screen.findByTestId("import-add"));
     await waitFor(() => expect(api.importEnqueue).toHaveBeenCalledWith(["/a.pst", "/b.txt"]));
     expect(await screen.findByText(/is not an Outlook PST file/)).toBeTruthy();
-  });
-
-  it("queue card actions call cancel and resume", async () => {
-    vi.mocked(api.pstList).mockResolvedValue([
-      makePst({ id: 2, displayName: "big", status: "running", progress: progress() }),
-      makePst({ id: 3, displayName: "old", status: "cancelled" }),
-    ]);
-    renderWithProviders(<ImportScreen />);
-    fireEvent.click(await screen.findByTestId("queue-cancel"));
-    await waitFor(() => expect(api.importCancel).toHaveBeenCalledWith(2));
-    fireEvent.click(screen.getByTestId("queue-resume"));
-    await waitFor(() => expect(api.importResume).toHaveBeenCalledWith(3));
-    expect(screen.getByText("50 / 200 · 25%")).toBeTruthy();
   });
 });

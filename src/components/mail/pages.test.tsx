@@ -9,7 +9,6 @@ vi.mock("../../api/events", async () => (await import("../../app/testing")).even
 import { api } from "../../api/commands";
 import type { SearchPage } from "../../api/bindings/SearchPage";
 import type { SearchQuery } from "../../api/bindings/SearchQuery";
-import type { SearchRequest } from "../../api/bindings/SearchRequest";
 import { mockApiDefaults, renderWithProviders } from "../../app/testing";
 import { MAX_LIST_ROWS, MailList, PAGE_SIZE, nextPageParam, useMailPages } from ".";
 import { makeMailRow, stubViewport } from "./fixtures";
@@ -29,27 +28,23 @@ describe("mail paging", () => {
     expect(nextPageParam(full[498]!, full.slice(0, 499))).toBe("more");
   });
 
-  it("with 600 mock pages of 200 rows the list stops requesting after 100,000 rows and shows the cap row", async () => {
-    vi.mocked(api.searchMail).mockImplementation(async (req: SearchRequest) => {
-      const n = req.cursor === null ? 0 : Number(req.cursor);
-      return {
-        rows: Array.from({ length: PAGE_SIZE }, (_, i) => makeMailRow(n * PAGE_SIZE + i + 1)),
-        nextCursor: n < 599 ? String(n + 1) : null,
-        shortQuery: false,
-        elapsedMs: 1,
-      };
-    });
+  it("a cache holding 500 full pages is capped: no further request, 100,000 rows and the cap row", async () => {
+    // Seed the cache instead of fetching 500 pages one by one (that took 1.3-2.7 s); nextPageParam's cap is tested above.
+    const pages: SearchPage[] = Array.from({ length: 500 }, (_, n) => ({
+      rows: Array.from({ length: PAGE_SIZE }, (_, i) => makeMailRow(n * PAGE_SIZE + i + 1)),
+      nextCursor: String(n + 1),
+      shortQuery: false,
+      elapsedMs: 1,
+    }));
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(["searchMail", 1, QUERY], { pages, pageParams: [null, ...pages.slice(0, -1).map((p) => p.nextCursor)] });
     const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
     const { result } = renderHook(() => useMailPages(QUERY, 1), { wrapper });
-    await waitFor(() => expect(result.current.rows.length).toBe(PAGE_SIZE));
-    // More calls than pages: the hook itself must stop at the cap.
-    for (let i = 0; i < 600; i++) await act(() => result.current.fetchNextPage());
-    await waitFor(() => expect(result.current.capped).toBe(true));
-    expect(api.searchMail).toHaveBeenCalledTimes(500);
-    expect(vi.mocked(api.searchMail).mock.calls[0]![0]).toEqual({ query: QUERY, cursor: null, pageSize: 200 });
-    expect(result.current.rows.length).toBe(MAX_LIST_ROWS);
+    expect(result.current.capped).toBe(true);
     expect(result.current.hasMore).toBe(false);
+    expect(result.current.rows.length).toBe(MAX_LIST_ROWS);
+    await act(() => result.current.fetchNextPage());
+    expect(api.searchMail).not.toHaveBeenCalled();
 
     const restore = stubViewport(800);
     renderWithProviders(
@@ -60,7 +55,7 @@ describe("mail paging", () => {
     expect(screen.queryByTestId("list-loader-row")).toBeNull();
     expect(screen.getAllByTestId("mail-row").length).toBeLessThan(60);
     restore();
-  }, 60_000);
+  });
 
   it("a new seq evicts the superseded searchMail entry", async () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });

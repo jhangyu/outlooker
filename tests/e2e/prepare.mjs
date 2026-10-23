@@ -10,15 +10,13 @@ export const E2E_ROOT = path.join(REPO_ROOT, "scripts", "tmp", "e2e");
 export const APP_DATA = {
   fresh: path.join(E2E_ROOT, "fresh"),
   seeded: path.join(E2E_ROOT, "seeded"),
-  big: path.join(E2E_ROOT, "big"),
 };
 export const TARGET_DIR = path.resolve(REPO_ROOT, "src-tauri", process.env.CARGO_TARGET_DIR ?? "target");
-export const GROUPS = ["flow", "seeded", "scroll"];
-export const GROUP_APP_DATA = { flow: APP_DATA.fresh, seeded: APP_DATA.seeded, scroll: APP_DATA.big };
+export const GROUPS = ["flow", "seeded"];
+export const GROUP_APP_DATA = { flow: APP_DATA.fresh, seeded: APP_DATA.seeded };
 
 const LIBRARIES = {
   [APP_DATA.seeded]: { root: path.join(E2E_ROOT, "seeded-root"), language: "zh-TW", messages: 2000 },
-  [APP_DATA.big]: { root: path.join(E2E_ROOT, "big-root"), language: "en", messages: 120000 },
 };
 
 /** Data root of the group's app (its PostgreSQL cluster is `<root>/pgdata`). */

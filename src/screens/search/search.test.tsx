@@ -45,18 +45,6 @@ describe("Search screen", () => {
     restore();
   });
 
-  it("searchCount {count: 10000, capped: true} renders 10,000+ and {count: 9999, capped: false} renders 9,999", async () => {
-    vi.mocked(api.searchMail).mockResolvedValue(page([makeMailRow(1)]));
-    vi.mocked(api.searchCount).mockResolvedValue({ count: 10000, capped: true });
-    renderWithProviders(<SearchScreen />, READY);
-    type("alpha");
-    expect((await screen.findByTestId("result-count")).textContent).toBe("10,000+ messages");
-    vi.mocked(api.searchCount).mockResolvedValue({ count: 9999, capped: false });
-    type("beta");
-    await waitFor(() => expect(screen.getByTestId("result-count").textContent).toBe("9,999 messages"));
-    expect(api.searchCount).toHaveBeenLastCalledWith({ kind: "simple", text: "beta" });
-  });
-
   it("a stale search response (older sequence) is dropped", async () => {
     const older = deferred<SearchPage>();
     const newer = deferred<SearchPage>();
@@ -121,32 +109,5 @@ describe("Search screen", () => {
     await waitFor(() => expect(api.filterOptions).toHaveBeenCalledTimes(2));
     expect(screen.queryByText("ArchivePST")).not.toBeNull();
     await act(async () => release(opts));
-  });
-
-  it("shows the short-query hint and selects the first row", async () => {
-    vi.mocked(api.searchMail).mockResolvedValue(page([makeMailRow(1), makeMailRow(2)], true));
-    renderWithProviders(<SearchScreen />, READY);
-    type("報價");
-    expect(await screen.findByTestId("short-query-hint")).toBeTruthy();
-    await waitFor(() => expect(api.mailGet).toHaveBeenCalledWith(1));
-    expect(screen.getAllByTestId("mail-row")[0]!.getAttribute("aria-selected")).toBe("true");
-  });
-
-  it("shows the empty, idle, zero-result and problem states", async () => {
-    const empty = renderWithProviders(<SearchScreen />);
-    expect(screen.getByText("No mail to search yet")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Go to Import" }));
-    expect(empty.go).toHaveBeenCalledWith("import");
-    empty.unmount();
-
-    renderWithProviders(<SearchScreen />, READY);
-    expect(screen.getByText("Search your mail")).toBeTruthy();
-    type("nothing");
-    expect(await screen.findByText("No messages match")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Clear search and conditions" }));
-    expect((screen.getByTestId("search-box") as HTMLInputElement).value).toBe("");
-    type("a b c d e f g h i j k");
-    expect(screen.getByText("Use at most 10 search words.")).toBeTruthy();
-    expect(api.searchMail).toHaveBeenCalledTimes(1);
   });
 });

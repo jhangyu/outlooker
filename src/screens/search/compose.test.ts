@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { ConditionGroup } from "../../api/bindings/ConditionGroup";
 import { toInstant } from "../../components/dsl";

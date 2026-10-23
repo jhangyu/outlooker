@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import commandNames from "./bindings/commands.json";
 import eventNames from "./bindings/events.json";

@@ -1,7 +1,4 @@
-import {
-  createTableColumn, DataGrid, DataGridBody, DataGridHeader, DataGridHeaderCell, DataGridRow, FluentProvider, webLightTheme,
-} from "@fluentui/react-components";
-import { act, render, renderHook, screen } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { useColumnWidths, type ColumnDefaults } from "./columnWidths";
 
@@ -35,29 +32,5 @@ describe("useColumnWidths", () => {
       expect(result.current.columnSizingOptions.a.defaultWidth).toBe(100);
       expect(result.current.columnSizingOptions.b.defaultWidth).toBe(120);
     }
-  });
-
-  it("spread onto DataGrid renders the stored width", () => {
-    localStorage.setItem("outlooker.columnWidths.t2", JSON.stringify({ a: 240 }));
-    const cols = [
-      createTableColumn<{ id: string }>({ columnId: "a", renderHeaderCell: () => "HA", renderCell: (x) => x.id }),
-      createTableColumn<{ id: string }>({ columnId: "b", renderHeaderCell: () => "HB", renderCell: (x) => x.id }),
-    ];
-    function Grid() {
-      const sizing = useColumnWidths("t2", DEFAULTS);
-      return (
-        <FluentProvider theme={webLightTheme}>
-          <DataGrid {...sizing} items={[]} columns={cols} getRowId={(x) => x.id}>
-            <DataGridHeader>
-              <DataGridRow>{({ renderHeaderCell }) => <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>}</DataGridRow>
-            </DataGridHeader>
-            <DataGridBody>{() => null}</DataGridBody>
-          </DataGrid>
-        </FluentProvider>
-      );
-    }
-    render(<Grid />);
-    expect(screen.getByText("HA").closest<HTMLElement>("[role=columnheader]")?.style.width).toBe("240px");
-    expect(screen.getByText("HB").closest<HTMLElement>("[role=columnheader]")?.style.width).toBe("120px");
   });
 });

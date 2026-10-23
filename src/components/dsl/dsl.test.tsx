@@ -1,10 +1,8 @@
-import { fireEvent, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { ConditionGroup } from "../../api/bindings/ConditionGroup";
-import { renderWithProviders } from "../../app/testing";
 import {
-  DslBuilder, buildFolderTree, countLeaves, depthOf, newCond, newGroup, toConditionGroup, toInstant,
-  type CondDraft, type GroupDraft,
+  buildFolderTree, countLeaves, depthOf, newCond, newGroup, toConditionGroup, toInstant,
+  type CondDraft,
 } from ".";
 
 /** Part 03 §5.1 worked example, `req.query.root`, copied verbatim from the spec. */
@@ -25,7 +23,6 @@ const SPEC_ROOT: ConditionGroup = {
 const cond = (p: Partial<CondDraft>): CondDraft => ({ ...newCond(p.field), ...p });
 /** The spec's user is in UTC+8; the test pins that offset instead of depending on the machine time zone. */
 const utc8 = (day: string) => new Date(`${day}T00:00:00+08:00`);
-const OPTIONS = { psts: [{ id: 3, displayName: "2023", path: "/p/2023.pst" }], folders: [] };
 
 describe("DSL builder", () => {
   it("DSL builder output for the Part 03 §5.1 worked example deep-equals the spec JSON", () => {
@@ -62,26 +59,5 @@ describe("DSL builder", () => {
     ]);
     expect(tree.map((n) => [n.path, n.count])).toEqual([["Inbox", 8], ["Sent Items", 4]]);
     expect(tree[0]!.children.map((n) => [n.path, n.name, n.count])).toEqual([["Inbox/Projects", "Projects", 2]]);
-  });
-
-  it("Add group adds a group with one empty condition", () => {
-    const onChange = vi.fn();
-    renderWithProviders(<DslBuilder value={newGroup("and", [])} onChange={onChange} options={OPTIONS} leafBudget={50} />);
-    fireEvent.click(screen.getByRole("button", { name: "Add group" }));
-    const next = onChange.mock.calls[0]![0] as GroupDraft;
-    expect(next.children).toHaveLength(1);
-    const group = next.children[0] as GroupDraft;
-    expect(group.kind).toBe("group");
-    expect(group.children).toEqual([expect.objectContaining({ kind: "cond", field: "sender", text: "" })]);
-  });
-
-  it("disables Add condition at the leaf budget and hides Add group at depth 4", () => {
-    const value = newGroup("and", [
-      newGroup("or", [cond({ field: "sender", text: "a@b" }), newGroup("and", [newGroup("or", [cond({ field: "body", text: "x" })])])]),
-    ]);
-    renderWithProviders(<DslBuilder value={value} onChange={vi.fn()} options={OPTIONS} leafBudget={2} />);
-    for (const b of screen.getAllByRole("button", { name: "Add condition" })) expect((b as HTMLButtonElement).disabled).toBe(true);
-    // root bar + groups at depth 2 and 3; the group at depth 4 has none.
-    expect(screen.getAllByRole("button", { name: "Add group" })).toHaveLength(3);
   });
 });

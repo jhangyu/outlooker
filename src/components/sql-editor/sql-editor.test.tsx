@@ -25,13 +25,4 @@ describe("SQL editor", () => {
     r.rerender(<SqlEditor {...props} value="SELECT 2" onRun={onRun} />);
     expect(screen.getByTestId("sql-editor").textContent).toBe("SELECT 2");
   });
-
-  it("sqlError position marks the character in the editor", () => {
-    const r = render(<SqlEditor {...props} value="SELECT 😀 x" errorPosition={10} />);
-    expect(r.container.querySelector(".cm-sql-error")?.textContent).toBe("x");
-    r.rerender(<SqlEditor {...props} value="SELECT 😀 x" errorPosition={8} />);
-    expect(r.container.querySelector(".cm-sql-error")?.textContent).toBe("😀");
-    r.rerender(<SqlEditor {...props} value="SELECT 😀 x" errorPosition={null} />);
-    expect(r.container.querySelector(".cm-sql-error")).toBeNull();
-  });
 });

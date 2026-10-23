@@ -1,10 +1,9 @@
 import { FluentProvider, Toaster, webLightTheme } from "@fluentui/react-components";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
-import type { i18n } from "i18next";
 import type { ReactElement } from "react";
 import { I18nextProvider } from "react-i18next";
-import { vi, type Mock } from "vitest";
+import { vi } from "vitest";
 import { api } from "../api/commands";
 import type { AppStatus } from "../api/bindings/AppStatus";
 import type { DbStatus } from "../api/bindings/DbStatus";
@@ -106,16 +105,15 @@ export function mockApiDefaults(): void {
 
 export function renderWithProviders(
   ui: ReactElement,
-  opts: { lng?: "en" | "zh-TW" | "cimode"; status?: Partial<AppStatus>; screen?: ScreenId } = {},
-): RenderResult & { queryClient: QueryClient; go: Mock; i18n: i18n } {
-  const instance = createI18n(opts.lng ?? "en");
+  opts: { status?: Partial<AppStatus>; screen?: ScreenId } = {},
+): RenderResult {
+  const instance = createI18n("en");
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  const go = vi.fn();
-  const result = render(
+  return render(
     <FluentProvider theme={webLightTheme}>
       <I18nextProvider i18n={instance}>
         <QueryClientProvider client={queryClient}>
-          <AppStatusProvider initial={makeStatus(opts.status)} initialScreen={opts.screen} onGo={go}>
+          <AppStatusProvider initial={makeStatus(opts.status)} initialScreen={opts.screen}>
             {ui}
             <Toaster toasterId="app" />
           </AppStatusProvider>
@@ -123,5 +121,4 @@ export function renderWithProviders(
       </I18nextProvider>
     </FluentProvider>,
   );
-  return { ...result, queryClient, go, i18n: instance };
 }

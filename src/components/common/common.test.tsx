@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { AppError } from "../../api/bindings/AppError";
 import { createI18n } from "../../app/i18n";

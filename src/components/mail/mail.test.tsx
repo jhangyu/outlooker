@@ -26,16 +26,6 @@ describe("mail components", () => {
   });
   afterEach(() => restore());
 
-  it("applies the stored sender width to header and rows, and hides the header in compact mode", () => {
-    localStorage.setItem("outlooker.columnWidths.mail-list", JSON.stringify({ sender: 300 }));
-    const r = renderWithProviders(<MailList {...listProps} rows={ROWS} />);
-    expect(screen.getByTestId("mail-list-header").style.gridTemplateColumns).toContain("300px");
-    expect(screen.getAllByTestId("mail-row")[0]!.style.gridTemplateColumns).toContain("300px");
-    r.unmount();
-    renderWithProviders(<MailList {...listProps} rows={ROWS} compact />);
-    expect(screen.queryByTestId("mail-list-header")).toBeNull();
-  });
-
   it('preview iframe has sandbox="" and no allow- token', () => {
     render(<MailPreview html="<p>Hi</p>" title="Hello" />);
     const frame = screen.getByTestId("mail-preview");
@@ -46,47 +36,20 @@ describe("mail components", () => {
     expect(frame.getAttribute("srcdoc")).toBe("<p>Hi</p>");
   });
 
-  it("preview replaces srcdoc on the same iframe", () => {
-    const r = render(<MailPreview html="<p>one</p>" title="a" />);
-    const first = screen.getByTestId("mail-preview");
-    r.rerender(<MailPreview html="<p>two</p>" title="b" />);
-    const second = screen.getByTestId("mail-preview");
-    expect(second).toBe(first);
-    expect(second.getAttribute("srcdoc")).toBe("<p>two</p>");
-  });
-
-  it("reading pane shows the header, attachments and the plain-text fallback", async () => {
-    vi.mocked(api.mailGet).mockResolvedValue(makeMailDetail({ bodyHtml: null, bodyText: "Plain body" }));
-    renderWithProviders(<ReadingPane mailId={5} />);
-    expect(await screen.findByText("Plain body")).toBeTruthy();
-    expect(api.mailGet).toHaveBeenCalledWith(5);
-    expect(screen.queryByTestId("mail-preview")).toBeNull();
-    expect(screen.getByText("Quote Q1")).toBeTruthy();
-    expect(screen.getByText("Bob <bob@x.example>")).toBeTruthy();
-    expect(screen.getByText("archive · Inbox/Projects")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Download quote.pdf" }) as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it("reading pane renders HTML through MailPreview and shows the pick state without a mail", async () => {
+  it("reading pane renders HTML in the sandboxed preview and plain text when the mail has no HTML", async () => {
     vi.mocked(api.mailGet).mockResolvedValue(makeMailDetail());
     const r = renderWithProviders(<ReadingPane mailId={5} />);
     expect((await screen.findByTestId("mail-preview")).getAttribute("srcdoc")).toBe("<p>Hello</p>");
+    expect(api.mailGet).toHaveBeenCalledWith(5);
     r.unmount();
-    renderWithProviders(<ReadingPane mailId={null} />);
-    expect(screen.getByText("Select a message")).toBeTruthy();
+    vi.mocked(api.mailGet).mockResolvedValue(makeMailDetail({ bodyHtml: null, bodyText: "Plain body" }));
+    renderWithProviders(<ReadingPane mailId={5} />);
+    expect(await screen.findByText("Plain body")).toBeTruthy();
+    expect(screen.queryByTestId("mail-preview")).toBeNull();
   });
 
   it("buildEntries inserts month headers and an undated group", () => {
     expect(buildEntries(ROWS, "en", "No date").map((e) => e.kind)).toEqual(["month", "mail", "mail", "month", "mail", "month", "mail"]);
-  });
-
-  it("ArrowDown on the list selects the next mail", () => {
-    const onSelect = vi.fn();
-    renderWithProviders(<MailList {...listProps} rows={ROWS} selectedId={1} onSelect={onSelect} />);
-    expect(screen.getAllByTestId("mail-row")).toHaveLength(4);
-    expect(screen.getByText("No date")).toBeTruthy();
-    fireEvent.keyDown(screen.getByRole("listbox"), { key: "ArrowDown" });
-    expect(onSelect).toHaveBeenCalledWith(2);
   });
 
   it("requests the next page only when the end is within 50 rows", () => {

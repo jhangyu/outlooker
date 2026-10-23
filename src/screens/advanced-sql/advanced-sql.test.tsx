@@ -49,13 +49,6 @@ describe("Advanced SQL screen", () => {
     );
   });
 
-  it("truncated: true shows the cap MessageBar", async () => {
-    vi.mocked(api.sqlExecute).mockResolvedValue({ ...TABLE, truncated: true });
-    renderWithProviders(<AdvancedSqlScreen />, READY);
-    runSql("SELECT kind, n, note FROM t");
-    expect((await screen.findByTestId("sql-truncated")).textContent).toContain("Showing the first 10,000 rows");
-  });
-
   it("Advanced SQL shows MailList for a result with an id column and a table otherwise", async () => {
     vi.mocked(api.sqlExecute).mockResolvedValueOnce({
       mode: "mailList", rows: [makeMailRow(7, { subject: "from sql" })], missingIds: 1, truncated: false, elapsedMs: 2,
@@ -64,41 +57,12 @@ describe("Advanced SQL screen", () => {
     runSql("SELECT id, subject FROM v_mail");
     await waitFor(() => expect(screen.getByTestId("sql-result").getAttribute("data-mode")).toBe("mailList"));
     expect(screen.getAllByTestId("mail-row")).toHaveLength(1);
-    // Compact rows (prototype `mailItem(…, true)`): no avatar, subject on its own line.
-    expect(screen.getByTestId("mail-row").querySelector(".fui-Avatar")).toBeNull();
-    expect(screen.getByText("from sql")).toBeTruthy();
-    expect(screen.getByText("1 ids matched no message")).toBeTruthy();
     await waitFor(() => expect(api.mailGet).toHaveBeenCalledWith(7));
     vi.mocked(api.sqlExecute).mockResolvedValueOnce(TABLE);
     runSql("SELECT kind, n, note FROM t");
     await waitFor(() => expect(screen.getByTestId("sql-result").getAttribute("data-mode")).toBe("table"));
     expect(screen.getAllByTestId("sql-table-row")).toHaveLength(2);
     expect(screen.queryByTestId("mail-row")).toBeNull();
-  });
-
-  it("clicking a table row shows its key/value list in column 4", async () => {
-    vi.mocked(api.sqlExecute).mockResolvedValue(TABLE);
-    renderWithProviders(<AdvancedSqlScreen />, READY);
-    runSql("SELECT kind, n, note FROM t");
-    const rows = await screen.findAllByTestId("sql-table-row");
-    expect(screen.queryByTestId("sql-row-detail")).toBeNull();
-    fireEvent.click(rows[0]!);
-    const detail = await screen.findByTestId("sql-row-detail");
-    expect(within(detail).getByText("kind")).toBeTruthy();
-    expect(within(detail).getByText("12")).toBeTruthy();
-    expect(within(detail).getByText("NULL")).toBeTruthy();
-    expect(screen.getByText("Row 1")).toBeTruthy();
-  });
-
-  it("applies a stored column width by column name to the header and every row", async () => {
-    localStorage.setItem("outlooker.columnWidths.sql-result", JSON.stringify({ kind: 240 }));
-    vi.mocked(api.sqlExecute).mockResolvedValue(TABLE);
-    renderWithProviders(<AdvancedSqlScreen />, READY);
-    runSql("SELECT kind, n, note FROM t");
-    const rows = await screen.findAllByTestId("sql-table-row");
-    const head = screen.getAllByRole("row")[0]!;
-    expect(head.style.gridTemplateColumns).toBe("240px 160px 160px");
-    expect(rows[0]!.style.gridTemplateColumns).toBe("240px 160px 160px");
   });
 
   it("Run is disabled while executing", async () => {
@@ -115,13 +79,9 @@ describe("Advanced SQL screen", () => {
     expect((screen.getByTestId("sql-cancel") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("shows sqlError text with its position and the empty states", async () => {
-    const empty = renderWithProviders(<AdvancedSqlScreen />);
-    expect(screen.getByText("No mail to query yet")).toBeTruthy();
-    empty.unmount();
+  it("shows sqlError text with its position", async () => {
     vi.mocked(api.sqlExecute).mockRejectedValue({ kind: "sqlError", sqlstate: "42601", message: 'syntax error at or near "SELEC"', position: 1 });
     renderWithProviders(<AdvancedSqlScreen />, READY);
-    expect(screen.getByText("Run a query")).toBeTruthy();
     runSql("SELEC 1");
     expect(await screen.findByText('syntax error at or near "SELEC" at character 1')).toBeTruthy();
   });

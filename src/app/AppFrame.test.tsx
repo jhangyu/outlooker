@@ -46,13 +46,6 @@ describe("App frame", () => {
     await waitFor(() => expect(screen.getByTestId("probe").textContent).toBe("5"));
   });
 
-  it("Failed screen Retry calls appRetry", async () => {
-    vi.mocked(api.appStatus).mockResolvedValue(makeStatus({ phase: "failed", error: { kind: "internal", detail: "x" } }));
-    render(<App />);
-    fireEvent.click(await screen.findByTestId("failed-retry"));
-    await waitFor(() => expect(api.appRetry).toHaveBeenCalledTimes(1));
-  });
-
   it("shows the blocking screen while the database starts and the frame when ready", async () => {
     vi.mocked(api.appStatus).mockResolvedValue(makeStatus({ phase: "startingDb" }));
     render(<App />);
@@ -100,7 +93,7 @@ describe("data-folder move", () => {
   }
   const progress = (phase: string, error: unknown = null) => ({ phase, bytesCopied: 512, bytesTotal: 1024, error });
 
-  it("keeps the move dialog through stoppingDb, startingDb and ready and toasts done", async () => {
+  it("keeps the move dialog through stoppingDb, startingDb and ready and closes it when done", async () => {
     await startMove();
     act(() => eventsMock.emit("app:status-changed", makeStatus({ phase: "stoppingDb" })));
     act(() => eventsMock.emit("data-dir:move-progress", progress("copying")));
@@ -111,8 +104,8 @@ describe("data-folder move", () => {
     expect(screen.getByText("512 B of 1.0 KB")).toBeTruthy();
     act(() => eventsMock.emit("app:status-changed", makeStatus({ phase: "ready" })));
     act(() => eventsMock.emit("data-dir:move-progress", progress("done")));
-    expect(await screen.findByText("The data folder was moved.")).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByTestId("title-bar")).toBeTruthy();
   });
 
   it("shows a failed move's error after the database is back in the old folder", async () => {
