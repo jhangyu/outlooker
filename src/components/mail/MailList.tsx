@@ -11,8 +11,9 @@ export const ROW_HEIGHT = 32;
 // 56 px of text lines + 2 × 8 px padding + 1 px bottom border (border-box).
 const COMPACT_ROW_HEIGHT = 73;
 const PREFETCH_ROWS = 50;
-// Only the sender boundary is resizable: subject is 1fr, date/meta is auto (grid plan §4 option A).
-const COLUMN_DEFAULTS = { sender: { width: 200, minWidth: 96 } };
+// Sender and subject are resizable; date/meta takes the remaining width (1fr, DATE_MIN_WIDTH floor).
+const COLUMN_DEFAULTS = { sender: { width: 200, minWidth: 96 }, subject: { width: 400, minWidth: 120 } };
+const DATE_MIN_WIDTH = 96;
 
 export type Entry = { kind: "month"; key: string; label: string } | { kind: "mail"; key: string; row: MailRow };
 
@@ -103,7 +104,7 @@ export function MailList(p: MailListProps) {
     if (el && el.scrollTop !== lastTop.current) el.scrollTop = lastTop.current;
   }, []);
   const { widths, headerProps } = useGridColumnSizing("mail-list", COLUMN_DEFAULTS);
-  const grid = { gridTemplateColumns: `24px ${widths.sender}px 1fr auto` };
+  const grid = { gridTemplateColumns: `24px ${widths.sender}px ${widths.subject}px minmax(${DATE_MIN_WIDTH}px, 1fr)` };
   const lng = i18n.language;
   const undated = t("list.undated");
   const entries = useMemo<Entry[]>(
@@ -137,6 +138,7 @@ export function MailList(p: MailListProps) {
   };
 
   const sender = headerProps("sender");
+  const subject = headerProps("subject");
   return (
     <div className={s.root}>
       {p.compact ? null : (
@@ -146,7 +148,10 @@ export function MailList(p: MailListProps) {
             <Caption1Strong className={s.ellipsis}>{t("list.col.from")}</Caption1Strong>
             {sender.aside}
           </span>
-          <Caption1Strong>{t("list.col.subject")}</Caption1Strong>
+          <span className={s.headCell} tabIndex={0} onKeyDown={subject.onKeyDown}>
+            <Caption1Strong className={s.ellipsis}>{t("list.col.subject")}</Caption1Strong>
+            {subject.aside}
+          </span>
           <Caption1Strong>{t("list.col.date")}</Caption1Strong>
         </div>
       )}
