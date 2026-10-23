@@ -1,6 +1,6 @@
 # Outlooker — Design Spec
 
-Date: 2026-10-21. Status: pending user review.
+Date: 2026-10-21. Status: implemented on macOS; Windows phase pending.
 Requirements (frozen, only the user may change): `docs/specs/requirements.md`.
 This spec merges the four architecture sections. Cross-references such as "01 §6", "02 §6.3" or
 "`03-frontend-api.md` §5.2" point to Part 01–04 below.
@@ -25,15 +25,15 @@ for the Advanced SQL screen.
 | Job progress transport | Global Tauri events, at most 4 per second, payload < 1 KB. Tauri `Channel` is not used. |
 | Prototype-only features | Out of scope: exact delete/keep preview before removing a PST, true pause / pause all, worker-count setting, re-convert existing images, disk-usage breakdown, SQL format, search-term highlighting, drag-and-drop import. The UI does not show these controls even though the variant-1 prototype draws them. |
 
-## 0.3 Known risks (must be verified during implementation)
-| Risk | Mitigation / verification |
-|---|---|
-| Chinese pg_trgm needs a UTF-8 libc locale; verified on macOS only. Windows locale (`en-US`, then `English_United States.65001`) unverified. | Startup self-check `SELECT similarity('測試測試','測試') > 0`; failure is fatal. First Windows build must run it. |
-| Query plans, DB size (estimate ~3.15 GB per 100k messages with images, ~1.65 GB without), import throughput (target ≥ 150 msg/s) and search latency (target p95 ≤ 500 ms at 1M messages) are estimates. | 1M-message load test (Part 04 §12.3) with pre-registered pass thresholds. |
-| The libpff fork ships no sample PST. | Test PSTs are generated on Windows with an Outlook automation script (Part 04 §12). Unverified: whether Outlook allows setting Message-ID / sent time on drafts; the script must fail loudly if not. |
-| Outlook HTML wrapped in RTF has no existing converter crate. | In-house converter (~200 lines, Part 01 §5); pure-RTF mail falls back to the plain-text body. |
-| Webview scroll-height limit for long lists. | 100k-row cap; test scrolling on WebView2 and WKWebView. |
-| Installer size ~45–55 MB is an estimate. | Measure the first release build per platform. |
+## 0.3 Known risks and outcomes
+| Risk | Mitigation / verification | Outcome |
+|---|---|---|
+| Chinese pg_trgm needs a UTF-8 libc locale; verified on macOS only. Windows locale (`en-US`, then `English_United States.65001`) unverified. | Startup self-check `SELECT similarity('測試測試','測試') > 0`; failure is fatal. First Windows build must run it. | open: Windows phase |
+| Query plans, DB size (estimate ~3.15 GB per 100k messages with images, ~1.65 GB without), import throughput (target ≥ 150 msg/s) and search latency (target p95 ≤ 500 ms at 1M messages) are estimates. | 1M-message load test (Part 04 §12.3) with pre-registered pass thresholds. | open: 1M load test (not run, needs a user-approved long run) |
+| The libpff fork ships no sample PST. | Test PSTs are generated on Windows with an Outlook automation script (Part 04 §12). Unverified: whether Outlook allows setting Message-ID / sent time on drafts; the script must fail loudly if not. | `tests/fixtures/external/outlook.pst` is used by the import tests and the e2e flow. `scripts/fixtures/make-pst.ps1` is kept for the Windows phase. |
+| Outlook HTML wrapped in RTF has no existing converter crate. | In-house converter (~200 lines, Part 01 §5); pure-RTF mail falls back to the plain-text body. | done: in-house converter `src-tauri/crates/outlooker-core/src/importer/normalize/rtf.rs` (`deencapsulate_html`, `to_text`). |
+| Webview scroll-height limit for long lists. | 100k-row cap; test scrolling on WebView2 and WKWebView. | 100k cap implemented. WKWebView covered by e2e group `scroll`. WebView2 open: Windows phase. |
+| Installer size ~45–55 MB is an estimate. | Measure the first release build per platform. | macOS dmg 42,445,233 bytes (`docs/logs/gate-round2-6e46659.md` G2.5). Windows open. |
 
 ## 0.4 Out of scope
 Attachment body storage/download, attachment content search, dark mode, multi-user/auth, live Outlook
@@ -63,7 +63,7 @@ Hard-to-reverse choices made during implementation. Each one names the rejected 
 
 # 01 — Technology Stack
 
-Owner: arch-stack. Input: `docs/specs/requirements.md` (frozen 2026-10-21). This section binds 02 (system architecture), 03 (frontend API) and 04 (backend server).
+Input: `docs/specs/requirements.md` (frozen 2026-10-21). This section binds 02 (system architecture), 03 (frontend API) and 04 (backend server).
 
 All versions below were checked against their registry on 2026-10-21 (crates.io API, `npm view`, GitHub Releases, pub.dev). "Pin" means the exact version that the first `Cargo.toml` / `package.json` must declare. Implementers can accept compatible patch updates only after they check the registry again.
 
@@ -137,7 +137,7 @@ How the frontend talks to Rust (verified in the Tauri docs, "Calling Rust"):
 
 ## 4. PST parsing — decision: Rust FFI to libpff (in-process)
 
-### 4.1 Evidence from the fork (`jhangyu/libpff`, cloned to `scripts/tmp/libpff`, HEAD `bb5bcc0`)
+### 4.1 Evidence from the fork (`jhangyu/libpff`, HEAD `bb5bcc0`)
 - The fork is upstream libyal/libpff with **1 commit ahead (an empty "Trigger workflow registration on fork"), 5 behind**, and no file changes (GitHub compare API, `ahead_by=1`, `files=[]`). Library version `20260625` (`configure.ac:3-5`).
 - Public C API: `include/libpff.h.in`: `libpff_file_open` / `libpff_file_open_wide` (:222, :234), `libpff_file_get_root_folder` (:389), `libpff_item_get_identifier` (:490), folder traversal `libpff_folder_get_sub_folder`/`_sub_message` (:2300, :2352), message times (:2504–:2531), `libpff_message_get_recipients` (:2568), attachments `libpff_message_get_attachment`/`libpff_attachment_get_data_size` (:2549, :3837), and the generic `libpff_item_get_entry_value_utf8_string` (:1138) for any MAPI property (Message-ID = `PidTagInternetMessageId` 0x1035, codepage = `PidTagInternetCodepage` 0x3FDE).
 - **Bodies (all three exposed):**
@@ -148,7 +148,7 @@ How the frontend talks to Rust (verified in the Tauri docs, "Calling Rust"):
 - **Thread safety:** no source file under `libpff/` uses `HAVE_MULTI_THREAD_SUPPORT` or read/write locks (only `libpff/libpff_libbfio.h` mentions it). `configure` reports `Multi-threading support: no`. **Rule: a `libpff_file_t` and its items belong to one thread. To read in parallel, open separate handles on the same PST.**
 - Compiler-only build route already exists: `_build.py` (pypff build) collects every `lib*/*.c` from the `SUBDIRS` in `Makefile.am`. For MSVC it **skips configure** and defines `_CRT_SECURE_NO_WARNINGS`, `UNICODE`, `WINVER=0x0501`, `HAVE_LOCAL_<LIB>` (`_build.py:44-62`, `:64-80`). `common/common.h:25-40` then includes `config_msc.h` + `config_winapi.h`. For non-MSVC it runs `configure --disable-nls --disable-shared-libs` (`_build.py:191-199`, `custom_build_ext.run`).
 - That route is green in CI on the fork: run `32393676269` (workflow `build_wheels`, 2026-08-20) built from the sdist on **windows-latest, windows-11-arm, macos-26, macos-26-intel, ubuntu-24.04, ubuntu-24.04-arm**. All passed.
-- Local proof on macOS (arm64): from that run's `cibw-sdist` artifact (`libpff_python-20260625.tar.gz`) we ran `sh configure --disable-nls --disable-shared-libs`. Then plain `cc -c` of all 252 `lib*/*.c` with `-DHAVE_CONFIG_H -DHAVE_LOCAL_<LIB>` took 2.5 s. We linked a static archive into a C smoke test that called `libpff_get_version()` → `20260625` and `libpff_check_file_signature()` → `0` for a non-PST file. Script: `scripts/tmp/sdist/ccbuild.sh`. This is the same compile step that `build.rs` will perform.
+- Local proof on macOS (arm64): from that run's `cibw-sdist` artifact (`libpff_python-20260625.tar.gz`) we ran `sh configure --disable-nls --disable-shared-libs`. Then plain `cc -c` of all 252 `lib*/*.c` with `-DHAVE_CONFIG_H -DHAVE_LOCAL_<LIB>` took 2.5 s. We linked a static archive into a C smoke test that called `libpff_get_version()` → `20260625` and `libpff_check_file_signature()` → `0` for a non-PST file. This is the same compile step that `build.rs` will perform.
 - zlib is optional: `libpff/libpff_compression.c:29,53` falls back to the built-in `libpff_deflate.c`. **Build without zlib on every platform** (`--with-zlib=no` on Unix, no `HAVE_ZLIB` on MSVC). This gives one code path and no zlib dependency.
 
 ### 4.2 Options compared
@@ -291,7 +291,7 @@ Conclusion: Electron matches Tauri on (a)–(c) and wins only on (d), at the cos
 
 # 02 — System Architecture
 
-Owner: arch-system. Input: `docs/specs/requirements.md` (frozen 2026-10-21), the only source of truth.
+Input: `docs/specs/requirements.md` (frozen 2026-10-21), the only source of truth.
 Binding decisions taken from `01-tech-stack.md`: in-process libpff FFI (§4), PostgreSQL 18.6 shipped as resources and run with initdb/pg_ctl (§6), tokio-postgres + deadpool-postgres + refinery (§7), rayon for CPU work (§5), tauri-plugin-single-instance (§3), app identifier `us.jhangy.outlooker` (§3).
 Component names match the "Serving component" column of `03-frontend-api.md` §3 and the module names of `04-backend-server.md`.
 
@@ -404,28 +404,40 @@ Repo layout (one Cargo workspace + one Vite app):
 
 ```
 /                              Vite + React app (frontend)
-├─ package.json, vite.config.ts, index.html
+├─ README.md, CLAUDE.md        Entry-point doc, cargo invocation rule
+├─ package.json, vite.config.ts, tsconfig.json, wdio.conf.ts, mise.toml, index.html
 ├─ src/
 │  ├─ main.tsx, app/            App frame: FluentProvider (webLightTheme), i18n, navigation, boot sequence
-│  ├─ api/                      commands.ts (hand-written typed invoke wrappers), events.ts (event names + listeners), bindings/ (generated by ts-rs in cargo test, TS_RS_EXPORT_DIR; 03 §1.1)
+│  ├─ api/                      commands.ts (hand-written typed invoke wrappers), events.ts (event names + listeners), dialog.ts, bindings/ (generated by ts-rs in cargo test, TS_RS_EXPORT_DIR; 03 §1.1)
 │  ├─ screens/{onboarding,search,advanced-sql,import,settings}/
-│  ├─ components/               Shared UI (mail list, preview frame, DSL builder, SQL editor wrapper)
-│  └─ locales/<lang>/<namespace>.json   (lang = zh-TW | en)
+│  ├─ components/                 common/ (empty state, display helpers), dsl/ (DSL builder), mail/ (mail list, preview frame), sql-editor/ (editor wrapper)
+│  ├─ assets/                   outlooker-logo.svg
+│  ├─ locales/<lang>/<namespace>.json   (lang = zh-TW | en)
+│  └─ test/                     Vitest setup
 ├─ src-tauri/                   Tauri app crate "outlooker" (thin: plugins, commands, events, URI scheme)
 │  ├─ Cargo.toml (workspace root), tauri.conf.json, build.rs
+│  ├─ capabilities/             Tauri permission set for the main window
 │  ├─ src/main.rs, src/lib.rs   App Shell
 │  ├─ src/commands/{app,search,sql,import,settings}.rs   Command Layer
 │  ├─ src/events.rs             Event Emitter
+│  ├─ src/mailimg.rs            Inline mail image URI scheme
 │  ├─ schemas/                  JSON schemas (03 §5.1)
 │  ├─ native/libpff/            Vendored libpff source tree + ORIGIN (01 §3)
 │  ├─ native/postgresql.sha256  Pinned PG binary hashes (01 §3)
 │  ├─ resources/postgresql/     Fetched + pruned PG 18.6 (gitignored, bundle.resources)
 │  └─ crates/
 │     ├─ pff/                   libpff FFI: build.rs (cc) + extern "C" + safe wrapper
+│     ├─ outlooker-loadgen/     Synthetic-mail seeder for load and e2e tests
 │     └─ outlooker-core/        All services. No Tauri dependency, so integration tests run without a window.
-│        └─ src/{paths,settings,lifecycle,db,gate,importer,search,sql_console,maintenance}/
-├─ scripts/fetch-postgres.mjs   (01 §3)
-└─ tests/e2e/                   WebdriverIO specs (01 §9)
+│        └─ src/{app,db,dto,gate,importer,lifecycle,maintenance,paths,search,settings,sink,sql_console,test_support}/
+├─ scripts/
+│  ├─ fetch-postgres.mjs        (01 §3)
+│  ├─ build.py                  One-command desktop build
+│  ├─ vendor-libpff.sh          Refresh the vendored libpff tree
+│  └─ fixtures/make-pst.ps1     Outlook automation PST generator (Windows phase)
+└─ tests/
+   ├─ e2e/                      WebdriverIO specs (01 §9)
+   └─ fixtures/external/        (tests/fixtures/external) Third-party sample PST + NOTICE
 ```
 
 `outlooker-core` reports progress through one trait, `EventSink` (`fn emit(&self, event: CoreEvent)`). The Event Emitter implements it for Tauri. Tests implement it with a `Vec` recorder.

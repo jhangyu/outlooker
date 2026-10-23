@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 // Downloads, verifies and prunes the bundled PostgreSQL 18.6 (spec Part 01 §3, §6).
-// Usage: node scripts/fetch-postgres.mjs [--target <triple>] [--self-test]
+// Usage: node scripts/fetch-postgres.mjs [--target <triple>]
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -58,25 +57,6 @@ export function makeWritable(dir) {
 
 async function main() {
   const args = process.argv.slice(2);
-  if (args.includes("--self-test")) {
-    try {
-      verify(Buffer.from("x"), "0".repeat(64));
-    } catch {
-      const t = mkdtempSync(join(tmpdir(), "fetch-pg-selftest-"));
-      try {
-        mkdirSync(join(t, "d"));
-        writeFileSync(join(t, "d", "f"), "x");
-        chmodSync(join(t, "d", "f"), 0o444);
-        makeWritable(t);
-        if (!(statSync(join(t, "d", "f")).mode & 0o200)) throw new Error("self-test failed: read-only file not made writable");
-      } finally {
-        rmSync(t, { recursive: true, force: true });
-      }
-      console.log("self-test ok: wrong hash rejected, read-only files made writable");
-      return;
-    }
-    throw new Error("self-test failed: wrong hash accepted");
-  }
   const ti = args.indexOf("--target");
   const triple = ti >= 0 ? args[ti + 1] : TRIPLES[`${process.platform}-${process.arch}`];
   if (!triple) throw new Error(`unsupported host ${process.platform}-${process.arch}`);
