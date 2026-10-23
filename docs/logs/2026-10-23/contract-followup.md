@@ -33,9 +33,6 @@ The six parking-lot items from `test-cleanup-result.md` are resolved as the user
 ## Round budget
 3 rounds.
 
-## Parking lot
-(empty)
-
 ## Result (final HEAD 1a723bc, round 1 of 3)
 All acceptance criteria pass.
 - A1: `writer::batch_cut_by_time` alone 0.398-0.407 s. Root cause: `free_space` (`sys.rs`) refreshed every mounted volume (20 mounts incl. NFS/SMB) on each writer flush (`writer.rs:385`), 0.4-0.8 s per call, serialized by a mutex. Fixed in 79f2875 (fs4).
