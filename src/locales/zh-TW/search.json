@@ -66,6 +66,19 @@
     "attachments": "附件",
     "downloadLater": "目前尚無法下載附件",
     "download": "下載 {{name}}",
-    "date": "寄件時間"
+    "date": "寄件時間",
+    "toolbar": "郵件資訊",
+    "details": "郵件詳細資料",
+    "subject": "主旨",
+    "from": "寄件者",
+    "copyAll": "複製全部",
+    "people": "{{n}} 位",
+    "places": "{{n}} 個位置",
+    "files": "{{n}} 個",
+    "tokenAriaMore": "{{label}}：{{first}} 與另外 {{n}} 位",
+    "foundInAria": "出現於 {{n}} 個位置",
+    "attAria": "{{n}} 個附件",
+    "moreAria": "另有 {{n}} 項：{{names}}",
+    "moreTitle": "其餘欄位"
   }
 }

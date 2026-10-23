@@ -66,6 +66,19 @@
     "attachments": "Attachments",
     "downloadLater": "Downloading attachments is not available yet",
     "download": "Download {{name}}",
-    "date": "Sent"
+    "date": "Sent",
+    "toolbar": "Message info",
+    "details": "Message details",
+    "subject": "Subject",
+    "from": "From",
+    "copyAll": "Copy all",
+    "people": "{{n}} people",
+    "places": "{{n}} locations",
+    "files": "{{n}} files",
+    "tokenAriaMore": "{{label}}: {{first}} and {{n}} more",
+    "foundInAria": "Found in {{n}} locations",
+    "attAria": "{{n}} attachments",
+    "moreAria": "{{n}} more: {{names}}",
+    "moreTitle": "More"
   }
 }
