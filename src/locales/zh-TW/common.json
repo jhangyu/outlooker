@@ -37,5 +37,5 @@
     "alreadyImported": "這個 PST 檔案已經匯入。",
     "internal": "發生錯誤，詳細內容在應用程式紀錄中。"
   },
-  "action": { "cancel": "取消", "close": "關閉", "goImport": "前往匯入" }
+  "action": { "cancel": "取消", "close": "關閉", "goImport": "前往匯入", "resize": "調整大小" }
 }

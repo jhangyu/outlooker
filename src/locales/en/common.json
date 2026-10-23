@@ -37,5 +37,5 @@
     "alreadyImported": "This PST file is already imported.",
     "internal": "Something went wrong. The app log has the details."
   },
-  "action": { "cancel": "Cancel", "close": "Close", "goImport": "Go to Import" }
+  "action": { "cancel": "Cancel", "close": "Close", "goImport": "Go to Import", "resize": "Resize" }
 }
