@@ -10,7 +10,7 @@ Desktop app (Tauri 2 + React + Rust) that imports Outlook PST files into a bundl
 - Build the frontend (typecheck + vite): `mise exec -- npm run build`
 - Frontend unit tests: `mise exec -- npm test`
 - End-to-end tests: `mise exec -- npm run e2e` (groups `flow`, `seeded`, `scroll`; `scroll` seeds 120,000 messages and is long)
-- One e2e group: `node tests/e2e/run.mjs --spec tests/e2e/flow.e2e.ts`
+- One e2e group: `mise exec -- node tests/e2e/run.mjs --spec tests/e2e/flow.e2e.ts`
 - Desktop build: `python3 scripts/build.py`
 - Cargo test, lint and build commands: see `CLAUDE.md`.
 
