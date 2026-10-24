@@ -761,6 +761,7 @@ async fn pst_remove_with_queued_job() {
     // worker not started: the import job is still queued; Delete works on a paused path
     fx.mgr.set_paused(pst_id, true).await.unwrap();
     fx.mgr.remove(pst_id).await.unwrap(); // no 23505 from import_jobs_one_active_per_pst
+    assert_eq!(tc.count("SELECT count(*) FROM import_jobs WHERE kind = 'import'").await, 0, "the queued import job is deleted");
     assert_eq!(fx.mgr.list().await.unwrap()[0].status, ImportStatus::Removing);
     assert!(matches!(fx.mgr.remove(pst_id).await, Err(AppError::Busy { .. })));
     assert!(matches!(fx.mgr.set_paused(pst_id, false).await, Err(AppError::Busy { .. })));
