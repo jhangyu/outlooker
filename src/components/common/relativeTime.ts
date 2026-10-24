@@ -2,8 +2,10 @@ import { useSyncExternalStore } from "react";
 
 /** "3 min ago" / "in 5 min" in the app language. Units: minutes, hours, days (rounded). */
 export function formatRelative(iso: string, lng: string, now: number): string {
-  const m = Math.round((new Date(iso).getTime() - now) / 60_000);
+  const diff = new Date(iso).getTime() - now;
   const rtf = new Intl.RelativeTimeFormat(lng, { numeric: "auto", style: "short" });
+  if (Math.abs(diff) < 60_000) return rtf.format(0, "second");
+  const m = Math.round(diff / 60_000);
   if (Math.abs(m) < 60) return rtf.format(m, "minute");
   const h = Math.round(m / 60);
   return Math.abs(h) < 24 ? rtf.format(h, "hour") : rtf.format(Math.round(h / 24), "day");

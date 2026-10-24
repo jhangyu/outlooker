@@ -15,6 +15,11 @@ describe("formatRelative", () => {
     expect(formatRelative(at(-23 * 60 * MIN), "en", NOW)).toMatch(/23 hr/);
     expect(formatRelative(at(-48 * 60 * MIN), "en", NOW)).toMatch(/2 days ago/);
   });
+  it("under 60 s reads as now, from 60 s as minutes", () => {
+    expect(formatRelative(at(-59_000), "en", NOW)).toBe("now");
+    expect(formatRelative(at(30_000), "zh-TW", NOW)).toBe("現在");
+    expect(formatRelative(at(60_000), "en", NOW)).toMatch(/in 1 min/);
+  });
   it("follows the app language", () => {
     expect(formatRelative(at(-3 * MIN), "zh-TW", NOW)).toBe("3 分鐘前");
     expect(formatRelative(at(5 * MIN), "zh-TW", NOW)).toBe("5 分鐘後");
