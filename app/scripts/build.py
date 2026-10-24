@@ -233,6 +233,9 @@ def build(opts):
 
 
 def main():
+    # run() streams child output (vite prints non-cp1252 glyphs) through sys.stdout, which Python < 3.15 encodes as cp1252 on Windows
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description="Build the outlooker desktop app (tauri build).")
     ap.add_argument("--debug", action="store_true", help="pass --debug to tauri build")
     ap.add_argument("--clean-install", action="store_true", help="force npm ci")
