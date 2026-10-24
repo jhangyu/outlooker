@@ -22,4 +22,8 @@ lastSyncedAt: string | null,
 /**
  * Message of the newest job's `job_failed` row; set only when status is `failed`.
  */
-failureReason: string | null, };
+failureReason: string | null, 
+/**
+ * The newest job is a removal that failed (status is `failed`): Delete is the way forward, a sync would do nothing.
+ */
+removeFailed: boolean, };

@@ -49,6 +49,7 @@ export function makePst(p: Partial<PstSource> = {}): PstSource {
     lastCheckedAt: "2026-10-01T08:10:00Z",
     lastSyncedAt: "2026-10-01T08:10:00Z",
     failureReason: null,
+    removeFailed: false,
     ...p,
   };
 }
