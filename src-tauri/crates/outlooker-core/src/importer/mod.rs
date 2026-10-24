@@ -75,7 +75,7 @@ impl ImportManager {
         queue::register(&self.inner, paths).await
     }
     /// One sync step per target path: skip while a job is active, unchanged → only `last_checked_at`, else probe and
-    /// queue a job, or record the locked / unavailable streak. Serialized; kicks the worker when it queued a job.
+    /// queue a job, or record the locked / unavailable streak. Paths run concurrently; kicks the worker per queued job.
     pub async fn sync(&self, target: SyncTarget) -> Result<(), AppError> {
         queue::sync(&self.inner, target).await
     }

@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -25,7 +25,7 @@ use crate::importer::probe::{Probe, probe};
 use crate::importer::progress::{BYTE_BUDGET, ByteBudget, Throughput};
 use crate::importer::runner::worker;
 use crate::importer::types::{FolderIn, ItemError, RawItem};
-use crate::importer::writer::truncate_to_micros;
+use crate::importer::writer::{INS_JOB_FAILED, truncate_to_micros};
 use crate::importer::{ImportTuning, RecoveryReport, SyncTarget};
 use crate::paths::Paths;
 use crate::sink::{CoreEvent, EventSink};
@@ -103,8 +103,6 @@ pub(crate) struct Inner {
     pub(super) throughput: Mutex<Throughput>,
     pub(super) hold_used: AtomicBool,
     pub(crate) events: broadcast::Sender<(i64, ImportStatus)>,
-    /// Serializes `sync` calls (scheduler and a manual "sync now" never interleave).
-    sync_lock: tokio::sync::Mutex<()>,
 }
 
 impl Inner {
@@ -123,7 +121,6 @@ impl Inner {
             throughput: Mutex::new(Throughput::new()),
             hold_used: AtomicBool::new(false),
             events: broadcast::Sender::new(64),
-            sync_lock: tokio::sync::Mutex::new(()),
         }
     }
     pub(super) fn running(&self) -> Option<RunningJob> {
@@ -365,54 +362,72 @@ enum SyncStep {
     Queued,
 }
 
-/// One sync step for one path (spec 2026-10-24 PST scheduled sync; arch-2 §2–§4), in one transaction that holds the
-/// source row. Unchanged = stat size and mtime equal the checkpoint identity and the newest job is a completed
-/// import: no job, no open. Locked / unavailable streaks keep one job row (and one error row) per streak.
+/// One sync step for one path (spec 2026-10-24 PST scheduled sync; arch-2 §2–§4). Unchanged = stat size and mtime
+/// equal the checkpoint identity and the newest job is a completed import: no job, no open. Locked / unavailable
+/// streaks keep one job row (and one error row) per streak.
+/// File I/O (stat, probe) runs on the blocking pool before the transaction, holding no lock (contract override 9: a
+/// stalled network share delays only its own path). The transaction then holds the source row and applies the result
+/// only when the newest job is still the one the decision was based on, so concurrent syncs of one path (scheduler and
+/// "sync now") never both act on it.
 async fn sync_one(inner: &Inner, pst_id: i64) -> Result<SyncStep, AppError> {
-    let mut c = inner.db.app_client().await?;
-    let tx = c.transaction().await.map_err(db_err)?;
-    let Some((job_id, kind, state)) = newest_job_for_update(&tx, pst_id).await? else {
-        return Ok(SyncStep::Skipped);
+    let row = {
+        let c = inner.db.app_client().await?;
+        c.query_opt(
+            "SELECT s.path, j.id, j.kind, j.state, cp.pst_file_size, cp.pst_file_mtime FROM pst_sources s \
+               CROSS JOIN LATERAL (SELECT id, kind, state FROM import_jobs WHERE pst_id = s.id ORDER BY id DESC LIMIT 1) j \
+               LEFT JOIN import_checkpoints cp ON cp.pst_id = s.id WHERE s.id = $1",
+            &[&pst_id],
+        )
+        .await
+        .map_err(db_err)?
     };
-    if matches!(state, JobState::Queued | JobState::Running | JobState::Cancelling) {
+    let Some(row) = row else { return Ok(SyncStep::Skipped) };
+    let (path, seen_job, kind, state): (String, i64, JobKind, JobState) = (row.get(0), row.get(1), JobKind::from_db(row.get(2))?, JobState::from_db(row.get(3))?);
+    // A removal owns the path until it succeeds, also after it failed half-way: a re-import would bring back mail the
+    // user deleted (review round 1 finding 1).
+    if kind == JobKind::Remove || matches!(state, JobState::Queued | JobState::Running | JobState::Cancelling) {
         return Ok(SyncStep::Skipped);
     }
-    let path: String = tx.query_one("SELECT path FROM pst_sources WHERE id = $1", &[&pst_id]).await.map_err(db_err)?.get(0);
-    let mut step = SyncStep::Checked;
-    let unchanged = (kind, state) == (JobKind::Import, JobState::Completed) && {
-        let cp = tx.query_opt("SELECT pst_file_size, pst_file_mtime FROM import_checkpoints WHERE pst_id = $1", &[&pst_id]).await.map_err(db_err)?;
+    let identity: Option<(i64, SystemTime)> =
+        if (kind, state) == (JobKind::Import, JobState::Completed) { row.get::<_, Option<i64>>(4).zip(row.get(5)) } else { None };
+    // None = unchanged
+    let probed = tokio::task::spawn_blocking(move || {
         let now = std::fs::metadata(&path).ok().and_then(|m| Some((m.len() as i64, truncate_to_micros(m.modified().ok()?))));
-        cp.is_some_and(|r| now == Some((r.get(0), r.get(1))))
-    };
-    if !unchanged {
-        match probe(&path) {
-            Probe::Ready { .. } => {
-                tx.execute("INSERT INTO import_jobs (pst_id, kind, state) VALUES ($1, 'import', 'queued')", &[&pst_id]).await.map_err(db_err)?;
-                step = SyncStep::Queued;
-            }
-            Probe::Locked if (kind, state) == (JobKind::Import, JobState::Locked) => {
-                tx.execute("UPDATE import_jobs SET finished_at = now() WHERE id = $1", &[&job_id]).await.map_err(db_err)?;
-            }
-            Probe::Locked => {
-                tx.execute("INSERT INTO import_jobs (pst_id, kind, state, finished_at) VALUES ($1, 'import', 'locked', now())", &[&pst_id])
-                    .await
-                    .map_err(db_err)?;
-            }
-            Probe::Unavailable(_) if (kind, state) == (JobKind::Import, JobState::Failed) => {}
-            Probe::Unavailable(e) => {
-                let failed: i64 = tx
-                    .query_one("INSERT INTO import_jobs (pst_id, kind, state, finished_at) VALUES ($1, 'import', 'failed', now()) RETURNING id", &[&pst_id])
-                    .await
-                    .map_err(db_err)?
-                    .get(0);
-                let e = ItemError::new(ImportErrorStage::Open, ImportErrorSeverity::JobFailed, "", 0, &e.to_string());
-                tx.execute(
-                    "INSERT INTO import_errors (pst_id, job_id, stage, severity, message) VALUES ($1, $2, 'open', 'job_failed', $3)",
-                    &[&pst_id, &failed, &e.message],
-                )
+        (identity.is_none() || now != identity).then(|| probe(&path))
+    })
+    .await
+    .map_err(|e| AppError::internal(e.to_string()))?;
+
+    let mut c = inner.db.app_client().await?;
+    let tx = c.transaction().await.map_err(db_err)?;
+    match newest_job_for_update(&tx, pst_id).await? {
+        Some((job_id, ..)) if job_id == seen_job => {}
+        _ => return Ok(SyncStep::Skipped), // a job started, ended or was added meanwhile: the next sync looks again
+    }
+    let mut step = SyncStep::Checked;
+    match probed {
+        None => {}
+        Some(Probe::Ready { .. }) => {
+            tx.execute("INSERT INTO import_jobs (pst_id, kind, state) VALUES ($1, 'import', 'queued')", &[&pst_id]).await.map_err(db_err)?;
+            step = SyncStep::Queued;
+        }
+        Some(Probe::Locked) if state == JobState::Locked => {
+            tx.execute("UPDATE import_jobs SET finished_at = now() WHERE id = $1", &[&seen_job]).await.map_err(db_err)?;
+        }
+        Some(Probe::Locked) => {
+            tx.execute("INSERT INTO import_jobs (pst_id, kind, state, finished_at) VALUES ($1, 'import', 'locked', now())", &[&pst_id])
                 .await
                 .map_err(db_err)?;
-            }
+        }
+        Some(Probe::Unavailable(_)) if state == JobState::Failed => {}
+        Some(Probe::Unavailable(e)) => {
+            let failed: i64 = tx
+                .query_one("INSERT INTO import_jobs (pst_id, kind, state, finished_at) VALUES ($1, 'import', 'failed', now()) RETURNING id", &[&pst_id])
+                .await
+                .map_err(db_err)?
+                .get(0);
+            let e = ItemError::new(ImportErrorStage::Open, ImportErrorSeverity::JobFailed, "", 0, &e.to_string());
+            tx.execute(INS_JOB_FAILED, &[&pst_id, &failed, &ImportErrorStage::Open.as_db(), &e.message]).await.map_err(db_err)?;
         }
     }
     tx.execute("UPDATE pst_sources SET last_checked_at = now() WHERE id = $1", &[&pst_id]).await.map_err(db_err)?;
@@ -421,8 +436,8 @@ async fn sync_one(inner: &Inner, pst_id: i64) -> Result<SyncStep, AppError> {
 }
 
 /// `SyncTarget::All` = every enabled path; `One(id)` = that path even when disabled (explicit user action).
-pub(crate) async fn sync(inner: &Inner, target: SyncTarget) -> Result<(), AppError> {
-    let _serial = inner.sync_lock.lock().await;
+/// Paths run concurrently, each kicks the worker as soon as it queued a job; the first error is returned after all ran.
+pub(crate) async fn sync(inner: &Arc<Inner>, target: SyncTarget) -> Result<(), AppError> {
     let ids: Vec<i64> = {
         let c = inner.db.app_client().await?;
         let rows = match target {
@@ -435,18 +450,27 @@ pub(crate) async fn sync(inner: &Inner, target: SyncTarget) -> Result<(), AppErr
         }
         rows.iter().map(|r| r.get(0)).collect()
     };
-    let mut queued = false;
+    let mut steps = tokio::task::JoinSet::new();
     for pst_id in ids {
-        let step = sync_one(inner, pst_id).await?;
-        if step != SyncStep::Skipped {
-            emit_status(inner, pst_id).await;
+        let inner = inner.clone();
+        steps.spawn(async move {
+            let step = sync_one(&inner, pst_id).await?;
+            if step != SyncStep::Skipped {
+                emit_status(&inner, pst_id).await;
+            }
+            if step == SyncStep::Queued {
+                inner.kick.notify_one();
+            }
+            Ok::<(), AppError>(())
+        });
+    }
+    let mut first_err = None;
+    while let Some(r) = steps.join_next().await {
+        if let Err(e) = r.map_err(|e| AppError::internal(e.to_string())).and_then(|r| r) {
+            first_err.get_or_insert(e);
         }
-        queued |= step == SyncStep::Queued;
     }
-    if queued {
-        inner.kick.notify_one();
-    }
-    Ok(())
+    first_err.map_or(Ok(()), Err)
 }
 
 /// Newest job of a PST, locked for the rest of the transaction. None when the PST does not exist.
