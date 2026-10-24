@@ -30,7 +30,7 @@ pub fn probe(path: &str) -> Probe {
     if !p.is_absolute() {
         return fa("notAbsolute");
     }
-    if test_locked(path) {
+    if test_seam(path) {
         return Probe::Locked;
     }
     let meta = match std::fs::metadata(p) {
@@ -56,10 +56,18 @@ pub fn probe(path: &str) -> Probe {
     }
 }
 
+/// `probe` on the blocking pool: a slow path (network share) never stalls an async worker.
+pub async fn probe_blocking(path: String) -> Probe {
+    tokio::task::spawn_blocking(move || probe(&path)).await.unwrap_or_else(|e| Probe::Unavailable(AppError::internal(e.to_string())))
+}
+
 // ------------------------------------------------------------------------------------------------ test seam
 
 #[cfg(feature = "test-support")]
 static TEST_LOCKED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::LazyLock::new(Default::default);
+#[cfg(feature = "test-support")]
+static TEST_HELD: std::sync::LazyLock<(std::sync::Mutex<std::collections::HashSet<String>>, std::sync::Condvar)> =
+    std::sync::LazyLock::new(Default::default);
 
 /// Test seam (feature test-support): `probe(path)` reports `Locked` while set, for every ImportManager of the process.
 #[cfg(feature = "test-support")]
@@ -72,12 +80,35 @@ pub fn set_test_lock(path: &str, locked: bool) {
     }
 }
 
+/// Test seam (feature test-support): `probe(path)` blocks, like a stat on a stalled network share, until the
+/// returned guard is dropped.
 #[cfg(feature = "test-support")]
-fn test_locked(path: &str) -> bool {
+#[must_use]
+pub fn hold_probe(path: &str) -> ProbeHold {
+    TEST_HELD.0.lock().unwrap_or_else(|p| p.into_inner()).insert(path.to_owned());
+    ProbeHold(path.to_owned())
+}
+
+#[cfg(feature = "test-support")]
+pub struct ProbeHold(String);
+
+#[cfg(feature = "test-support")]
+impl Drop for ProbeHold {
+    fn drop(&mut self) {
+        TEST_HELD.0.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.0);
+        TEST_HELD.1.notify_all();
+    }
+}
+
+/// Waits while the path is held, then reports whether it is test-locked.
+#[cfg(feature = "test-support")]
+fn test_seam(path: &str) -> bool {
+    let held = TEST_HELD.0.lock().unwrap_or_else(|p| p.into_inner());
+    drop(TEST_HELD.1.wait_while(held, |h| h.contains(path)).unwrap_or_else(|p| p.into_inner()));
     TEST_LOCKED.lock().unwrap_or_else(|p| p.into_inner()).contains(path)
 }
 #[cfg(not(feature = "test-support"))]
-fn test_locked(_path: &str) -> bool {
+fn test_seam(_path: &str) -> bool {
     false
 }
 

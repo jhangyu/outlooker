@@ -14,7 +14,7 @@ use crate::importer::progress::Throughput;
 use crate::importer::queue::{CancelReason, Inner, JobCancel, JobKind, JobState, RunningJob, emit_status};
 use crate::importer::remove;
 use crate::importer::types::ItemError;
-use crate::importer::writer::{AFTER_JOB_VACUUM, Checkpoint};
+use crate::importer::writer::{AFTER_JOB_VACUUM, Checkpoint, INS_JOB_FAILED};
 use crate::sink::CoreEvent;
 
 /// How long `pause_for_db` waits for the Supervisor to leave `Ready` after a DB error (Part 02 §6.1 PG crash row).
@@ -162,12 +162,7 @@ async fn set_final(inner: &Inner, job_id: i64, pst_id: i64, state: JobState, fai
     let tx = c.transaction().await.map_err(db_err)?;
     if let Some(f) = failure {
         let e = ItemError::new(f.stage, ImportErrorSeverity::JobFailed, "", 0, &f.message);
-        tx.execute(
-            "INSERT INTO import_errors (pst_id, job_id, stage, severity, message) VALUES ($1, $2, $3, 'job_failed', $4)",
-            &[&pst_id, &job_id, &f.stage.as_db(), &e.message],
-        )
-        .await
-        .map_err(db_err)?;
+        tx.execute(INS_JOB_FAILED, &[&pst_id, &job_id, &f.stage.as_db(), &e.message]).await.map_err(db_err)?;
     }
     tx.execute(
         "UPDATE import_jobs SET state = $2, finished_at = CASE WHEN $2 = 'queued' THEN NULL ELSE now() END WHERE id = $1",

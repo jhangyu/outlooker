@@ -19,12 +19,12 @@ use crate::dto::error::AppError;
 use crate::dto::events::LibraryChanged;
 use crate::dto::import::{ImportErrorStage, ImportPhase, ImportProgress};
 use crate::importer::normalize::{NormalizeCtx, normalize};
-use crate::importer::probe::{Probe, probe};
+use crate::importer::probe::{Probe, probe_blocking};
 use crate::importer::progress::Throughput;
-use crate::importer::pst_reader::{self, ReaderMsg, ReaderParams, ScanResult};
+use crate::importer::pst_reader::{self, POISON_MESSAGE, ReaderMsg, ReaderParams, ScanResult};
 use crate::importer::queue::{CancelReason, Inner, JobCancel, synthetic_items};
 use crate::importer::types::{FolderIn, NormalizedItem, RawItem};
-use crate::importer::writer::{Checkpoint, OnCommit, WriterConfig, WriterHandle, load_known_hashes, upsert_folders};
+use crate::importer::writer::{Checkpoint, INS_SCAN_ERROR, OnCommit, WriterConfig, WriterHandle, load_known_hashes, upsert_folders};
 use crate::sink::CoreEvent;
 
 pub(super) fn progress_event(cp: &Checkpoint, tp: Option<&Throughput>) -> ImportProgress {
@@ -77,7 +77,7 @@ pub(super) async fn attempt(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel
     let path: String = c.query_one("SELECT path FROM pst_sources WHERE id = $1", &[&pst_id]).await.map_err(db_err)?.get(0);
     let synthetic = synthetic_items(&path);
     // (1) file identity; a lock that appeared while the job was queued must not reset the checkpoint
-    let (size, mtime) = match probe(&path) {
+    let (size, mtime) = match probe_blocking(path.clone()).await {
         Probe::Ready { size, mtime } => (size, mtime),
         Probe::Locked => return Ok(AttemptEnd::Locked),
         Probe::Unavailable(e) => return Ok(AttemptEnd::Failed(JobFailure { stage: ImportErrorStage::Open, message: e.to_string() })),
@@ -92,15 +92,24 @@ pub(super) async fn attempt(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel
     let known: HashSet<i64> =
         c.query("SELECT pst_item_id FROM message_occurrences WHERE pst_id = $1", &[&pst_id]).await.map_err(db_err)?.iter().map(|r| r.get(0)).collect();
     let known_count = known.len() as i64;
+    // items an earlier job skipped as poison: a new sync job must not read (and die on) them again; marker rows
+    // without an item id (death before the id was read) cannot be keyed and are retried
+    let poison: HashSet<i64> = c
+        .query("SELECT pst_item_id FROM import_errors WHERE pst_id = $1 AND stage = 'parse' AND message = $2 AND pst_item_id > 0", &[&pst_id, &POISON_MESSAGE])
+        .await
+        .map_err(db_err)?
+        .iter()
+        .map(|r| r.get(0))
+        .collect();
     // (3) poison item, (4) reader
-    let (rx, reader) = spawn_reader(inner, &path, &start, reset, synthetic, Arc::new(known), cancel)?;
+    let (rx, reader) = spawn_reader(inner, &path, &start, reset, synthetic, (Arc::new(known), Arc::new(poison)), cancel)?;
     let (rx, scanned) = first_message(rx, cancel).await?;
     let scanned = match scanned {
         Ok(s) => s,
         Err(f) => {
             join_thread(reader).await;
             // libpff's open error is a bare string: re-probe to tell a lock from a broken file
-            if f.stage == ImportErrorStage::Open && probe(&path) == Probe::Locked {
+            if f.stage == ImportErrorStage::Open && probe_blocking(path).await == Probe::Locked {
                 return Ok(AttemptEnd::Locked);
             }
             return Ok(AttemptEnd::Failed(f));
@@ -156,7 +165,7 @@ fn spawn_reader(
     start: &Checkpoint,
     reset: bool,
     synthetic: Option<(Vec<FolderIn>, Vec<RawItem>)>,
-    known: Arc<HashSet<i64>>,
+    (known, poison): (Arc<HashSet<i64>>, Arc<HashSet<i64>>),
     cancel: &JobCancel,
 ) -> Result<(Receiver<ReaderMsg>, JoinHandle<()>), AppError> {
     let job_id = start.job_id;
@@ -175,6 +184,7 @@ fn spawn_reader(
         budget: cancel.budget.clone(),
         job_id,
         known,
+        poison,
     };
     Ok(match synthetic {
         #[cfg(feature = "test-support")]
@@ -202,12 +212,7 @@ async fn first_message(rx: Receiver<ReaderMsg>, cancel: &JobCancel) -> Result<(R
 async fn record_scan(c: &mut Client, pst_id: i64, job_id: i64, scanned: &ScanResult, start: Checkpoint) -> Result<Checkpoint, AppError> {
     upsert_folders(c, pst_id, &scanned.folders).await?;
     for e in &scanned.scan_errors {
-        c.execute(
-            "INSERT INTO import_errors (pst_id, job_id, stage, severity, folder_path, message) VALUES ($1, $2, 'scan', 'degraded', $3, $4)",
-            &[&pst_id, &job_id, &e.folder_path, &e.message],
-        )
-        .await
-        .map_err(db_err)?;
+        c.execute(INS_SCAN_ERROR, &[&pst_id, &job_id, &e.folder_path, &e.message]).await.map_err(db_err)?;
     }
     Checkpoint::set_phase(c, pst_id, ImportPhase::Importing, Some(scanned.items_total)).await?;
     Ok(Checkpoint { phase: ImportPhase::Importing, items_total: Some(scanned.items_total), ..start })

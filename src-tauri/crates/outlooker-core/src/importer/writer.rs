@@ -270,8 +270,41 @@ JOIN messages m ON m.dedupe_key = o.dedupe_key
 JOIN folders f ON f.pst_id = $1 AND f.pst_folder_id = o.pst_folder_id
 ON CONFLICT (pst_id, pst_item_id) DO NOTHING";
 
-const INS_ERRORS: &str = "INSERT INTO import_errors (pst_id, job_id, stage, severity, folder_path, pst_item_id, message)
-SELECT $1, $2, stage, severity, folder_path, pst_item_id, message FROM stage_errors";
+/// Error rows of `$src` (columns stage, severity, folder_path, pst_item_id, message) for PST $1, job $2. Every
+/// sync of a source is a new job that re-reads its unreadable items and re-hits its failures: an error an earlier
+/// job of this source already recorded is not added again, its row moves to this job (job_id, occurred_at). So a
+/// source keeps one row per distinct error, and the newest job still finds its own `job_failed` row.
+// ponytail: matched through import_errors_page (pst_id prefix); add an index on (pst_id, pst_item_id) if sources
+// with tens of thousands of error rows make batches slow
+macro_rules! insert_errors_sql {
+    ($src:literal) => {
+        concat!(
+            "WITH n AS (", $src, "), \
+             moved AS (UPDATE import_errors e SET job_id = $2, occurred_at = now() FROM n WHERE ", same_error!(), " RETURNING e.id) \
+             INSERT INTO import_errors (pst_id, job_id, stage, severity, folder_path, pst_item_id, message) \
+             SELECT $1, $2, n.stage, n.severity, n.folder_path, n.pst_item_id, n.message FROM n \
+              WHERE NOT EXISTS (SELECT 1 FROM import_errors e WHERE ", same_error!(), ")"
+        )
+    };
+}
+/// `e` is a row of an earlier job of PST $1 with the same content as `n` (rows of this job never match).
+macro_rules! same_error {
+    () => {
+        "e.pst_id = $1 AND e.job_id IS DISTINCT FROM $2 AND e.stage = n.stage AND e.severity = n.severity \
+         AND e.message = n.message AND e.folder_path IS NOT DISTINCT FROM n.folder_path \
+         AND e.pst_item_id IS NOT DISTINCT FROM n.pst_item_id"
+    };
+}
+
+const INS_ERRORS: &str = insert_errors_sql!("SELECT stage, severity, folder_path, pst_item_id, message FROM stage_errors");
+/// One degraded scan row: $3 folder_path, $4 message.
+pub(crate) const INS_SCAN_ERROR: &str = insert_errors_sql!(
+    "SELECT 'scan'::text AS stage, 'degraded'::text AS severity, $3::text AS folder_path, NULL::bigint AS pst_item_id, $4::text AS message"
+);
+/// One job_failed row: $3 stage, $4 message.
+pub(crate) const INS_JOB_FAILED: &str = insert_errors_sql!(
+    "SELECT $3::text AS stage, 'job_failed'::text AS severity, NULL::text AS folder_path, NULL::bigint AS pst_item_id, $4::text AS message"
+);
 
 /// Bytes an item adds to the open batch (the 64 MB cut of spec Part 04 §6.2).
 pub fn staged_bytes(item: &NormalizedItem) -> usize {
@@ -415,7 +448,9 @@ async fn commit_batch(
         .collect();
     tx.execute(INS_INLINE, &[]).await?;
     tx.execute(INS_OCCURRENCES, &[&cfg.pst_id]).await?;
-    tx.execute(INS_ERRORS, &[&cfg.pst_id, &cp.job_id]).await?;
+    if items.iter().any(|i| !i.errors.is_empty()) {
+        tx.execute(INS_ERRORS, &[&cfg.pst_id, &cp.job_id]).await?;
+    }
     let mails = items.iter().filter(|i| matches!(i.outcome, Outcome::Mail(_))).count() as i64;
     let skipped = items.iter().filter(|i| matches!(i.outcome, Outcome::Skipped)).count() as i64;
     let non_mail = items.iter().filter(|i| matches!(i.outcome, Outcome::NonMail)).count() as i64;

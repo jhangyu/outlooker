@@ -13,7 +13,7 @@ use outlooker_core::dto::error::AppError;
 use outlooker_core::dto::import::{EnqueueResult, ImportErrorStage, ImportStatus};
 use outlooker_core::gate::Gate;
 use outlooker_core::importer::inflight::{Inflight, InflightRecord};
-use outlooker_core::importer::probe::set_test_lock;
+use outlooker_core::importer::probe::{hold_probe, set_test_lock};
 use outlooker_core::importer::pst_reader::walk_ids;
 use outlooker_core::importer::types::{FolderIn, RawAttachment, RawContent, RawItem, RawMail, RawRecipient};
 use outlooker_core::importer::writer::{Checkpoint, WriterLimits, truncate_to_micros};
@@ -615,6 +615,7 @@ async fn retry_rewrites_marker_before_reading() {
         budget: budget.clone(),
         job_id: 9,
         known: Default::default(),
+        poison: Default::default(),
     });
     assert!(matches!(rx.recv().unwrap(), ReaderMsg::Scanned(_)));
     let ReaderMsg::Item(item) = rx.recv().unwrap() else { panic!("item 1 expected") };
@@ -864,6 +865,110 @@ async fn sync_locked_no_error_row_no_finalize() {
     fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
     assert_eq!(tc.count("SELECT count(*) FROM messages").await, 3);
+}
+
+/// Review round 1 finding 1: a removal that failed half-way keeps its path out of every sync, so the mail it already
+/// deleted is not imported again.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_skips_path_after_failed_removal() {
+    let tc = TestCluster::start().await;
+    let mut fx = manager(&tc, ImportTuning::default());
+    let path = synthetic_path(&tc, "rm.pst");
+    let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), corpus(3)).await.unwrap();
+    fx.mgr.start_worker();
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
+    tc.admin()
+        .await
+        .execute("INSERT INTO import_jobs (pst_id, kind, state, started_at, finished_at) VALUES ($1, 'remove', 'failed', now(), now())", &[&pst_id])
+        .await
+        .unwrap();
+    std::fs::write(&path, b"!BDN changed since the import").unwrap();
+    fx.mgr.sync(SyncTarget::All).await.unwrap();
+    fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
+    assert_eq!(tc.count("SELECT count(*) FROM import_jobs WHERE kind = 'import'").await, 1, "no re-import after a failed removal");
+    assert_eq!(fx.mgr.list().await.unwrap()[0].status, ImportStatus::Failed);
+}
+
+/// Review round 1 finding 2: an item an earlier job skipped as poison (it killed the process twice) is not read by a
+/// later sync job; it stays one error row.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_skips_earlier_poison_items() {
+    let tc = TestCluster::start().await;
+    let mut fx = manager(&tc, ImportTuning::default());
+    let path = synthetic_path(&tc, "poison.pst");
+    let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), corpus(3)).await.unwrap();
+    fx.mgr.start_worker();
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
+    let poison = item(4, 1, RawContent::Unreadable { stage: ImportErrorStage::Parse, message: "poison item was read".into() });
+    tc.admin()
+        .await
+        .execute(
+            "INSERT INTO import_errors (pst_id, job_id, stage, severity, folder_path, pst_item_id, message) \
+             SELECT $1, id, 'parse', 'item_skipped', 'Inbox', $2, 'parser crashed on this item' FROM import_jobs WHERE pst_id = $1",
+            &[&pst_id, &poison.pst_item_id],
+        )
+        .await
+        .unwrap();
+    let mut second = corpus(3);
+    second.push(poison);
+    ImportManager::set_synthetic_items(&path, folders(), second);
+    std::fs::write(&path, b"!BDN the file grew in Outlook").unwrap();
+    fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
+    assert_eq!(tc.count("SELECT count(*) FROM import_errors WHERE message = 'poison item was read'").await, 0, "poison item not read");
+    assert_eq!(tc.count("SELECT count(*) FROM import_errors").await, 1);
+}
+
+/// Review round 1 finding 3: every sync re-reads unreadable items and re-runs a job that fails the same way; the
+/// source keeps one error row per distinct error, so rows and the listed count do not grow per sync.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_repeated_errors_keep_one_row() {
+    let tc = TestCluster::start().await;
+    let mut fx = manager(&tc, ImportTuning::default());
+    let path = synthetic_path(&tc, "bad-item.pst");
+    let bad = vec![item(1, 1, RawContent::Unreadable { stage: ImportErrorStage::Parse, message: "bad item".into() })];
+    let item_src = fx.mgr.enqueue_synthetic(&path, folders(), bad).await.unwrap();
+    let broken = synthetic_path(&tc, "broken.pst"); // PST magic, but libpff cannot open it: the job fails every time
+    let res = fx.mgr.register(vec![broken]).await.unwrap();
+    let EnqueueResult::Queued { pst } = &res[0] else { panic!("{res:?}") };
+    let failing = pst.id;
+    fx.mgr.start_worker();
+    assert_eq!(wait_jobs(&mut fx.events, &[item_src, failing]).await, [ImportStatus::Completed, ImportStatus::Failed]);
+    std::fs::write(&path, b"!BDN changed").unwrap();
+    fx.mgr.sync(SyncTarget::All).await.unwrap();
+    assert_eq!(wait_jobs(&mut fx.events, &[item_src, failing]).await, [ImportStatus::Completed, ImportStatus::Failed]);
+    assert_eq!(tc.count("SELECT count(*) FROM import_jobs").await, 4, "two runs of each path");
+    let rows = |id: i64| format!("SELECT count(*) FROM import_errors WHERE pst_id = {id}");
+    assert_eq!((tc.count(&rows(item_src)).await, tc.count(&rows(failing)).await), (1, 1));
+    let list = fx.mgr.list().await.unwrap();
+    let listed = |id: i64| list.iter().find(|p| p.id == id).unwrap();
+    assert_eq!((listed(item_src).error_count, listed(failing).error_count), (1, 1));
+    assert!(listed(failing).failure_reason.is_some(), "the newest failed job still shows its reason");
+}
+
+/// Contract override 9: a probe stuck on one path (a stalled network share) does not delay another path's sync or
+/// the import worker.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_blocked_probe_does_not_delay_other_paths() {
+    let tc = TestCluster::start().await;
+    let mut fx = manager(&tc, ImportTuning::default());
+    let slow = synthetic_path(&tc, "slow.pst");
+    let fast = synthetic_path(&tc, "fast.pst");
+    let a = fx.mgr.enqueue_synthetic(&slow, folders(), corpus(3)).await.unwrap();
+    let b = fx.mgr.enqueue_synthetic(&fast, folders(), corpus_tagged(3, "f")).await.unwrap();
+    fx.mgr.start_worker();
+    assert_eq!(wait_jobs(&mut fx.events, &[a, b]).await, [ImportStatus::Completed; 2]);
+    std::fs::write(&slow, b"!BDN changed slow").unwrap();
+    std::fs::write(&fast, b"!BDN changed fast").unwrap();
+    let hold = hold_probe(&slow); // the slow path sorts first: a serial sync would wait on it
+    let mgr = fx.mgr.clone();
+    let sync = tokio::spawn(async move { mgr.sync(SyncTarget::All).await });
+    let fast_end = tokio::time::timeout(Duration::from_secs(3), wait_job(&mut fx.events, b)).await;
+    assert_eq!(fast_end.ok(), Some(ImportStatus::Completed), "the fast path synced and imported while the slow probe hangs");
+    assert!(!sync.is_finished());
+    drop(hold);
+    sync.await.unwrap().unwrap();
+    assert_eq!(wait_job(&mut fx.events, a).await, ImportStatus::Completed);
 }
 
 // ------------------------------------------------------------------------------------------------ Outlook fixtures (W2)

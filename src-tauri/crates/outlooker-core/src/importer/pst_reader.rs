@@ -26,7 +26,7 @@ const TRANSPORT_MESSAGE_HEADERS: u32 = 0x007d;
 const SENT_REPRESENTING_SMTP_ADDRESS: u32 = 0x5d02;
 const SENT_REPRESENTING_NAME: u32 = 0x0042;
 const MAIL_CLASSES: [&str; 3] = ["IPM.Note", "IPM.Schedule.Meeting", "REPORT.IPM.Note"];
-const POISON_MESSAGE: &str = "parser crashed on this item";
+pub(crate) const POISON_MESSAGE: &str = "parser crashed on this item";
 
 pub struct ScanResult {
     pub folders: Vec<FolderIn>,
@@ -53,6 +53,9 @@ pub struct ReaderParams {
     pub job_id: i64,
     /// PST item ids that already have an occurrence under this source: sent as `RawContent::Known`, never read.
     pub known: Arc<HashSet<i64>>,
+    /// PST item ids an earlier job of this source skipped as poison (they killed the process twice): sent as
+    /// unreadable with the poison message, never read again.
+    pub poison: Arc<HashSet<i64>>,
 }
 
 /// One folder of the walk, in walk order.
@@ -290,7 +293,7 @@ fn run(p: ReaderParams, tx: SyncSender<ReaderMsg>) {
             let raw = match pending {
                 Some(r) if r.attempts >= 2 => {
                     // died twice on this item: do not touch it
-                    base(r.pst_item_id, RawContent::Unreadable { stage: ImportErrorStage::Parse, message: POISON_MESSAGE.to_owned() })
+                    base(r.pst_item_id, poisoned())
                 }
                 _ => {
                     let attempts = pending.map_or(1, |r| r.attempts + 1);
@@ -303,6 +306,7 @@ fn run(p: ReaderParams, tx: SyncSender<ReaderMsg>) {
                     match folder.item.sub_message(index).and_then(|m| Ok((i64::from(m.identifier()?), m))) {
                         Err(e) => base(0, RawContent::Unreadable { stage: ImportErrorStage::Parse, message: e.message }),
                         Ok((id, _)) if p.known.contains(&id) => base(id, RawContent::Known),
+                        Ok((id, _)) if p.poison.contains(&id) => base(id, poisoned()),
                         Ok((id, message)) => {
                             mark(id); // same attempt, now with the PST item id for a later error row
                             let content = read_mail(&message)
@@ -340,6 +344,8 @@ pub fn spawn_synthetic(params: ReaderParams, folders: Vec<FolderIn>, items: Vec<
             for mut raw in items.into_iter().filter(|r| r.seq > params.cursor_seq) {
                 if params.known.contains(&raw.pst_item_id) {
                     raw.content = RawContent::Known;
+                } else if params.poison.contains(&raw.pst_item_id) {
+                    raw.content = poisoned();
                 }
                 if params.cancel.load(Ordering::SeqCst) || !send_item(&params, &tx, raw) {
                     return;
@@ -348,6 +354,10 @@ pub fn spawn_synthetic(params: ReaderParams, folders: Vec<FolderIn>, items: Vec<
         })
         .expect("spawn synthetic reader");
     (rx, handle)
+}
+
+fn poisoned() -> RawContent {
+    RawContent::Unreadable { stage: ImportErrorStage::Parse, message: POISON_MESSAGE.to_owned() }
 }
 
 /// Deterministic list of (seq, pst_item_id, folder path) without reading message properties (tests).
