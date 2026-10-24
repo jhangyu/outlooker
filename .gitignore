@@ -9,3 +9,4 @@ app/backend/gen/
 .claude/settings.local.json
 .claude/worktrees/
 .claude/tmp/
+__pycache__/

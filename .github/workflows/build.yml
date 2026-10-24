@@ -20,6 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
       - run: python app/scripts/ci_guard.py
 
   build:
@@ -31,6 +36,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
       - uses: jdx/mise-action@v5
       # rustup >= 1.28 no longer auto-installs the toolchain pinned in rust-toolchain.toml
       - run: rustup toolchain install
@@ -41,10 +51,12 @@ jobs:
           workspaces: app/backend
       - uses: actions/cache@v6
         with:
-          path: ~/.npm
+          path: ${{ github.workspace }}/.npm-cache
           key: npm-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
           restore-keys: npm-${{ runner.os }}-
       - run: python app/scripts/build.py --ci --out out
+        env:
+          npm_config_cache: ${{ github.workspace }}/.npm-cache
       - uses: actions/upload-artifact@v7
         with:
           name: bundles-${{ matrix.os }}
@@ -64,6 +76,9 @@ jobs:
           path: out
           merge-multiple: true
       # gh is preinstalled on runners; lighter than a third-party release action
-      - run: gh release create "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" --generate-notes
+      # create tolerates an existing release (job re-run), upload --clobber replaces assets
+      - run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes || true
+          gh release upload "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" --clobber
         env:
           GH_TOKEN: ${{ github.token }}

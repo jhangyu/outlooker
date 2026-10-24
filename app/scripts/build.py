@@ -30,21 +30,26 @@ def run(args, **kw):
         sys.exit(rc)
 
 
+def is_bundle(p):
+    return (p.is_dir() and p.suffix == ".app") or (
+        p.is_file() and (p.suffix in {".dmg", ".msi", ".deb", ".rpm", ".AppImage"} or p.name.endswith("-setup.exe")))
+
+
 def collect_bundles(bases, out):
     """Copy bundles from each `<base>/*/` dir flat into out (a .app dir becomes .app.tar.gz); return the new paths."""
     out.mkdir(parents=True, exist_ok=True)
     copied = []
     for base in bases:
         for p in sorted(base.glob("*/*")) if base.is_dir() else []:
-            if p.is_dir() and p.suffix == ".app":
+            if not is_bundle(p):
+                continue
+            if p.is_dir():
                 dst = out / (p.name + ".tar.gz")
                 with tarfile.open(dst, "w:gz") as t:
                     t.add(p, arcname=p.name)
-            elif p.is_file() and (p.suffix in {".dmg", ".msi", ".deb", ".rpm", ".AppImage"} or p.name.endswith("-setup.exe")):
+            else:
                 dst = out / p.name
                 shutil.copy2(p, dst)
-            else:
-                continue
             copied.append(dst)
     return copied
 
@@ -81,19 +86,19 @@ def main():
     # APPIMAGE_EXTRACT_AND_RUN: linuxdeploy runs without FUSE (containers, CI)
     run(cmd, env={**os.environ, "CI": "true", "APPIMAGE_EXTRACT_AND_RUN": "1"})
 
-    # --debug writes to target/debug, so search both
-    bases = (BUNDLE_DIR, BUNDLE_DIR.parents[1] / "debug" / "bundle")
+    # only this build's profile: older bundles of the other profile must not be shipped
+    bases = (BUNDLE_DIR.parents[1] / ("debug" if opts.debug else "release") / "bundle",)
     if opts.out:
         copied = collect_bundles(bases, opts.out)
         for p in copied:
             print(p)
         if not copied:
-            die("no bundles found under " + " or ".join(map(str, bases)))
+            die("no bundles found under " + str(bases[0]))
         return
     for base in bases:
         if base.is_dir():
             for p in sorted(base.glob("*/*")):
-                if p.suffix in {".app", ".dmg", ".msi", ".exe"}:
+                if is_bundle(p):
                     print(p)
 
 

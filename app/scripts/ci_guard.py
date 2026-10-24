@@ -20,17 +20,19 @@ import re
 import sys
 from pathlib import Path
 
+# npm/pnpm/yarn options (--prefix app, -w app, --silent) may precede the subcommand
+OPTS = r"(?:-{1,2}[\w-]+(?:[ =][^\s-]\S*)?\s+)*"
 BAD = re.compile(
     r"(?<![\w.-])(?:"
-    r"cargo\s+(?:\+\S+\s+)?(?:test|nextest|bench)"
-    r"|(?:npm|pnpm|yarn)\s+(?:run(?:-script)?\s+)?(?:test|e2e)\S*"
+    r"cargo\s+(?:\+\S+\s+)?(?:test|t|nextest|bench)"
+    r"|(?:npm|pnpm|yarn)\s+" + OPTS + r"(?:run(?:-script)?\s+" + OPTS + r")?(?:(?:test|e2e)\S*|(?:tst|t|it|cit|install-test)(?:[:-]\S*)?)"
     r"|(?:npx\s+)?(?:vitest|pytest|wdio|nextest)"
-    r"|--features[ =]\S*e2e"
+    r"|(?:--features|-F)[ =]\S*e2e"
     r"|perf\.rs|outlooker-loadgen"
     r"|node\s+\S*(?:e2e|vitest-capped|cargo-test-runner)\S*"
     r")(?![\w-])"
 )
-NPM_RUN = re.compile(r"(?<![\w.-])npm\s+run(?:-script)?\s+([\w:.-]+)")
+NPM_RUN = re.compile(r"(?<![\w.-])npm\s+" + OPTS + r"run(?:-script)?\s+" + OPTS + r"([\w:.-]+)")
 
 
 def clean(line):
