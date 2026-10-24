@@ -1,12 +1,11 @@
 import type { PstSource } from "../../api/bindings/PstSource";
 import type { SyncSchedule } from "../../api/bindings/SyncSchedule";
 
-/** What the row shows. `disabled` sits on top of the last status, except while a job is live (arch-2 §6 UI state table). */
-export type RowState = "completed" | "queued" | "running" | "locked" | "failed" | "removing" | "disabled";
+/** What the row shows. `paused` sits on top of every status except `removing` (a paused path may still be stopping its current item). */
+export type RowState = "completed" | "queued" | "running" | "locked" | "failed" | "removing" | "paused";
 
 export function rowState(p: Pick<PstSource, "status" | "paused">): RowState {
-  const live = p.status === "running" || p.status === "queued" || p.status === "removing";
-  return p.paused && !live ? "disabled" : p.status;
+  return p.paused && p.status !== "removing" ? "paused" : p.status;
 }
 
 /** Editable form of a schedule. `n`/`unit` only matter for interval, `time`/`days` only for daily. */

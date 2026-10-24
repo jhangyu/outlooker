@@ -3,28 +3,28 @@
   "add": "加入 PST 路徑…",
   "syncAll": "全部立即同步",
   "stats": { "messages": "郵件", "psts": "PST 路徑", "size": "資料庫大小", "unknown": "—" },
-  "paths": { "title": "已登錄的 PST 路徑", "summary": "{{n}} 個 · {{enabled}} 個已啟用", "note": "同步只新增郵件；在 Outlook 刪除或移動的郵件會保留。" },
-  "col": { "name": "檔案", "size": "大小", "messages": "郵件", "new": "上次新增", "lastSync": "上次同步", "nextSync": "下次同步", "status": "狀態", "enabled": "啟用" },
-  "row": { "enable": "啟用 {{name}} 的同步", "syncNow": "立即同步 {{name}}", "syncOnce": "立即同步", "retry": "立即重試", "remove": "移除 {{name}}" },
+  "paths": { "title": "已登錄的 PST 路徑", "summary": "{{n}} 個 · {{active}} 個運作中", "note": "同步只新增郵件；在 Outlook 刪除或移動的郵件會保留。" },
+  "col": { "name": "檔案", "size": "大小", "messages": "郵件", "new": "上次新增", "lastSync": "上次同步", "nextSync": "下次同步", "status": "狀態" },
+  "row": { "pause": "暫停 {{name}}", "pauseTip": "暫停", "resume": "繼續 {{name}}", "resumeTip": "繼續", "unregister": "取消 {{name}}", "unregisterTip": "取消（保留郵件）", "removeTip": "刪除（連同只屬於它的郵件）", "syncNow": "立即同步 {{name}}", "syncOnce": "立即同步", "retry": "立即重試", "remove": "刪除 {{name}}" },
   "when": { "notScheduled": "不排程", "syncing": "同步中", "thisRun": "本輪", "retrying": "自動重試" },
   "status": {
     "queued": "等待中", "running": "同步中", "failed": "失敗",
-    "completed": "已是最新", "locked": "已鎖定", "removing": "移除中", "disabled": "已停用"
+    "completed": "已是最新", "locked": "已鎖定", "removing": "移除中", "paused": "已暫停"
   },
   "cap": {
     "queued": "等目前的同步完成後開始。",
     "locked": "其他程式正在使用此檔案。下次排程會自動重試。",
     "failed": "同步失敗。",
-    "disabled": "郵件保留在資料庫；排程與全部同步會略過此路徑。"
+    "paused": "已暫停。排程與全部同步會略過此路徑；繼續後從中斷處接續。",
+    "pausing": "暫停中，處理完目前項目後停止。"
   },
   "phase": { "scanning": "掃描資料夾", "importing": "匯入郵件", "finalizing": "建立搜尋索引" },
   "progress": "{{done}} / {{total}} · {{percent}}%",
   "rate": "{{rate}}/秒",
   "eta": "剩餘約 {{minutes}} 分鐘",
-  "cancel": "取消",
   "sched": {
     "title": "同步排程",
-    "appliesTo": "套用到所有已啟用的路徑",
+    "appliesTo": "套用到所有未暫停的路徑",
     "off": "關閉（只在按「立即同步」時執行）",
     "interval": "固定間隔",
     "every": "每隔",
@@ -43,6 +43,7 @@
   "activity": {
     "title": "目前活動",
     "lastRun": "上次執行 {{time}}",
+    "pause": "暫停",
     "idle": "目前沒有同步或匯入工作。",
     "lockedSkipped": "已鎖定 · 略過",
     "retryNext": "將於下次排程重試。"
@@ -51,10 +52,16 @@
   "stage": { "open": "開啟", "scan": "掃描", "parse": "解析", "html": "內容", "image": "圖片", "store": "儲存" },
   "empty": { "title": "尚未登錄任何 PST 路徑", "body": "加入 Outlook PST 檔案的路徑。Outlooker 會先完整匯入一次，之後依排程只帶入新郵件。" },
   "remove": {
-    "title": "移除「{{name}}」？",
+    "title": "刪除「{{name}}」？",
     "body": "這個 PST 檔案帶入了 {{n}} 封郵件。只存在於這個 PST 的郵件會被刪除；也存在於其他 PST 的郵件會保留。PST 檔案本身不會被修改。",
-    "confirm": "移除",
-    "done": "正在移除 {{name}}"
+    "confirm": "刪除",
+    "done": "正在刪除 {{name}}"
+  },
+  "unregister": {
+    "title": "取消「{{name}}」？",
+    "body": "此路徑會從清單移除，且不再同步。已匯入的郵件會保留並可搜尋。之後再登錄同一路徑不會產生重複郵件。",
+    "confirm": "取消路徑",
+    "done": "已取消 {{name}}"
   },
   "enqueue": { "rejected": "{{path}}：{{reason}}" }
 }
