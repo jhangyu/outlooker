@@ -1,0 +1,5 @@
+{
+  "env": {
+    "CLAUDE_PROJECT_TMP_DIR": "app/scripts/tmp"
+  }
+}

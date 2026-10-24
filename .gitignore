@@ -1,8 +1,11 @@
-scripts/tmp/
+app/scripts/tmp/
 node_modules/
 target/
 dist/
 .DS_Store
-src-tauri/target/
-src-tauri/resources/postgresql/
-src-tauri/gen/
+app/backend/target/
+app/backend/resources/postgresql/
+app/backend/gen/
+.claude/settings.local.json
+.claude/worktrees/
+.claude/tmp/
