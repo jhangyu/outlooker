@@ -1,5 +1,6 @@
 //! Durable job queue (spec Part 03 §7.1 state machine): job state, SQL commands, list, errors, recovery, worker
 //! start / shutdown. The job runner is `runner.rs`, one import attempt is `pipeline.rs`.
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -101,6 +102,8 @@ pub(crate) struct Inner {
     worker: Mutex<Option<tokio::task::JoinHandle<()>>>,
     shutdown: watch::Sender<bool>,
     running: Mutex<Option<RunningJob>>,
+    /// Paths whose sync step runs now (`sync`): one step per path, so a probe stuck on a dead share is not started again.
+    syncing: Mutex<HashSet<i64>>,
     pub(super) throughput: Mutex<Throughput>,
     pub(super) hold_used: AtomicBool,
     pub(crate) events: broadcast::Sender<(i64, ImportStatus)>,
@@ -119,6 +122,7 @@ impl Inner {
             worker: Mutex::new(None),
             shutdown: watch::Sender::new(false),
             running: Mutex::new(None),
+            syncing: Mutex::new(HashSet::new()),
             throughput: Mutex::new(Throughput::new()),
             hold_used: AtomicBool::new(false),
             events: broadcast::Sender::new(64),
@@ -292,7 +296,7 @@ fn plain_path(p: String) -> String {
     } else {
         return p;
     };
-    if plain.len() < 260 { plain } else { p }
+    if plain.encode_utf16().count() < 260 { plain } else { p }
 }
 
 /// Source row + its first import job (`queued`, or `locked` when the PST is held) in one transaction.
@@ -493,6 +497,11 @@ async fn sync_one(inner: &Inner, pst_id: i64) -> Result<SyncStep, AppError> {
         Some((job_id, ..)) if job_id == seen_job => {}
         _ => return Ok(SyncStep::Skipped), // a job started, ended or was added meanwhile: the next sync looks again
     }
+    // Paused, unregistered or shut down during the probe: queue nothing (the row is locked above).
+    let held: bool = tx.query_one("SELECT paused OR unregistered FROM pst_sources WHERE id = $1", &[&pst_id]).await.map_err(db_err)?.get(0);
+    if held || inner.shutting_down() {
+        return Ok(SyncStep::Skipped);
+    }
     let mut step = SyncStep::Checked;
     match probed {
         None => {}
@@ -536,6 +545,8 @@ async fn sync_one(inner: &Inner, pst_id: i64) -> Result<SyncStep, AppError> {
 /// `SyncTarget::All` = every listed path; `One(id)` = that path. Both skip a paused path; an unregistered one is not
 /// listed (`One`: NotFound).
 /// Paths run concurrently, each kicks the worker as soon as it queued a job; the first error is returned after all ran.
+/// A path whose previous step still runs (scheduled or "sync now", e.g. a probe stuck on a dead share) is skipped.
+/// Each step is its own task: dropping this future leaves running steps to finish, and the path stays marked meanwhile.
 pub(crate) async fn sync(inner: &Arc<Inner>, target: SyncTarget) -> Result<(), AppError> {
     let ids: Vec<i64> = {
         let c = inner.db.app_client().await?;
@@ -549,10 +560,15 @@ pub(crate) async fn sync(inner: &Arc<Inner>, target: SyncTarget) -> Result<(), A
         }
         rows.iter().filter(|r| !r.get::<_, bool>(1)).map(|r| r.get(0)).collect()
     };
-    let mut steps = tokio::task::JoinSet::new();
+    let mut steps = Vec::new();
     for pst_id in ids {
+        if !inner.syncing.lock().unwrap_or_else(|p| p.into_inner()).insert(pst_id) {
+            continue;
+        }
+        let mark = Syncing(inner.clone(), pst_id);
         let inner = inner.clone();
-        steps.spawn(async move {
+        steps.push(tokio::spawn(async move {
+            let _mark = mark;
             let step = sync_one(&inner, pst_id).await?;
             if step != SyncStep::Skipped {
                 emit_status(&inner, pst_id).await;
@@ -561,15 +577,25 @@ pub(crate) async fn sync(inner: &Arc<Inner>, target: SyncTarget) -> Result<(), A
                 inner.kick.notify_one();
             }
             Ok::<(), AppError>(())
-        });
+        }));
     }
     let mut first_err = None;
-    while let Some(r) = steps.join_next().await {
+    for h in steps {
+        let r = h.await;
         if let Err(e) = r.map_err(|e| AppError::internal(e.to_string())).and_then(|r| r) {
             first_err.get_or_insert(e);
         }
     }
     first_err.map_or(Ok(()), Err)
+}
+
+/// Unmarks the path when its sync step ends (also on panic).
+struct Syncing(Arc<Inner>, i64);
+
+impl Drop for Syncing {
+    fn drop(&mut self) {
+        self.0.syncing.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.1);
+    }
 }
 
 /// Newest job of a PST, locked for the rest of the transaction. None when the PST does not exist.
