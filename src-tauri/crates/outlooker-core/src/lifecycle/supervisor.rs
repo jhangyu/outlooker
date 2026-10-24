@@ -128,18 +128,38 @@ impl Supervisor {
 
     /// `app_retry` (spec Part 03 §4).
     pub async fn retry(&self) -> Result<(), AppError> {
-        if self.phase() != AppPhase::Failed {
+        let paths = self.paths();
+        // A marker without pgdata: cluster creation (first run or reset) failed after the marker was written. Create
+        // the cluster again on this root; onboarding would adopt the root and fail on the missing cluster.
+        let target = match (paths.pgdata().exists(), paths.marker().exists()) {
+            (true, _) => AppPhase::StartingDb,
+            (false, true) => AppPhase::InitializingCluster,
+            (false, false) => AppPhase::NeedsSetup,
+        };
+        // Compare-and-set, so a retry racing a reset (or another retry) is refused.
+        let claimed = self.inner.phase_tx.send_if_modified(|p| {
+            let ok = *p == AppPhase::Failed;
+            if ok {
+                *p = target;
+            }
+            ok
+        });
+        if !claimed {
             return Err(AppError::invalid("phase", "notFailed"));
         }
         self.inner.restarts.lock().unwrap_or_else(|p| p.into_inner()).clear();
-        if self.paths().pgdata().exists() {
-            self.set_phase(AppPhase::StartingDb, None).await;
-            let me = self.clone();
-            tokio::spawn(async move {
-                let _ = me.start_cluster().await;
-            });
-        } else {
-            self.set_phase(AppPhase::NeedsSetup, None).await;
+        self.set_phase(target, None).await;
+        let me = self.clone();
+        match target {
+            AppPhase::StartingDb => {
+                tokio::spawn(async move {
+                    let _ = me.start_cluster().await;
+                });
+            }
+            AppPhase::InitializingCluster => {
+                tokio::spawn(async move { me.first_run(paths).await });
+            }
+            _ => {}
         }
         Ok(())
     }

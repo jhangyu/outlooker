@@ -81,6 +81,15 @@ async fn retry_without_cluster_returns_to_setup() {
     wait_phase(&r.sup, AppPhase::Failed).await;
     r.sup.retry().await.unwrap();
     assert_eq!(r.sup.phase(), AppPhase::NeedsSetup);
+
+    // A marker without a cluster (creation failed after a reset): onboarding adopts the root and fails on the missing
+    // cluster, so retry must create the cluster again instead of going back to onboarding.
+    std::fs::write(r.root.join("outlooker-data.json"), b"{}").unwrap();
+    r.sup.initialize(InitializeRequest { data_dir: r.root.display().to_string(), language: Language::ZhTw }).await.unwrap();
+    wait_phase(&r.sup, AppPhase::Failed).await;
+    r.sup.retry().await.unwrap();
+    assert_eq!(r.sup.phase(), AppPhase::InitializingCluster);
+    wait_phase(&r.sup, AppPhase::Failed).await;
 }
 
 /// Move validation runs before any stop, so a Supervisor attached to a database of the shared cluster is enough.

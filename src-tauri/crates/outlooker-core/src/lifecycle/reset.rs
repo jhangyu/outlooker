@@ -26,9 +26,11 @@ impl Supervisor {
     /// `pgdata` directory and the `import-inflight` file, then runs the first-run cluster creation on the same data root (marker rewritten,
     /// credentials reused). Ends in `Ready` (or `Failed`), like onboarding.
     pub async fn reset_database(&self) -> Result<(), AppError> {
-        let prev = self.inner.error.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        // Compare-and-set, so a second reset or a retry racing this one is refused.
+        // Compare-and-set on the phase with the error read inside it, so a second reset or a retry racing this one is
+        // refused and the error judged is the one of this Failed phase.
+        let mut prev = None;
         let claimed = self.inner.phase_tx.send_if_modified(|p| {
+            prev = self.inner.error.lock().unwrap_or_else(|e| e.into_inner()).clone();
             let ok = *p == AppPhase::Failed && matches!(prev, Some(AppError::IncompatibleDatabase { .. }));
             if ok {
                 *p = AppPhase::InitializingCluster;
@@ -42,7 +44,11 @@ impl Supervisor {
         let pgdata = paths.pgdata();
         let removed = async {
             let real = resettable_pgdata(paths.data_root(), &pgdata)?;
-            PgController::new(paths.clone()).stop(&real, StopMode::Fast).await?;
+            // No postmaster.pid = no server on this dir. Skipping the stop lets a reset retry a partly deleted pgdata
+            // (no PG_VERSION, where `pg_ctl status` fails).
+            if real.join("postmaster.pid").exists() {
+                PgController::new(paths.clone()).stop(&real, StopMode::Fast).await?;
+            }
             // The import crash record names a job of the deleted database. Removed first (user-approved), so a fresh
             // job 1 never inherits it. remove_file on a symlink removes the link only.
             let inflight = paths.inflight_marker();

@@ -216,6 +216,8 @@ async fn reset_recreates_incompatible_database() {
     assert!(r.root.join("pgdata").is_file() && r.root.join("import-inflight").exists());
     std::fs::remove_file(r.root.join("pgdata")).unwrap();
     std::fs::rename(&moved, r.root.join("pgdata")).unwrap();
+    // A reset that stopped partway (PG_VERSION already deleted, `pg_ctl status` fails there) can be repeated.
+    std::fs::remove_file(r.root.join("pgdata/PG_VERSION")).unwrap();
 
     r.sup.reset_database().await.unwrap();
     assert!(!r.root.join("import-inflight").exists(), "the import crash record of the old database is deleted");
