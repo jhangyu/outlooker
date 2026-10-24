@@ -73,3 +73,14 @@ R4. A test or scratch check (output attached) shows a blocked probe on one path 
 R5. `golden_inline` green; whole `cargo test --workspace` green; clippy clean; `npm test` and `npm run build` green.
 R6. Fresh review round 2 finds no blocker. Then the dev data root is reset (no backup, user-approved) and the
     previously imported PSTs are registered and synced again.
+Round-2 additions (user decisions 2026-10-24):
+11. **Fresh failure reason**: when a failing path fails for a different reason (e.g. file now missing), a new failed
+    job/error row is written and the UI shows the new reason. Same reason → no new row (review finding 3 still holds).
+12. **Relative times** on the Import screen for last sync, next sync and last run ("3 分鐘前" / "in 5 min"), with the
+    absolute date-time as a tooltip; zh-TW and en.
+13. **Resizable side panel** on the Import screen using the existing Splitter / useSplit, like the other screens.
+    Real-app resize check by the user (jsdom layout is not evidence).
+Kept as-is (user): time-zone change while running needs a restart. Native time input, no per-run counters, error log
+as the third side card, no live next-sync preview.
+R7. 11: a test shows a changed reason writes one new row and the same reason writes none. 12/13: `npm test` and
+    `npm run build` green; relative-time formatting logic has one unit test (data transform).
