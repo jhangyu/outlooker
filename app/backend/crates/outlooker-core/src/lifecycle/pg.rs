@@ -134,7 +134,7 @@ fn newest_server_log(log_dir: &Path) -> Option<std::path::PathBuf> {
         .into_iter()
         .flatten()
         .filter_map(|e| e.ok())
-        .filter(|e| e.file_name() != "startup.log")
+        .filter(|e| e.file_name() != "startup.log" && e.file_name() != "pg_ctl.out")
         .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
         .map(|e| e.path())
 }
@@ -165,18 +165,20 @@ impl PgController {
         LOCALE_CANDIDATES
     }
 
-    async fn run(&self, bin: &str, args: Vec<OsString>, lc_all: &str) -> Result<Output, AppError> {
-        Command::new(self.paths.pg_bin(bin))
-            .args(args)
+    fn command(&self, bin: &str, args: Vec<OsString>, lc_all: &str) -> Command {
+        let mut c = Command::new(self.paths.pg_bin(bin));
+        c.args(args)
             .env("LC_ALL", lc_all)
             .env_remove("LANG")
             .env_remove("PGDATA")
             .env_remove("PGPORT")
             .env_remove("PGTZ")
-            .stdin(std::process::Stdio::null())
-            .output()
-            .await
-            .map_err(|e| io_err(bin, e))
+            .stdin(std::process::Stdio::null());
+        c
+    }
+
+    async fn run(&self, bin: &str, args: Vec<OsString>, lc_all: &str) -> Result<Output, AppError> {
+        self.command(bin, args, lc_all).output().await.map_err(|e| io_err(bin, e))
     }
 
     async fn pg_ctl(&self, args: &[&str], pgdata: &Path) -> Result<Output, AppError> {
@@ -290,6 +292,7 @@ impl PgController {
         let log_dir = pgdata.join("log");
         tokio::fs::create_dir_all(&log_dir).await.map_err(|e| io_err("create log dir", e))?;
         let startup_log = log_dir.join("startup.log");
+        let ctl_out = log_dir.join("pg_ctl.out");
         let mut bind_attempts = 0;
         let mut pid_retry_done = false;
         loop {
@@ -297,15 +300,26 @@ impl PgController {
             let _ = tokio::fs::remove_file(&startup_log).await;
             let opts = format!("-p {port}");
             let log_s = startup_log.display().to_string();
-            let out = self.pg_ctl(&["start", "-w", "-t", "60", "-l", &log_s, "-o", &opts], pgdata).await?;
-            if out.status.success() {
+            // On Windows pg_ctl runs postgres through cmd.exe, which inherits pg_ctl's stdout/stderr: a captured
+            // pipe would not reach EOF until postgres exits, so pg_ctl writes to a file and only its exit is awaited.
+            let out = std::fs::File::create(&ctl_out).map_err(|e| io_err("create pg_ctl.out", e))?;
+            let err = out.try_clone().map_err(|e| io_err("clone pg_ctl.out", e))?;
+            let mut args: Vec<OsString> = ["start", "-w", "-t", "60", "-l", &log_s, "-o", &opts].iter().map(OsString::from).collect();
+            args.extend(["-D".into(), pgdata.into()]);
+            let status = self
+                .command("pg_ctl", args, "C.UTF-8")
+                .stdout(out)
+                .stderr(err)
+                .status()
+                .await
+                .map_err(|e| io_err("pg_ctl", e))?;
+            if status.success() {
                 return Ok(port);
             }
             // logging_collector moves the real error (e.g. "could not bind") into the newest server log.
             let text = format!(
-                "{}\n{}\n{}\n{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr),
+                "{}\n{}\n{}",
+                tokio::fs::read_to_string(&ctl_out).await.unwrap_or_default(),
                 tokio::fs::read_to_string(&startup_log).await.unwrap_or_default(),
                 newest_server_log(&log_dir).and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default()
             );
