@@ -32,7 +32,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - {os: ubuntu-latest, platform: linux}
+          - {os: macos-latest, platform: macos}
+          - {os: windows-latest, platform: windows}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -54,7 +57,7 @@ jobs:
           path: ${{ github.workspace }}/.npm-cache
           key: npm-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
           restore-keys: npm-${{ runner.os }}-
-      - run: python app/scripts/build.py --ci --out out
+      - run: python app/scripts/build.py --ci --platform ${{ matrix.platform }} --out out
         env:
           npm_config_cache: ${{ github.workspace }}/.npm-cache
       - uses: actions/upload-artifact@v7

@@ -9,6 +9,12 @@ A Python CI build script compiles the Outlooker desktop app for Linux, macOS and
 - Windows host `User@192.168.26.209` (`ssh -i ~/.ssh/id_ed25519_win`, default shell cmd.exe, use `powershell -Command` with `;`): members may install rustup (per `app/backend/rust-toolchain.toml`) and mise (Node 24.22.1) in user scope. Do not modify Visual Studio. Work dir `C:\Users\User\outlooker-ci`.
 - Linux local check: Docker `--platform linux/amd64` (emulated on this arm64 Mac), same as the GitHub ubuntu runner.
 
+- One CI build script (user rule): `app/scripts/build.py` is the single committed CI build script; `--platform {linux,macos,windows}` selects the system (native on the matching host; Linux via Docker amd64 and Windows via SSH from the Mac). No build harness in scratch dirs.
+- Fixed long-run build commands (user rule): only these three strings ever get a long-run approval. Any change to what a build does goes into `app/scripts/build.py`, never into the command string:
+  - Linux (7f52abd3c0f571da): `python3 /Users/jhangyu/project/outlooker/app/scripts/build.py --ci --platform linux --out /Users/jhangyu/project/outlooker/app/scripts/tmp/ci/out/linux --log /Users/jhangyu/project/outlooker/app/scripts/tmp/ci/evidence/build-linux.log`
+  - Windows (1a90334187392f2b): `python3 /Users/jhangyu/project/outlooker/app/scripts/build.py --ci --platform windows --host User@192.168.26.209 --ssh-key /Users/jhangyu/.ssh/id_ed25519_win --out /Users/jhangyu/project/outlooker/app/scripts/tmp/ci/out/windows --log /Users/jhangyu/project/outlooker/app/scripts/tmp/ci/evidence/build-windows.log`
+  - macOS (52df96f510d7b925): `python3 /Users/jhangyu/project/outlooker/app/scripts/build.py --ci --platform macos --out /Users/jhangyu/project/outlooker/app/scripts/tmp/ci/out/macos --log /Users/jhangyu/project/outlooker/app/scripts/tmp/ci/evidence/build-macos.log`
+
 ## In scope
 1. Python CI build entry under `app/scripts/` (extend the existing `app/scripts/build.py`; one build module, no parallel second build path).
 2. A test guard: a Python check that fails when the CI path (workflow files + CI build script) invokes any test.
