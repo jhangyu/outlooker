@@ -14,13 +14,13 @@ pub async fn pst_register(s: State<'_, Services>, paths: Vec<String>) -> Result<
 }
 
 #[tauri::command]
-pub async fn pst_set_enabled(s: State<'_, Services>, pst_id: i64, enabled: bool) -> Result<PstSource, AppError> {
-    s.importer.set_enabled(pst_id, enabled).await
+pub async fn pst_set_paused(s: State<'_, Services>, pst_id: i64, paused: bool) -> Result<PstSource, AppError> {
+    s.importer.set_paused(pst_id, paused).await
 }
 
 #[tauri::command]
-pub async fn import_cancel(s: State<'_, Services>, pst_id: i64) -> Result<(), AppError> {
-    s.importer.cancel(pst_id).await
+pub async fn pst_unregister(s: State<'_, Services>, pst_id: i64) -> Result<(), AppError> {
+    s.importer.unregister(pst_id).await
 }
 
 #[tauri::command]

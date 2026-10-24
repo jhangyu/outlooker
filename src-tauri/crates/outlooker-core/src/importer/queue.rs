@@ -39,8 +39,10 @@ const DISPLAY_NAME_MAX: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CancelReason {
-    User,
+    /// The user paused (or unregistered) the path: back to `queued`, the job resumes from the checkpoint.
+    Hold,
     Shutdown,
+    /// DB pause (pause_for_db): the attempt re-runs when the database is back.
     Pause,
 }
 
@@ -55,7 +57,7 @@ impl JobCancel {
     pub(super) fn new() -> JobCancel {
         JobCancel { flag: Arc::new(AtomicBool::new(false)), reason: Mutex::new(None), budget: Arc::new(ByteBudget::new(BYTE_BUDGET)) }
     }
-    /// User and Shutdown are final; Pause only applies when nothing stronger is set.
+    /// Hold and Shutdown are final; Pause only applies when nothing stronger is set.
     pub(super) fn cancel(&self, why: CancelReason) {
         let mut r = self.reason.lock().unwrap_or_else(|p| p.into_inner());
         if matches!(*r, None | Some(CancelReason::Pause)) {
@@ -84,7 +86,6 @@ impl JobCancel {
 
 #[derive(Clone)]
 pub(super) struct RunningJob {
-    pub(super) job_id: i64,
     pub(super) pst_id: i64,
     pub(super) cancel: Arc<JobCancel>,
 }
@@ -191,7 +192,7 @@ const LIST_SQL: &str = "SELECT s.id, s.path, s.display_name, s.file_size_bytes, 
        to_char(j.created_at AT TIME ZONE 'UTC', $1), to_char(j.finished_at AT TIME ZONE 'UTC', $1), \
        c.phase, c.items_total, c.stored, c.duplicates, c.errors, c.skipped_non_mail, c.images_converted, \
        (SELECT count(*) FROM import_errors e WHERE e.pst_id = s.id), \
-       s.sync_enabled, to_char(s.last_checked_at AT TIME ZONE 'UTC', $1), \
+       s.paused, to_char(s.last_checked_at AT TIME ZONE 'UTC', $1), \
        (SELECT to_char(d.finished_at AT TIME ZONE 'UTC', $1) FROM import_jobs d \
          WHERE d.pst_id = s.id AND d.kind = 'import' AND d.state = 'completed' ORDER BY d.id DESC LIMIT 1), \
        (SELECT e.message FROM import_errors e WHERE e.pst_id = s.id AND e.job_id = j.id AND e.severity = 'job_failed' \
@@ -200,7 +201,7 @@ const LIST_SQL: &str = "SELECT s.id, s.path, s.display_name, s.file_size_bytes, 
   CROSS JOIN LATERAL (SELECT kind, state, id, created_at, finished_at FROM import_jobs j \
                       WHERE j.pst_id = s.id ORDER BY j.id DESC LIMIT 1) j \
   LEFT JOIN import_checkpoints c ON c.pst_id = s.id \
- WHERE $2::bigint IS NULL OR s.id = $2";
+ WHERE NOT s.unregistered AND ($2::bigint IS NULL OR s.id = $2)";
 
 pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSource>, AppError> {
     let c = inner.db.app_client().await?;
@@ -251,7 +252,7 @@ pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSour
                 error_count: r.get(16),
                 queued_at: r.get(7),
                 finished_at: r.get(8),
-                sync_enabled: r.get(17),
+                paused: r.get(17),
                 last_checked_at: r.get(18),
                 last_synced_at: r.get(19),
                 failure_reason: if status == ImportStatus::Failed { r.get(20) } else { None },
@@ -282,8 +283,29 @@ fn display_name(path: &str) -> String {
     stem.chars().take(DISPLAY_NAME_MAX).collect()
 }
 
+/// Path identity (contract override 8): `std::fs::canonicalize` gives the absolute path with `.` / `..` and symlinks
+/// resolved, separators normalized and the letter case as stored on disk (macOS `realpath`, Windows
+/// `GetFinalPathNameByHandleW`), so every spelling of one file maps to one string. None when the path does not resolve.
+fn canonical(path: &str) -> Option<String> {
+    Some(plain_path(std::fs::canonicalize(path).ok()?.into_os_string().into_string().ok()?))
+}
+
+/// Drops the `\\?\` prefix Windows canonicalization adds (drive and UNC paths below MAX_PATH), so the stored path
+/// reads like the one the user picked; longer paths keep it (they need it to open). Other strings pass unchanged.
+fn plain_path(p: String) -> String {
+    let plain = if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = p.strip_prefix(r"\\?\").filter(|r| r.as_bytes().get(1) == Some(&b':')) {
+        rest.to_owned()
+    } else {
+        return p;
+    };
+    if plain.len() < 260 { plain } else { p }
+}
+
 /// Source row + its first import job (`queued`, or `locked` when the PST is held) in one transaction.
-/// Err(AlreadyImported) when the path is registered.
+/// An unregistered row at the path is registered again on the same pst_id: its occurrences make every known item a
+/// duplicate, and a job the unregister stopped resumes from its checkpoint. Err(AlreadyImported) when registered.
 async fn insert_source(inner: &Inner, path: &str, size: i64, state: JobState) -> Result<i64, AppError> {
     let mut c = inner.db.app_client().await?;
     let tx = c.transaction().await.map_err(db_err)?;
@@ -295,11 +317,28 @@ async fn insert_source(inner: &Inner, path: &str, size: i64, state: JobState) ->
         )
         .await
         .map_err(db_err)?;
-    let Some(row) = row else {
-        let existing: i64 = tx.query_one("SELECT id FROM pst_sources WHERE path = $1", &[&path]).await.map_err(db_err)?.get(0);
-        return Err(AppError::AlreadyImported { pst_id: existing });
+    let pst_id: i64 = match row {
+        Some(row) => row.get(0),
+        None => {
+            let r = tx.query_one("SELECT id, unregistered FROM pst_sources WHERE path = $1 FOR UPDATE", &[&path]).await.map_err(db_err)?;
+            let (pst_id, unregistered): (i64, bool) = (r.get(0), r.get(1));
+            if !unregistered {
+                return Err(AppError::AlreadyImported { pst_id });
+            }
+            tx.execute("UPDATE pst_sources SET unregistered = false, paused = false, file_size_bytes = $2 WHERE id = $1", &[&pst_id, &size])
+                .await
+                .map_err(db_err)?;
+            let active = tx
+                .query_opt("SELECT 1 FROM import_jobs WHERE pst_id = $1 AND state IN ('queued', 'running', 'cancelling')", &[&pst_id])
+                .await
+                .map_err(db_err)?;
+            if active.is_some() {
+                tx.commit().await.map_err(db_err)?;
+                return Ok(pst_id);
+            }
+            pst_id
+        }
     };
-    let pst_id: i64 = row.get(0);
     tx.execute(
         "INSERT INTO import_jobs (pst_id, kind, state, finished_at) VALUES ($1, 'import', $2, CASE WHEN $2 = 'locked' THEN now() END)",
         &[&pst_id, &state.as_db()],
@@ -318,22 +357,31 @@ pub(crate) async fn register(inner: &Inner, paths: Vec<String>) -> Result<Vec<En
         return Err(AppError::invalid("paths", "tooMany"));
     }
     let mut out = Vec::with_capacity(paths.len());
-    for path in paths {
-        let inserted = match probe(&path) {
-            Probe::Unavailable(error) => {
-                out.push(EnqueueResult::Rejected { path, error });
+    for input in paths {
+        let path = input.clone();
+        // file I/O off the async workers; a path that does not resolve keeps its input form and the probe rejects it
+        let (path, probed) = tokio::task::spawn_blocking(move || {
+            let path = canonical(&path).unwrap_or(path);
+            let probed = match probe(&path) {
+                Probe::Ready { size, .. } => Ok((size, JobState::Queued)),
+                // ponytail: a held PST usually still stats (Windows sharing violations hit open, not stat); size 1 when
+                // it does not, the first unlocked attempt writes the real size
+                Probe::Locked => Ok((std::fs::metadata(&path).map_or(1, |m| (m.len() as i64).max(1)), JobState::Locked)),
+                Probe::Unavailable(error) => Err(error),
+            };
+            (path, probed)
+        })
+        .await
+        .map_err(|e| AppError::internal(format!("register probe: {e}")))?;
+        let inserted = match probed {
+            Err(error) => {
+                out.push(EnqueueResult::Rejected { path: input, error });
                 continue;
             }
-            Probe::Ready { size, .. } => insert_source(inner, &path, size, JobState::Queued).await,
-            // ponytail: a held PST usually still stats (Windows sharing violations hit open, not stat); size 1 when it
-            // does not, the first unlocked attempt writes the real size
-            Probe::Locked => {
-                let size = std::fs::metadata(&path).map_or(1, |m| (m.len() as i64).max(1));
-                insert_source(inner, &path, size, JobState::Locked).await
-            }
+            Ok((size, state)) => insert_source(inner, &path, size, state).await,
         };
         let result = match inserted {
-            Err(e @ AppError::AlreadyImported { .. }) => EnqueueResult::Rejected { path, error: e },
+            Err(e @ AppError::AlreadyImported { .. }) => EnqueueResult::Rejected { path: input, error: e },
             Err(e) => return Err(e),
             Ok(pst_id) => {
                 let pst = emit_status(inner, pst_id).await.ok_or_else(|| AppError::internal("registered source vanished"))?;
@@ -346,13 +394,59 @@ pub(crate) async fn register(inner: &Inner, paths: Vec<String>) -> Result<Vec<En
     Ok(out)
 }
 
-pub(crate) async fn set_enabled(inner: &Inner, pst_id: i64, enabled: bool) -> Result<PstSource, AppError> {
-    let c = inner.db.app_client().await?;
-    let n = c.execute("UPDATE pst_sources SET sync_enabled = $2 WHERE id = $1", &[&pst_id, &enabled]).await.map_err(db_err)?;
-    if n == 0 {
+/// Locks a listed source row and its newest job for Pause / Unregister; returns the newest job's status.
+/// NotFound for an unknown or unregistered id, Busy while a removal is queued or running.
+async fn listed_for_update(tx: &tokio_postgres::Transaction<'_>, pst_id: i64) -> Result<ImportStatus, AppError> {
+    let Some((_, kind, state)) = newest_job_for_update(tx, pst_id).await? else {
+        return Err(AppError::not_found("pst", pst_id));
+    };
+    let unregistered: bool = tx.query_one("SELECT unregistered FROM pst_sources WHERE id = $1", &[&pst_id]).await.map_err(db_err)?.get(0);
+    if unregistered {
         return Err(AppError::not_found("pst", pst_id));
     }
+    let status = status_of(kind, state);
+    if status == ImportStatus::Removing {
+        return Err(AppError::Busy { reason: crate::dto::error::BusyReason::PstRemoving });
+    }
+    Ok(status)
+}
+
+/// The running job of this PST stops after the current item; its checkpoint is committed and it goes back to `queued`.
+/// The job is registered as running before its row turns `running`, and the row only turns `running` while the source
+/// is neither paused nor unregistered (`runner::run_job`), so a job is either never started or stopped here.
+fn hold_running(inner: &Inner, pst_id: i64) {
+    if let Some(r) = inner.running().filter(|r| r.pst_id == pst_id) {
+        r.cancel.cancel(CancelReason::Hold);
+    }
+}
+
+/// Pause: no job of the path starts and no sync touches it until Resume; a running sync is held (checkpoint kept).
+/// Resume: the held job continues from its checkpoint.
+pub(crate) async fn set_paused(inner: &Inner, pst_id: i64, paused: bool) -> Result<PstSource, AppError> {
+    let mut c = inner.db.app_client().await?;
+    let tx = c.transaction().await.map_err(db_err)?;
+    listed_for_update(&tx, pst_id).await?;
+    tx.execute("UPDATE pst_sources SET paused = $2 WHERE id = $1", &[&pst_id, &paused]).await.map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    if paused {
+        hold_running(inner, pst_id);
+    } else {
+        inner.kick.notify_one();
+    }
     emit_status(inner, pst_id).await.ok_or_else(|| AppError::not_found("pst", pst_id))
+}
+
+/// Hides the path from the list and from every sync; its folders, occurrences and mail stay (search and reading keep
+/// working). A running sync is held; registering the path again continues on the same source row.
+pub(crate) async fn unregister(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
+    let mut c = inner.db.app_client().await?;
+    let tx = c.transaction().await.map_err(db_err)?;
+    let status = listed_for_update(&tx, pst_id).await?;
+    tx.execute("UPDATE pst_sources SET unregistered = true, paused = false WHERE id = $1", &[&pst_id]).await.map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    hold_running(inner, pst_id);
+    inner.sink.emit(CoreEvent::ImportStatusChanged(ImportStatusChanged { pst_id, status, removed: true, source: None }));
+    Ok(())
 }
 
 /// What one sync step did to a path.
@@ -420,20 +514,21 @@ async fn sync_one(inner: &Inner, pst_id: i64) -> Result<SyncStep, AppError> {
     Ok(step)
 }
 
-/// `SyncTarget::All` = every enabled path; `One(id)` = that path even when disabled (explicit user action).
+/// `SyncTarget::All` = every listed path; `One(id)` = that path. Both skip a paused path; an unregistered one is not
+/// listed (`One`: NotFound).
 pub(crate) async fn sync(inner: &Inner, target: SyncTarget) -> Result<(), AppError> {
     let _serial = inner.sync_lock.lock().await;
     let ids: Vec<i64> = {
         let c = inner.db.app_client().await?;
         let rows = match target {
-            SyncTarget::All => c.query("SELECT id FROM pst_sources WHERE sync_enabled ORDER BY id", &[]).await,
-            SyncTarget::One(id) => c.query("SELECT id FROM pst_sources WHERE id = $1", &[&id]).await,
+            SyncTarget::All => c.query("SELECT id, paused FROM pst_sources WHERE NOT unregistered ORDER BY id", &[]).await,
+            SyncTarget::One(id) => c.query("SELECT id, paused FROM pst_sources WHERE id = $1 AND NOT unregistered", &[&id]).await,
         }
         .map_err(db_err)?;
         if let (SyncTarget::One(id), true) = (target, rows.is_empty()) {
             return Err(AppError::not_found("pst", id));
         }
-        rows.iter().map(|r| r.get(0)).collect()
+        rows.iter().filter(|r| !r.get::<_, bool>(1)).map(|r| r.get(0)).collect()
     };
     let mut queued = false;
     for pst_id in ids {
@@ -460,29 +555,6 @@ async fn newest_job_for_update(tx: &tokio_postgres::Transaction<'_>, pst_id: i64
         .await
         .map_err(db_err)?;
     row.map(|r| Ok((r.get(0), JobKind::from_db(r.get(1))?, JobState::from_db(r.get(2))?))).transpose()
-}
-
-pub(crate) async fn cancel(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
-    let mut c = inner.db.app_client().await?;
-    let tx = c.transaction().await.map_err(db_err)?;
-    let Some((job_id, kind, state)) = newest_job_for_update(&tx, pst_id).await? else {
-        return Err(AppError::not_found("pst", pst_id));
-    };
-    match (kind, state) {
-        (JobKind::Import, JobState::Queued) => {
-            tx.execute("UPDATE import_jobs SET state = 'cancelled', finished_at = now() WHERE id = $1", &[&job_id]).await.map_err(db_err)?;
-        }
-        (JobKind::Import, JobState::Running) => {
-            tx.execute("UPDATE import_jobs SET state = 'cancelling' WHERE id = $1", &[&job_id]).await.map_err(db_err)?;
-        }
-        _ => return Err(AppError::invalid("pstId", "notCancellable")),
-    }
-    tx.commit().await.map_err(db_err)?;
-    if let Some(r) = inner.running().filter(|r| r.job_id == job_id) {
-        r.cancel.cancel(CancelReason::User);
-    }
-    emit_status(inner, pst_id).await;
-    Ok(())
 }
 
 pub(crate) async fn remove(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
@@ -696,5 +768,15 @@ mod tests {
         assert_eq!(display_name("/x/Archive 2023.pst"), "Archive 2023");
         assert_eq!(display_name("/x/.pst"), ".pst");
         assert_eq!(display_name(&format!("/x/{}.pst", "a".repeat(600))).len(), 512);
+    }
+
+    #[test]
+    fn windows_verbatim_prefix_dropped() {
+        assert_eq!(plain_path(r"\\?\C:\Mail\a.pst".into()), r"C:\Mail\a.pst");
+        assert_eq!(plain_path(r"\\?\UNC\srv\share\a.pst".into()), r"\\srv\share\a.pst");
+        assert_eq!(plain_path(r"\\?\Volume{x}\a.pst".into()), r"\\?\Volume{x}\a.pst");
+        assert_eq!(plain_path("/Users/x/a.pst".into()), "/Users/x/a.pst");
+        let long = format!(r"\\?\C:\{}.pst", "a".repeat(300));
+        assert_eq!(plain_path(long.clone()), long, "beyond MAX_PATH the prefix is needed to open the file");
     }
 }

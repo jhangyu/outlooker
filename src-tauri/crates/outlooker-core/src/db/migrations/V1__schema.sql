@@ -9,7 +9,8 @@ CREATE TABLE pst_sources (
     path             text COLLATE "C" NOT NULL CHECK (length(path) BETWEEN 1 AND 4096),
     display_name     text        NOT NULL CHECK (length(display_name) BETWEEN 1 AND 512),
     file_size_bytes  bigint      NOT NULL CHECK (file_size_bytes > 0),  -- size at the last sync attempt (display)
-    sync_enabled     boolean     NOT NULL DEFAULT true,                 -- false: scheduler and "sync all" skip it
+    paused           boolean     NOT NULL DEFAULT false,                -- true: no job starts, no sync (Pause)
+    unregistered     boolean     NOT NULL DEFAULT false,                -- true: hidden, never synced; mail kept
     last_checked_at  timestamptz,                                       -- last sync step that looked at the path
     created_at       timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT pst_sources_path_once UNIQUE (path)  -- AppError::AlreadyImported (path already registered)

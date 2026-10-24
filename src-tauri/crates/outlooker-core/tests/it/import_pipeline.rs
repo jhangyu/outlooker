@@ -17,7 +17,9 @@ use outlooker_core::importer::probe::set_test_lock;
 use outlooker_core::importer::pst_reader::walk_ids;
 use outlooker_core::importer::types::{FolderIn, RawAttachment, RawContent, RawItem, RawMail, RawRecipient};
 use outlooker_core::importer::writer::{Checkpoint, WriterLimits, truncate_to_micros};
+use outlooker_core::dto::search::{SearchQuery, SearchRequest};
 use outlooker_core::importer::{ImportManager, ImportTuning, RecoveryReport, SyncTarget};
+use outlooker_core::search::SearchService;
 use outlooker_core::sink::NullSink;
 use outlooker_core::test_support::{png, TestCluster};
 use tokio::sync::{broadcast, mpsc, watch};
@@ -374,9 +376,9 @@ async fn index_policy_first_import_drops_and_rebuilds() {
     wait_batch(&mut batches, 1).await;
     // during the job (reader held after item 5, job running): all six dropped
     assert_eq!(missing(&tc).await, all_six());
-    fx.mgr.cancel(pst_id).await.unwrap();
-    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Cancelled);
-    fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
+    fx.mgr.set_paused(pst_id, true).await.unwrap();
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Queued);
+    fx.mgr.set_paused(pst_id, false).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
     assert_eq!(missing(&tc).await, Vec::<&str>::new(), "after Completed all six exist and are valid");
     let after = index_oids(&tc).await;
@@ -384,20 +386,20 @@ async fn index_policy_first_import_drops_and_rebuilds() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn index_policy_rebuilt_after_cancel_and_disk_failure() {
+async fn index_policy_rebuilt_after_pause_and_disk_failure() {
     let tc = TestCluster::start().await;
-    // (a) cancelled job
+    // (a) paused job (back to queued, no finalize)
     let mut tuning = small_batches();
     tuning.hold_reader_after = Some(10);
     let mut batches = batch_signal(&mut tuning);
     let mut fx = manager(&tc, tuning);
-    let p1 = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "cancelled.pst"), folders(), corpus(20)).await.unwrap();
+    let p1 = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "paused.pst"), folders(), corpus(20)).await.unwrap();
     fx.mgr.start_worker();
     wait_batch(&mut batches, 1).await;
     assert_eq!(missing(&tc).await, all_six());
-    fx.mgr.cancel(p1).await.unwrap();
-    assert_eq!(wait_job(&mut fx.events, p1).await, ImportStatus::Cancelled);
-    assert_eq!(missing(&tc).await, Vec::<&str>::new(), "rebuilt after the cancelled job");
+    fx.mgr.set_paused(p1, true).await.unwrap();
+    assert_eq!(wait_job(&mut fx.events, p1).await, ImportStatus::Queued);
+    assert_eq!(missing(&tc).await, Vec::<&str>::new(), "rebuilt after the paused job");
     fx.mgr.shutdown(JOB_TIMEOUT).await.unwrap();
 
     // (b) job failed by the free-space guard
@@ -434,24 +436,40 @@ async fn index_policy_incremental_keeps_indexes() {
 
 // ------------------------------------------------------------------------------------------------ resume, crash, poison
 
+/// Pause stops a running sync with its checkpoint and holds the job in the queue: no sync and no job start while
+/// paused (a later queued path runs past it). Resume continues the same job from the checkpoint.
 #[tokio::test(flavor = "multi_thread")]
-async fn resume_after_cancel_equals_uninterrupted() {
+async fn pause_resume_continues_from_checkpoint() {
     const ITEMS: i64 = 10;
+    const JOBS: &str = "SELECT count(*) FROM import_jobs WHERE kind = 'import'";
     let tc = TestCluster::start().await;
     let mut tuning = small_batches();
     tuning.hold_reader_after = Some(5);
     let mut batches = batch_signal(&mut tuning);
     let mut fx = manager(&tc, tuning);
-    let pst_id = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "c.pst"), folders(), corpus(ITEMS)).await.unwrap();
+    let path = synthetic_path(&tc, "c.pst");
+    let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), corpus(ITEMS)).await.unwrap();
     fx.mgr.start_worker();
     wait_batch(&mut batches, 1).await;
-    fx.mgr.cancel(pst_id).await.unwrap();
-    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Cancelled);
+    assert!(fx.mgr.set_paused(pst_id, true).await.unwrap().paused);
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Queued, "held, not cancelled");
     let cursor = tc.count("SELECT cursor_seq FROM import_checkpoints").await;
-    assert!((5..ITEMS).contains(&cursor), "cancelled mid-job: cursor {cursor}");
+    assert!((5..ITEMS).contains(&cursor), "paused mid-job: cursor {cursor}");
+    let stored = tc.count("SELECT count(*) FROM messages").await;
+    // no sync while paused, even for a changed file; a later path is not blocked by the held job
+    std::fs::write(&path, b"!BDN changed while paused").unwrap();
+    fx.mgr.sync(SyncTarget::All).await.unwrap();
     fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
+    let other = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "other.pst"), folders(), corpus_tagged(1, "o")).await.unwrap();
+    assert_eq!(wait_job(&mut fx.events, other).await, ImportStatus::Completed);
+    assert_eq!(tc.count(JOBS).await, 2, "no job queued for the paused path");
+    assert_eq!(fx.mgr.list().await.unwrap().iter().find(|p| p.id == pst_id).unwrap().status, ImportStatus::Queued);
+    assert_eq!(tc.count("SELECT count(*) FROM messages").await, stored + 1, "only the other path stored mail");
+    // Resume: same job, checkpoint identity changed by the write above → cursor reset, known items skipped
+    assert!(!fx.mgr.set_paused(pst_id, false).await.unwrap().paused);
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
-    assert_eq!(snapshot(&tc).await, expected(&corpus(ITEMS)));
+    assert_eq!(tc.count(JOBS).await, 2, "the held job was resumed, not replaced");
+    assert_eq!(snapshot(&tc).await, expected(&[corpus(ITEMS), corpus_tagged(1, "o")].concat()));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -489,15 +507,15 @@ async fn mtime_change_resets_cursor() {
     let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), corpus(ITEMS)).await.unwrap();
     fx.mgr.start_worker();
     wait_batch(&mut batches, 1).await;
-    fx.mgr.cancel(pst_id).await.unwrap();
-    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Cancelled);
+    fx.mgr.set_paused(pst_id, true).await.unwrap();
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Queued);
     let before_resume = tc.count("SELECT count(*) FROM messages").await;
     assert!(before_resume > 0);
     // touch: mtime + 60 s
     let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
     f.set_modified(SystemTime::now() + Duration::from_secs(60)).unwrap();
     drop(f);
-    fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
+    fx.mgr.set_paused(pst_id, false).await.unwrap();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
     let r = tc
         .admin()
@@ -743,17 +761,21 @@ async fn pst_remove_with_queued_job() {
     let tc = TestCluster::start().await;
     let mut fx = manager(&tc, ImportTuning::default());
     let pst_id = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "q.pst"), folders(), corpus(3)).await.unwrap();
-    // worker not started: the import job is still queued
+    // worker not started: the import job is still queued; Delete works on a paused path
+    fx.mgr.set_paused(pst_id, true).await.unwrap();
     fx.mgr.remove(pst_id).await.unwrap(); // no 23505 from import_jobs_one_active_per_pst
     assert_eq!(fx.mgr.list().await.unwrap()[0].status, ImportStatus::Removing);
     assert!(matches!(fx.mgr.remove(pst_id).await, Err(AppError::Busy { .. })));
+    assert!(matches!(fx.mgr.set_paused(pst_id, false).await, Err(AppError::Busy { .. })));
+    assert!(matches!(fx.mgr.unregister(pst_id).await, Err(AppError::Busy { .. })));
     fx.mgr.start_worker();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Removing);
     assert_eq!(tc.count("SELECT count(*) FROM pst_sources").await, 0);
     assert_eq!(tc.count("SELECT count(*) FROM messages").await, 0);
 }
 
-/// Registration identity is the path: a changed file at a registered path is rejected, not a second source.
+/// Registration identity is the canonical path: a changed file at a registered path, and other spellings of it
+/// (`.`, `..`, doubled separators, letter case where the file system ignores case), are rejected, not a second source.
 /// Probe rejections pass through (the classification itself: probe.rs unit tests); a held file registers as locked.
 #[tokio::test(flavor = "multi_thread")]
 async fn register_same_path_rejected() {
@@ -762,7 +784,7 @@ async fn register_same_path_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let missing = s(&dir.path().join("missing.pst"));
     let path = synthetic_path(&tc, "r.pst");
-    let held = synthetic_path(&tc, "held.pst");
+    let held = s(&std::fs::canonicalize(synthetic_path(&tc, "held.pst")).unwrap()); // the probe sees the canonical path
     set_test_lock(&held, true);
     let res = fx.mgr.register(vec![missing.clone(), path.clone(), held.clone()]).await.unwrap();
     set_test_lock(&held, false);
@@ -772,8 +794,26 @@ async fn register_same_path_rejected() {
     let EnqueueResult::Queued { pst: locked } = &res[2] else { panic!("{res:?}") };
     assert_eq!(locked.status, ImportStatus::Locked, "registered while held: one locked job, retried by the next sync");
     std::fs::write(&path, b"!BDN changed and longer").unwrap();
-    let again = fx.mgr.register(vec![path]).await.unwrap();
-    assert!(matches!(&again[0], EnqueueResult::Rejected { error: AppError::AlreadyImported { pst_id }, .. } if *pst_id == pst.id), "{again:?}");
+    let canonical = s(&std::fs::canonicalize(&path).unwrap());
+    assert_eq!(pst.path, canonical);
+    let dir = Path::new(&path).parent().unwrap();
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    let d = s(dir);
+    let upper = format!("{d}/R.PST");
+    let mut variants = vec![path.clone(), format!("{d}//r.pst"), format!("{d}/./r.pst"), format!("{d}/sub/../r.pst")];
+    // ponytail: the case variant is the same file only where the file system ignores case (macOS, Windows)
+    let case_insensitive = Path::new(&upper).exists();
+    if case_insensitive {
+        variants.push(upper.clone());
+    }
+    let again = fx.mgr.register(variants.clone()).await.unwrap();
+    for (v, r) in variants.iter().zip(&again) {
+        assert!(matches!(r, EnqueueResult::Rejected { error: AppError::AlreadyImported { pst_id }, path } if *pst_id == pst.id && path == v), "{v}: {r:?}");
+    }
+    if !case_insensitive {
+        let r = fx.mgr.register(vec![upper]).await.unwrap();
+        assert!(matches!(&r[0], EnqueueResult::Rejected { error: AppError::FileAccess { .. }, .. }), "{r:?}");
+    }
     assert_eq!(tc.count("SELECT count(*) FROM pst_sources").await, 2);
     assert_eq!(fx.mgr.register(vec![]).await.unwrap_err(), AppError::invalid("paths", "empty"));
     assert_eq!(fx.mgr.register(vec![missing; 101]).await.unwrap_err(), AppError::invalid("paths", "tooMany"));
@@ -815,7 +855,7 @@ async fn sync_changed_file_keeps_one_row_and_skips_known() {
     assert_eq!(index_oids(&tc).await, oids, "known items do not count as remaining: no index drop");
 }
 
-/// Unchanged file after a completed run: no job, only last_checked_at. A disabled path is skipped by `All`, not by `One`.
+/// Unchanged file after a completed run: no job, only last_checked_at. A paused path is skipped by `All` and `One`.
 #[tokio::test(flavor = "multi_thread")]
 async fn sync_unchanged_creates_no_job() {
     const JOBS: &str = "SELECT count(*) FROM import_jobs";
@@ -830,14 +870,54 @@ async fn sync_unchanged_creates_no_job() {
     assert_eq!(tc.count(JOBS).await, 1, "unchanged: no job");
     assert!(fx.mgr.list().await.unwrap()[0].last_checked_at.is_some());
 
-    assert!(!fx.mgr.set_enabled(pst_id, false).await.unwrap().sync_enabled);
+    fx.mgr.set_paused(pst_id, true).await.unwrap();
     std::fs::write(&path, b"!BDN changed").unwrap();
     fx.mgr.sync(SyncTarget::All).await.unwrap();
-    assert_eq!(tc.count(JOBS).await, 1, "disabled: All skips it");
     fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
-    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed, "One syncs a disabled path");
+    assert_eq!(tc.count(JOBS).await, 1, "paused: All and One skip it");
+    fx.mgr.set_paused(pst_id, false).await.unwrap();
+    fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap();
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
     assert_eq!(tc.count(JOBS).await, 2);
     assert_eq!(fx.mgr.sync(SyncTarget::One(pst_id + 1)).await.unwrap_err(), AppError::not_found("pst", pst_id + 1));
+}
+
+/// Unregister hides the path and stops every sync of it; its mail stays searchable and readable. Registering the same
+/// file again (another spelling) continues on the same source row: no second row, no duplicate message or occurrence.
+#[tokio::test(flavor = "multi_thread")]
+async fn unregister_keeps_mail_and_reregister_adds_no_duplicates() {
+    const FIRST: i64 = 10; // 9 mails
+    const SECOND: i64 = 12; // + 2 mails (seq 11, 12)
+    let tc = TestCluster::start().await;
+    let mut fx = manager(&tc, ImportTuning::default());
+    let path = s(&std::fs::canonicalize(synthetic_path(&tc, "un.pst")).unwrap());
+    let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), corpus(FIRST)).await.unwrap();
+    fx.mgr.start_worker();
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
+    fx.mgr.unregister(pst_id).await.unwrap();
+    assert!(fx.mgr.list().await.unwrap().is_empty(), "gone from the list");
+    let search = SearchService::new(tc.db.clone());
+    let page = search.search(SearchRequest { query: SearchQuery::Simple { text: "Mail".into() }, cursor: None, page_size: None }).await.unwrap();
+    assert_eq!(page.rows.len(), 9, "still searchable");
+    let detail = search.mail_get(page.rows[0].id).await.unwrap();
+    assert_eq!(detail.occurrences[0].pst_path, path, "still readable, with its source");
+    // never synced again; Pause / Unregister / Sync now see no such path
+    ImportManager::set_synthetic_items(&path, folders(), corpus(SECOND));
+    std::fs::write(&path, b"!BDN the file grew after unregister").unwrap();
+    fx.mgr.sync(SyncTarget::All).await.unwrap();
+    assert_eq!(fx.mgr.sync(SyncTarget::One(pst_id)).await.unwrap_err(), AppError::not_found("pst", pst_id));
+    assert_eq!(fx.mgr.set_paused(pst_id, true).await.unwrap_err(), AppError::not_found("pst", pst_id));
+    assert_eq!(fx.mgr.unregister(pst_id).await.unwrap_err(), AppError::not_found("pst", pst_id));
+    assert_eq!(tc.count("SELECT count(*) FROM import_jobs").await, 1);
+    // registered again via another spelling of the same file
+    let dir = Path::new(&path).parent().unwrap();
+    let res = fx.mgr.register(vec![format!("{}/./un.pst", s(dir))]).await.unwrap();
+    let EnqueueResult::Queued { pst } = &res[0] else { panic!("{res:?}") };
+    assert_eq!((pst.id, pst.paused), (pst_id, false), "same source row");
+    assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
+    assert_eq!(tc.count("SELECT count(*) FROM pst_sources").await, 1);
+    assert_eq!(tc.count("SELECT count(*) FROM messages").await, 11, "9 kept + 2 new, no duplicates");
+    assert_eq!(tc.count("SELECT count(*) FROM message_occurrences").await, 11);
 }
 
 /// A held PST: the job-start probe ends the job `locked` before the checkpoint; later syncs while held keep that one
