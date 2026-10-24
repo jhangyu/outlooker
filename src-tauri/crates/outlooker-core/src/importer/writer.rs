@@ -287,10 +287,12 @@ macro_rules! insert_errors_sql {
         )
     };
 }
-/// `e` is a row of an earlier job of PST $1 with the same content as `n` (rows of this job never match).
+/// `e` is a row of PST $1 with the same content as `n`. Rows of this job match too when `n` is identifiable (item id
+/// or scan row): a job runs many attempts (pause, resume, restart) that re-hit the same error. Item errors
+/// without an id stay distinct within one job.
 macro_rules! same_error {
     () => {
-        "e.pst_id = $1 AND e.job_id IS DISTINCT FROM $2 AND e.stage = n.stage AND e.severity = n.severity \
+        "e.pst_id = $1 AND (e.job_id IS DISTINCT FROM $2 OR n.pst_item_id > 0 OR n.stage = 'scan') AND e.stage = n.stage AND e.severity = n.severity \
          AND e.message = n.message AND e.folder_path IS NOT DISTINCT FROM n.folder_path \
          AND e.pst_item_id IS NOT DISTINCT FROM n.pst_item_id"
     };
