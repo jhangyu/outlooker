@@ -1,5 +1,5 @@
 //! Shared real-PostgreSQL test fixture: ONE cluster per test run, booted by `examples/test_pg_server.rs` (spawned by
-//! `scripts/cargo-test-runner.mjs`, connection in `OUTLOOKER_TEST_PG`). Tests only connect and get one fresh
+//! `app/scripts/cargo-test-runner.mjs`, connection in `OUTLOOKER_TEST_PG`). Tests only connect and get one fresh
 //! `WAL_LOG` database each. Production initdb flags, migrated, both pools.
 pub mod import_fixtures;
 mod template;

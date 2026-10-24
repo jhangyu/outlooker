@@ -1,5 +1,5 @@
 #![cfg(feature = "test-support")]
-//! App composition tests on a real PostgreSQL (run `node scripts/fetch-postgres.mjs` first).
+//! App composition tests on a real PostgreSQL (run `node app/scripts/fetch-postgres.mjs` first).
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -74,7 +74,7 @@ impl EventSink for TestSink {
 }
 
 fn dirs(root: &Path) -> AppDirs {
-    assert!(dev_pg_dir().join("bin").exists(), "PostgreSQL binaries missing: run node scripts/fetch-postgres.mjs");
+    assert!(dev_pg_dir().join("bin").exists(), "PostgreSQL binaries missing: run node app/scripts/fetch-postgres.mjs");
     AppDirs { app_local_data_dir: root.join("app"), app_log_dir: root.join("logs"), pg_dir: dev_pg_dir() }
 }
 

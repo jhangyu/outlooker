@@ -63,7 +63,7 @@ pub struct DataDirMoveProgress {
 #[cfg(test)]
 pub(crate) fn write_name_list(file: &str, names: &[&str]) {
     let dir = std::env::var("TS_RS_EXPORT_DIR")
-        .expect("TS_RS_EXPORT_DIR is set by src-tauri/.cargo/config.toml");
+        .expect("TS_RS_EXPORT_DIR is set by app/backend/.cargo/config.toml");
     std::fs::create_dir_all(&dir).unwrap();
     let body = serde_json::to_string_pretty(names).unwrap() + "\n";
     std::fs::write(std::path::Path::new(&dir).join(file), body).unwrap();

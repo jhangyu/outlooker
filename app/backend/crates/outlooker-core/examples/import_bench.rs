@@ -1,7 +1,7 @@
 //! Import throughput bench (spec Part 02 §9): imports a given PST into a fresh cluster and prints
 //! messages/s and MB/s per phase. The last stdout line is exactly
 //! `import_bench messages_per_sec=<f64> peak_rss_bytes=<u64>` (messages/s = items done / import-phase seconds;
-//! peak RSS of this process, sampled at every progress event). Run from src-tauri/: `cargo build --workspace --release --example import_bench`,
+//! peak RSS of this process, sampled at every progress event). Run from app/backend/: `cargo build --workspace --release --example import_bench`,
 //! then `target/release/examples/import_bench <absolute path to .pst>` (outlooker-loadgen turns test-support on for the workspace).
 
 #[cfg(not(feature = "test-support"))]

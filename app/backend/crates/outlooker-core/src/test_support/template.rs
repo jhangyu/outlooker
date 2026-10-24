@@ -53,7 +53,7 @@ fn key() -> String {
 }
 
 fn prepare() -> PathBuf {
-    assert!(dev_pg_dir().join("bin").exists(), "PostgreSQL binaries missing: run node scripts/fetch-postgres.mjs");
+    assert!(dev_pg_dir().join("bin").exists(), "PostgreSQL binaries missing: run node app/scripts/fetch-postgres.mjs");
     let base = std::env::temp_dir().join("outlooker-test-pg");
     let key = key();
     let dir = base.join(&key);

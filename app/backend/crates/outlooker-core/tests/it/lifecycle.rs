@@ -24,7 +24,7 @@ struct Rig {
 }
 
 fn rig_at(dir: tempfile::TempDir, app: &str, pg_dir: std::path::PathBuf) -> Rig {
-    assert!(dev_pg_dir().join("bin").exists(), "PostgreSQL binaries missing: run node scripts/fetch-postgres.mjs");
+    assert!(dev_pg_dir().join("bin").exists(), "PostgreSQL binaries missing: run node app/scripts/fetch-postgres.mjs");
     let paths = Paths::new(dir.path().join(app), dir.path().join("logs"), pg_dir);
     let settings = SettingsStore::load(paths.bootstrap_file()).unwrap();
     let (db, gate) = (Db::new(), Gate::new());

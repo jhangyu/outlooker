@@ -1,7 +1,7 @@
 #![cfg(feature = "test-support")]
 //! The only tests that start their own PostgreSQL: creating, restarting, moving and taking over the cluster IS the
 //! behavior under test. Each runs on a clone of the cached template data root (`seeded_root`) except X1, which runs
-//! the real initdb. Run `node scripts/fetch-postgres.mjs` first.
+//! the real initdb. Run `node app/scripts/fetch-postgres.mjs` first.
 
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -40,7 +40,7 @@ struct Rig {
 }
 
 fn rig_at(dir: tempfile::TempDir, app: &str, config: SupervisorConfig) -> Rig {
-    assert!(dev_pg_dir().join("bin").exists(), "PostgreSQL binaries missing: run node scripts/fetch-postgres.mjs");
+    assert!(dev_pg_dir().join("bin").exists(), "PostgreSQL binaries missing: run node app/scripts/fetch-postgres.mjs");
     let paths = Paths::new(dir.path().join(app), dir.path().join("logs"), dev_pg_dir());
     let settings = SettingsStore::load(paths.bootstrap_file()).unwrap();
     let (tx, events) = mpsc::unbounded_channel();
@@ -243,7 +243,7 @@ fn fake_pid_file(paths: &Paths, pid: u32) {
 /// X4: starting after a crash or reboot works with a stale pid file, a still-running orphan and a busy port.
 #[tokio::test]
 async fn orphan_postmaster_is_restarted() {
-    assert!(dev_pg_dir().join("bin").exists(), "PostgreSQL binaries missing: run node scripts/fetch-postgres.mjs");
+    assert!(dev_pg_dir().join("bin").exists(), "PostgreSQL binaries missing: run node app/scripts/fetch-postgres.mjs");
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::new(dir.path().join("app"), dir.path().join("logs"), dev_pg_dir()).with_data_root(dir.path().join("data"));
     seeded_root(paths.data_root());

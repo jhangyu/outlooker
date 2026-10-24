@@ -1,4 +1,4 @@
-//! The shared PostgreSQL cluster for one test run. `scripts/cargo-test-runner.mjs` spawns it once before a test
+//! The shared PostgreSQL cluster for one test run. `app/scripts/cargo-test-runner.mjs` spawns it once before a test
 //! binary that needs it, reads `<port>\t<run dir>` from the first stdout line into `OUTLOOKER_TEST_PG`, and closes
 //! stdin when the binary exits; then the cluster stops (immediate) and the run dir is removed. Tests only connect
 //! (`test_support::TestCluster`); this example is the only place that boots it.

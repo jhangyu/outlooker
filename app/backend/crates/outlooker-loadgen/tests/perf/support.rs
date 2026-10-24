@@ -20,14 +20,14 @@ pub enum Log {
     Perf,
 }
 
-/// Repository root (this crate is `src-tauri/crates/outlooker-loadgen`).
+/// Repository root (this crate is `app/backend/crates/outlooker-loadgen`).
 pub fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..")
 }
 
-/// `$OUTLOOKER_PERF_ROOT`, default `src-tauri/target/perf-root`.
+/// `$OUTLOOKER_PERF_ROOT`, default `app/backend/target/perf-root`.
 pub fn perf_root() -> PathBuf {
-    std::env::var_os("OUTLOOKER_PERF_ROOT").map(PathBuf::from).unwrap_or_else(|| repo_root().join("src-tauri/target/perf-root"))
+    std::env::var_os("OUTLOOKER_PERF_ROOT").map(PathBuf::from).unwrap_or_else(|| repo_root().join("app/backend/target/perf-root"))
 }
 
 pub fn generate_json() -> PathBuf {

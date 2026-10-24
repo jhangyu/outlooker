@@ -28,7 +28,7 @@ use tokio::sync::{broadcast, mpsc, watch};
 
 /// libyal testdata `pst/outlook.pst`, relative to this crate.
 const OUTLOOK_PST: &str = "../../../tests/fixtures/external/outlook.pst";
-/// Repository root, relative to this crate (Windows-phase fixtures live in `tests/fixtures/pst/`).
+/// `app/` root, relative to this crate (Windows-phase fixtures live in `tests/fixtures/pst/`).
 #[cfg(feature = "outlook-fixtures")]
 const REPO_ROOT: &str = "../../..";
 const JOB_TIMEOUT: Duration = Duration::from_secs(120);
