@@ -285,20 +285,7 @@ fn display_name(path: &str) -> String {
 /// resolved, separators normalized and the letter case as stored on disk (macOS `realpath`, Windows
 /// `GetFinalPathNameByHandleW`), so every spelling of one file maps to one string. None when the path does not resolve.
 fn canonical(path: &str) -> Option<String> {
-    Some(plain_path(std::fs::canonicalize(path).ok()?.into_os_string().into_string().ok()?))
-}
-
-/// Drops the `\\?\` prefix Windows canonicalization adds (drive and UNC paths below MAX_PATH), so the stored path
-/// reads like the one the user picked; longer paths keep it (they need it to open). Other strings pass unchanged.
-fn plain_path(p: String) -> String {
-    let plain = if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
-        format!(r"\\{rest}")
-    } else if let Some(rest) = p.strip_prefix(r"\\?\").filter(|r| r.as_bytes().get(1) == Some(&b':')) {
-        rest.to_owned()
-    } else {
-        return p;
-    };
-    if plain.encode_utf16().count() < 260 { plain } else { p }
+    Some(crate::paths::plain_path(std::fs::canonicalize(path).ok()?.into_os_string().into_string().ok()?))
 }
 
 /// Source row + its first import job (`queued`, or `locked` when the PST is held) in one transaction.
@@ -813,15 +800,5 @@ mod tests {
         assert_eq!(display_name("/x/Archive 2023.pst"), "Archive 2023");
         assert_eq!(display_name("/x/.pst"), ".pst");
         assert_eq!(display_name(&format!("/x/{}.pst", "a".repeat(600))).len(), 512);
-    }
-
-    #[test]
-    fn windows_verbatim_prefix_dropped() {
-        assert_eq!(plain_path(r"\\?\C:\Mail\a.pst".into()), r"C:\Mail\a.pst");
-        assert_eq!(plain_path(r"\\?\UNC\srv\share\a.pst".into()), r"\\srv\share\a.pst");
-        assert_eq!(plain_path(r"\\?\Volume{x}\a.pst".into()), r"\\?\Volume{x}\a.pst");
-        assert_eq!(plain_path("/Users/x/a.pst".into()), "/Users/x/a.pst");
-        let long = format!(r"\\?\C:\{}.pst", "a".repeat(300));
-        assert_eq!(plain_path(long.clone()), long, "beyond MAX_PATH the prefix is needed to open the file");
     }
 }
