@@ -22,7 +22,7 @@ const GENERIC_ATTRIBUTES: &[&str] = &["style"];
 /// turns the former into `<code>`.
 const TAG_ATTRIBUTES: &[(&str, &[&str])] = &[
     ("a", &["href"]),
-    ("img", &["src", "alt"]),
+    ("img", &["src", "alt", "width", "height"]),
     ("font", &["color", "size", "face"]),
     ("td", &["colspan", "rowspan"]),
     ("th", &["colspan", "rowspan"]),
@@ -128,6 +128,12 @@ fn filter<'u>(
                 return Some(Cow::Owned(format!("outlooker-inline:{ordinal}")));
             }
             None // remote http(s) and everything else: never fetched
+        }
+        ("img", "width" | "height") => {
+            let v = value.trim();
+            let n = v.strip_suffix("px").unwrap_or(v);
+            (!n.is_empty() && n.len() <= 5 && n.bytes().all(|b| b.is_ascii_digit()) && n.bytes().any(|b| b != b'0'))
+                .then(|| Cow::Owned(n.trim_start_matches('0').to_string()))
         }
         ("font", "face") => is_mono(value).then_some(Cow::Borrowed("monospace")),
         (_, "style") => {
@@ -393,5 +399,12 @@ mod tests {
         );
         assert_eq!(out.refs.len(), 2);
         assert_eq!(drop_src(&out.html, 0).matches("outlooker-inline:0").count(), 0);
+    }
+
+    #[test]
+    fn img_dimensions_numeric_only() {
+        let html = r#"<img width="40" height="20px"><img width="100%" height="-5"><img width="javascript:x" height="0"><img width=" 7 " height="1e3"><img width="12.5">"#;
+        let out = sanitize(html, &HashMap::new());
+        assert_eq!(out.html, r#"<img width="40" height="20"><img><img><img width="7"><img>"#);
     }
 }

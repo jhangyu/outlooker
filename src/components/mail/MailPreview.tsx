@@ -6,6 +6,7 @@ const useStyles = makeStyles({
 
 const READING_STYLE =
   '<style>body{font-family:Aptos,"Segoe UI","Microsoft JhengHei UI","Microsoft JhengHei",-apple-system,"PingFang TC",sans-serif}' +
+  'img{max-width:100%;height:auto}' +
   'pre,code{font-family:ui-monospace,"Cascadia Mono",Consolas,Menlo,monospace}</style>';
 
 /**
