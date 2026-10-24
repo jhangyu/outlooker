@@ -40,7 +40,7 @@ async fn create_source(db: &Db, s: u32) -> Result<(i64, i64), AppError> {
     let name = format!("source-{s:02}.pst");
     let pst_id: i64 = app
         .query_one(
-            "INSERT INTO pst_sources (path, display_name, file_size_bytes) VALUES ($1, $2, 1) RETURNING id",
+            "INSERT INTO pst_sources (path, display_name, file_size_bytes, paused) VALUES ($1, $2, 1, true) RETURNING id",
             &[&path, &name],
         )
         .await
