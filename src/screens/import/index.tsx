@@ -15,7 +15,8 @@ import { dbStatusQuery, pstListQuery, syncStatusQuery } from "../../api/queries"
 import type { PstSource } from "../../api/bindings/PstSource";
 import { useAppStatus } from "../../app/AppStatusContext";
 import {
-  EmptyState, ellipsis, formatBytes, formatDateTime, formatNumber, useAppToast, useColumnWidths, useRegisterPst,
+  EmptyState, Splitter, ellipsis, formatBytes, formatDateTime, formatNumber, useAppToast, useColumnWidths, useRegisterPst, useSplit,
+  type SplitDefaults,
 } from "../../components/common";
 import { RemoveDialog } from "./RemoveDialog";
 import { ActivityCard, ErrorLogCard, ScheduleCard, SidePanel } from "./SidePanel";
@@ -32,6 +33,8 @@ const BADGE: Record<RowState, { color: BadgeProps["color"]; appearance: BadgePro
   removing: { color: "warning", appearance: "tint", icon: <DeleteRegular /> },
   disabled: { color: "subtle", appearance: "tint", icon: <PauseCircleRegular /> },
 };
+/** Side panel width (px, right pane, so the Splitter is `reverse`); the list keeps at least `minOther`. */
+const SPLITS: SplitDefaults = { side: { size: 360, min: 280, max: 640, minOther: 360 } };
 type ColumnKey = "name" | "size" | "messages" | "new" | "lastSync" | "nextSync" | "status" | "enabled" | "actions";
 const COLUMNS: Record<ColumnKey, { width: number }> = {
   name: { width: 260 }, size: { width: 88 }, messages: { width: 88 }, new: { width: 88 }, lastSync: { width: 150 },
@@ -43,7 +46,7 @@ const column = (columnId: ColumnKey, def: Omit<Parameters<typeof createTableColu
 
 const useStyles = makeStyles({
   root: {
-    display: "grid", gridTemplateRows: "auto 1fr", gridTemplateColumns: "minmax(0, 1fr) 360px", height: "100%", minHeight: 0,
+    display: "grid", gridTemplateRows: "auto 1fr", height: "100%", minHeight: 0, position: "relative",
   },
   cmdbar: {
     gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS,
@@ -97,6 +100,7 @@ export function ImportScreen() {
   const s = useStyles();
   const { t, i18n } = useTranslation("import");
   const lng = i18n.language;
+  const split = useSplit("import", SPLITS);
   const status = useAppStatus();
   const qc = useQueryClient();
   const toast = useAppToast();
@@ -264,7 +268,7 @@ export function ImportScreen() {
   const empty = psts.isSuccess && list.length === 0;
 
   return (
-    <div className={s.root}>
+    <div ref={split.host("side", "x")} className={s.root} style={{ gridTemplateColumns: `${split.rest("side", "1fr")} ${split.track("side", "360px")}` }}>
       <div className={s.cmdbar}>
         <Subtitle2 as="h2" className={s.title}>
           {t("title")}
@@ -341,6 +345,7 @@ export function ImportScreen() {
             </SidePanel>
           </div>
       </aside>
+      <Splitter orientation="vertical" reverse {...split.props("side")} style={{ gridColumn: 2, gridRow: 2, top: 0, bottom: 0, left: -3 }} />
       {removing ? <RemoveDialog pst={removing} onClose={() => setRemoving(null)} /> : null}
     </div>
   );
