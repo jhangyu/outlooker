@@ -93,7 +93,8 @@ Out of scope: Windows verification, VSS, mirror sync, per-path schedules, tray/a
 Overrides of round 2 (they win):
 14. **Reset database**: when the database cannot be opened because its format is wrong (migration failure), the
     warning screen offers "Reset database". After a confirmation dialog it deletes only the app's database data
-    directory, creates a fresh database, and returns to the first-run flow. It never deletes anything outside that directory.
+    directory and the crash record `data_root/import-inflight` (user decision 2026-10-24: its old job id would misfire on the
+    fresh database), creates a fresh database, and returns to the first-run flow. It deletes nothing else.
 15. **Dev data root** `scripts/tmp/demo-root` is deleted without backup (user-approved, random demo mail only) and
     reseeded by the loadgen with 10,000 messages; loadgen fake sources are written as paused.
 Round-3 acceptance (on main after merge):
