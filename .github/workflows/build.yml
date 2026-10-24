@@ -1,0 +1,69 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref, never tag (release) runs.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python app/scripts/ci_guard.py
+
+  build:
+    needs: guard
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      # rustup >= 1.28 no longer auto-installs the toolchain pinned in rust-toolchain.toml
+      - run: rustup toolchain install
+        working-directory: app/backend
+        shell: bash
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/backend
+      - uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-
+      - run: python app/scripts/build.py --ci --out out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bundles-${{ matrix.os }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: bundles-*
+          path: out
+          merge-multiple: true
+      # gh is preinstalled on runners; lighter than a third-party release action
+      - run: gh release create "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
