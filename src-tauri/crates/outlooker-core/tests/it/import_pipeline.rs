@@ -1023,6 +1023,31 @@ async fn sync_repeated_errors_keep_one_row() {
     assert!(listed(failing).failure_reason.is_some(), "the newest failed job still shows its reason");
 }
 
+/// Contract item 11: a failed path whose next sync fails for another reason (file now missing) gets one new failed
+/// job and error row, so the listed reason is the current one. The same reason again writes nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_changed_failure_reason_writes_one_new_row() {
+    let tc = TestCluster::start().await;
+    let mut fx = manager(&tc, ImportTuning::default());
+    let broken = synthetic_path(&tc, "reason.pst"); // PST magic, but libpff cannot open it: the job fails
+    let res = fx.mgr.register(vec![broken.clone()]).await.unwrap();
+    let EnqueueResult::Queued { pst } = &res[0] else { panic!("{res:?}") };
+    let id = pst.id;
+    fx.mgr.start_worker();
+    assert_eq!(wait_job(&mut fx.events, id).await, ImportStatus::Failed);
+    let old = fx.mgr.list().await.unwrap()[0].failure_reason.clone();
+    let counts = || async { (tc.count("SELECT count(*) FROM import_jobs").await, tc.count("SELECT count(*) FROM import_errors").await) };
+    assert_eq!(counts().await, (1, 1));
+    std::fs::remove_file(&broken).unwrap();
+    fx.mgr.sync(SyncTarget::One(id)).await.unwrap();
+    assert_eq!(counts().await, (2, 2), "new reason: one new job and error row");
+    let new = fx.mgr.list().await.unwrap()[0].failure_reason.clone();
+    assert_ne!(new, old);
+    fx.mgr.sync(SyncTarget::One(id)).await.unwrap();
+    fx.mgr.sync(SyncTarget::All).await.unwrap();
+    assert_eq!(counts().await, (2, 2), "same reason: nothing written");
+}
+
 /// Contract override 9: a probe stuck on one path (a stalled network share) does not delay another path's sync or
 /// the import worker.
 #[tokio::test(flavor = "multi_thread")]

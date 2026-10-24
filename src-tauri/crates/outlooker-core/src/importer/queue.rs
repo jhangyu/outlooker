@@ -508,15 +508,24 @@ async fn sync_one(inner: &Inner, pst_id: i64) -> Result<SyncStep, AppError> {
                 .await
                 .map_err(db_err)?;
         }
-        Some(Probe::Unavailable(_)) if state == JobState::Failed => {}
         Some(Probe::Unavailable(e)) => {
-            let failed: i64 = tx
-                .query_one("INSERT INTO import_jobs (pst_id, kind, state, finished_at) VALUES ($1, 'import', 'failed', now()) RETURNING id", &[&pst_id])
-                .await
-                .map_err(db_err)?
-                .get(0);
             let e = ItemError::new(ImportErrorStage::Open, ImportErrorSeverity::JobFailed, "", 0, &e.to_string());
-            tx.execute(INS_JOB_FAILED, &[&pst_id, &failed, &ImportErrorStage::Open.as_db(), &e.message]).await.map_err(db_err)?;
+            // A failed streak keeps its row while the reason stays the same; a different reason is a new failed job so the
+            // listed failure reason is the current one.
+            let same = state == JobState::Failed
+                && tx
+                    .query_opt("SELECT 1 FROM import_errors WHERE job_id = $1 AND severity = 'job_failed' AND message = $2", &[&seen_job, &e.message])
+                    .await
+                    .map_err(db_err)?
+                    .is_some();
+            if !same {
+                let failed: i64 = tx
+                    .query_one("INSERT INTO import_jobs (pst_id, kind, state, finished_at) VALUES ($1, 'import', 'failed', now()) RETURNING id", &[&pst_id])
+                    .await
+                    .map_err(db_err)?
+                    .get(0);
+                tx.execute(INS_JOB_FAILED, &[&pst_id, &failed, &ImportErrorStage::Open.as_db(), &e.message]).await.map_err(db_err)?;
+            }
         }
     }
     tx.execute("UPDATE pst_sources SET last_checked_at = now() WHERE id = $1", &[&pst_id]).await.map_err(db_err)?;
