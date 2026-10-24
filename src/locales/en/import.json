@@ -3,28 +3,28 @@
   "add": "Add PST path…",
   "syncAll": "Sync all now",
   "stats": { "messages": "Messages", "psts": "PST paths", "size": "Database size", "unknown": "—" },
-  "paths": { "title": "Registered PST paths", "summary": "{{n}} paths · {{enabled}} enabled", "note": "Sync only adds mail. Mail deleted or moved in Outlook is kept." },
-  "col": { "name": "File", "size": "Size", "messages": "Messages", "new": "Last added", "lastSync": "Last sync", "nextSync": "Next sync", "status": "Status", "enabled": "Enabled" },
-  "row": { "enable": "Enable sync for {{name}}", "syncNow": "Sync {{name}} now", "syncOnce": "Sync now", "retry": "Retry now", "remove": "Remove {{name}}" },
+  "paths": { "title": "Registered PST paths", "summary": "{{n}} paths · {{active}} active", "note": "Sync only adds mail. Mail deleted or moved in Outlook is kept." },
+  "col": { "name": "File", "size": "Size", "messages": "Messages", "new": "Last added", "lastSync": "Last sync", "nextSync": "Next sync", "status": "Status" },
+  "row": { "pause": "Pause {{name}}", "pauseTip": "Pause", "resume": "Resume {{name}}", "resumeTip": "Resume", "unregister": "Unregister {{name}}", "unregisterTip": "Unregister (keeps mail)", "removeTip": "Delete (removes its mail)", "syncNow": "Sync {{name}} now", "syncOnce": "Sync now", "retry": "Retry now", "remove": "Delete {{name}}" },
   "when": { "notScheduled": "Not scheduled", "syncing": "Syncing", "thisRun": "This run", "retrying": "Automatic retry" },
   "status": {
     "queued": "Waiting", "running": "Syncing", "failed": "Failed",
-    "completed": "Up to date", "locked": "Locked", "removing": "Removing", "disabled": "Disabled"
+    "completed": "Up to date", "locked": "Locked", "removing": "Removing", "paused": "Paused"
   },
   "cap": {
     "queued": "Starts after the current sync finishes.",
     "locked": "Another program is using this file. The next scheduled run retries automatically.",
     "failed": "The sync failed.",
-    "disabled": "Mail stays in the database. The schedule and Sync all skip this path."
+    "paused": "Paused. The schedule and Sync all skip this path. Resume continues from where it stopped.",
+    "pausing": "Pausing. Stops after the current item."
   },
   "phase": { "scanning": "Scanning folders", "importing": "Importing mail", "finalizing": "Building search indexes" },
   "progress": "{{done}} / {{total}} · {{percent}}%",
   "rate": "{{rate}}/s",
   "eta": "About {{minutes}} min left",
-  "cancel": "Cancel",
   "sched": {
     "title": "Sync schedule",
-    "appliesTo": "Applies to all enabled paths",
+    "appliesTo": "Applies to all paths that are not paused",
     "off": "Off (only runs when you press Sync now)",
     "interval": "Fixed interval",
     "every": "Every",
@@ -43,6 +43,7 @@
   "activity": {
     "title": "Current activity",
     "lastRun": "Last run {{time}}",
+    "pause": "Pause",
     "idle": "No sync or import is running.",
     "lockedSkipped": "Locked · skipped",
     "retryNext": "Retried on the next scheduled run."
@@ -51,10 +52,16 @@
   "stage": { "open": "Open", "scan": "Scan", "parse": "Parse", "html": "Content", "image": "Image", "store": "Store" },
   "empty": { "title": "No PST path registered", "body": "Add the path of an Outlook PST file. Outlooker imports it fully once, then only brings in new mail on the schedule." },
   "remove": {
-    "title": "Remove “{{name}}”?",
+    "title": "Delete “{{name}}”?",
     "body": "This PST file brought {{n}} messages. Messages that exist only in this PST file are deleted. Messages also found in other PST files are kept. The PST file itself is not changed.",
-    "confirm": "Remove",
-    "done": "Removing {{name}}"
+    "confirm": "Delete",
+    "done": "Deleting {{name}}"
+  },
+  "unregister": {
+    "title": "Unregister “{{name}}”?",
+    "body": "The path leaves this list and is never synced again. Its mail stays stored and searchable. Registering the same path later adds no duplicate messages.",
+    "confirm": "Unregister",
+    "done": "Unregistered {{name}}"
   },
   "enqueue": { "rejected": "{{path}}: {{reason}}" }
 }

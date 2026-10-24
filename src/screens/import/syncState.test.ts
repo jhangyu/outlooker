@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { rowState, toDraft, toSchedule } from "./syncState";
 
 describe("sync state derivation", () => {
-  it("disabled shows over a resting status but never hides a live job", () => {
-    expect(rowState({ status: "completed", paused: true })).toBe("disabled");
-    expect(rowState({ status: "locked", paused: true })).toBe("disabled");
-    expect(rowState({ status: "running", paused: true })).toBe("running");
+  it("paused shows over every status except removing", () => {
+    expect(rowState({ status: "completed", paused: true })).toBe("paused");
+    expect(rowState({ status: "locked", paused: true })).toBe("paused");
+    expect(rowState({ status: "running", paused: true })).toBe("paused");
+    expect(rowState({ status: "queued", paused: true })).toBe("paused");
+    expect(rowState({ status: "removing", paused: true })).toBe("removing");
     expect(rowState({ status: "locked", paused: false })).toBe("locked");
   });
 

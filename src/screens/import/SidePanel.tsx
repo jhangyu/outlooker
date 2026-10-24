@@ -160,7 +160,7 @@ export function ScheduleCard({ status }: { status: SyncStatus }) {
   );
 }
 
-export function ActivityCard({ list, status, onCancel }: { list: PstSource[]; status: SyncStatus | undefined; onCancel(id: number): void }) {
+export function ActivityCard({ list, status, onPause }: { list: PstSource[]; status: SyncStatus | undefined; onPause(id: number): void }) {
   const s = useStyles();
   const { t, i18n } = useTranslation("import");
   const lng = i18n.language;
@@ -211,8 +211,8 @@ export function ActivityCard({ list, status, onCancel }: { list: PstSource[]; st
                   {pr?.bytesPerSec ? <span>{t("rate", { rate: formatBytes(pr.bytesPerSec, lng) })}</span> : null}
                   {pr?.etaSeconds ? <span>{t("eta", { minutes: Math.max(1, Math.round(pr.etaSeconds / 60)) })}</span> : null}
                   <span className={s.grow} />
-                  <Button size="small" appearance="subtle" onClick={() => onCancel(p.id)} data-testid="activity-cancel">
-                    {t("cancel")}
+                  <Button size="small" appearance="subtle" disabled={p.paused} onClick={() => onPause(p.id)} data-testid="activity-pause">
+                    {t("activity.pause")}
                   </Button>
                 </div>
               </div>

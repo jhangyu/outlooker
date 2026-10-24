@@ -1,11 +1,11 @@
 import {
   Badge, Body1Strong, Button, Caption1, DataGrid, DataGridBody, DataGridCell, DataGridHeader, DataGridHeaderCell, DataGridRow,
-  ProgressBar, Subtitle2, Switch, TableCellLayout, createTableColumn, makeStyles, mergeClasses, tokens, buttonClassNames,
+  ProgressBar, Subtitle2, TableCellLayout, createTableColumn, makeStyles, mergeClasses, tokens, buttonClassNames,
   type BadgeProps, type TableColumnDefinition, type TableColumnId,
 } from "@fluentui/react-components";
 import {
   AddRegular, ArrowSyncRegular, CheckmarkCircleRegular, DeleteRegular, DismissCircleRegular, DocumentRegular, HourglassRegular,
-  LockClosedRegular, MailInboxRegular, PauseCircleRegular,
+  LockClosedRegular, MailInboxRegular, PauseCircleRegular, PlayCircleRegular, DismissRegular,
 } from "@fluentui/react-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactElement } from "react";
@@ -18,7 +18,7 @@ import {
   EmptyState, Splitter, ellipsis, formatBytes, formatDateTime, formatNumber, formatRelative, useAppToast, useNow, useColumnWidths,
   useRegisterPst, useSplit, type SplitDefaults,
 } from "../../components/common";
-import { RemoveDialog } from "./RemoveDialog";
+import { RemoveDialog, UnregisterDialog } from "./RemoveDialog";
 import { ActivityCard, ErrorLogCard, ScheduleCard, SidePanel } from "./SidePanel";
 import { rowState, type RowState } from "./syncState";
 
@@ -29,14 +29,14 @@ const BADGE: Record<RowState, { color: BadgeProps["color"]; appearance: BadgePro
   locked: { color: "warning", appearance: "tint", icon: <LockClosedRegular /> },
   failed: { color: "danger", appearance: "tint", icon: <DismissCircleRegular /> },
   removing: { color: "warning", appearance: "tint", icon: <DeleteRegular /> },
-  disabled: { color: "subtle", appearance: "tint", icon: <PauseCircleRegular /> },
+  paused: { color: "subtle", appearance: "tint", icon: <PauseCircleRegular /> },
 };
 /** Side panel width (px, right pane, so the Splitter is `reverse`); the list keeps at least `minOther`. */
 const SPLITS: SplitDefaults = { side: { size: 360, min: 280, max: 640, minOther: 360 } };
-type ColumnKey = "name" | "size" | "messages" | "new" | "lastSync" | "nextSync" | "status" | "enabled" | "actions";
+type ColumnKey = "name" | "size" | "messages" | "new" | "lastSync" | "nextSync" | "status" | "actions";
 const COLUMNS: Record<ColumnKey, { width: number }> = {
   name: { width: 260 }, size: { width: 88 }, messages: { width: 88 }, new: { width: 88 }, lastSync: { width: 150 },
-  nextSync: { width: 150 }, status: { width: 230 }, enabled: { width: 72 }, actions: { width: 84 },
+  nextSync: { width: 150 }, status: { width: 230 }, actions: { width: 150 },
 };
 const NUMERIC: ReadonlySet<TableColumnId> = new Set<ColumnKey>(["size", "messages", "new"]);
 const column = (columnId: ColumnKey, def: Omit<Parameters<typeof createTableColumn<PstSource>>[0], "columnId">) =>
@@ -107,6 +107,7 @@ export function ImportScreen() {
   const db = useQuery(dbStatusQuery);
   const [selected, setSelected] = useState<number | null>(null);
   const [removing, setRemoving] = useState<PstSource | null>(null);
+  const [unregistering, setUnregistering] = useState<PstSource | null>(null);
   const list = psts.data ?? [];
   const sizing = useColumnWidths("import-paths", COLUMNS);
 
@@ -128,7 +129,7 @@ export function ImportScreen() {
     await register();
   });
   const nextRunAt = sync.data?.nextRunAt ?? null;
-  const enabledCount = list.filter((p) => !p.paused).length;
+  const activeCount = list.filter((p) => !p.paused).length;
   const live = (p: PstSource) => p.status === "running" || p.status === "queued" || p.status === "removing";
   const now = useNow();
   const when = (iso: string | null, sub?: string) => (
@@ -175,7 +176,7 @@ export function ImportScreen() {
         const st = rowState(p);
         if (st === "running") return when(null, t("when.syncing"));
         if (st === "queued") return when(null, t("when.thisRun"));
-        if (st === "disabled" || st === "removing") return when(null, t("when.notScheduled"));
+        if (st === "paused" || st === "removing") return when(null, t("when.notScheduled"));
         return nextRunAt ? when(nextRunAt, st === "locked" ? t("when.retrying") : undefined) : when(null, t("when.notScheduled"));
       },
     }),
@@ -206,21 +207,10 @@ export function ImportScreen() {
             {st === "queued" ? <Caption1 className={s.cap}>{t("cap.queued")}</Caption1> : null}
             {st === "locked" ? <Caption1 className={s.capWarn}>{t("cap.locked")}</Caption1> : null}
             {st === "failed" ? <Caption1 className={s.capErr}>{p.failureReason ?? t("cap.failed")}</Caption1> : null}
-            {st === "disabled" ? <Caption1 className={s.cap}>{t("cap.disabled")}</Caption1> : null}
+            {st === "paused" ? <Caption1 className={s.cap}>{t(p.status === "running" ? "cap.pausing" : "cap.paused")}</Caption1> : null}
           </span>
         );
       },
-    }),
-    column("enabled", {
-      renderHeaderCell: () => t("col.enabled"),
-      renderCell: (p) => (
-        <Switch
-          checked={!p.paused}
-          aria-label={t("row.enable", { name: p.displayName })}
-          data-testid="pst-enabled"
-          onChange={(_, d) => void act(() => api.pstSetPaused(p.id, !d.checked))()}
-        />
-      ),
     }),
     column("actions", {
       renderHeaderCell: () => "",
@@ -231,7 +221,7 @@ export function ImportScreen() {
             icon={<ArrowSyncRegular />}
             aria-label={t("row.syncNow", { name: p.displayName })}
             title={t(p.status === "failed" || p.status === "locked" ? "row.retry" : "row.syncOnce")}
-            disabled={live(p)}
+            disabled={live(p) || p.paused}
             data-testid="pst-sync"
             onClick={(e) => {
               e.stopPropagation();
@@ -240,10 +230,35 @@ export function ImportScreen() {
           />
           <Button
             appearance="subtle"
+            icon={p.paused ? <PlayCircleRegular /> : <PauseCircleRegular />}
+            aria-label={t(p.paused ? "row.resume" : "row.pause", { name: p.displayName })}
+            title={t(p.paused ? "row.resumeTip" : "row.pauseTip")}
+            disabled={p.status === "removing"}
+            data-testid={p.paused ? "pst-resume" : "pst-pause"}
+            onClick={(e) => {
+              e.stopPropagation();
+              void act(() => api.pstSetPaused(p.id, !p.paused))();
+            }}
+          />
+          <Button
+            appearance="subtle"
+            icon={<DismissRegular />}
+            aria-label={t("row.unregister", { name: p.displayName })}
+            title={t("row.unregisterTip")}
+            disabled={p.status === "removing"}
+            data-testid="pst-unregister"
+            onClick={(e) => {
+              e.stopPropagation();
+              setUnregistering(p);
+            }}
+          />
+          <Button
+            appearance="subtle"
             className={s.danger}
             icon={<DeleteRegular />}
             aria-label={t("row.remove", { name: p.displayName })}
-            disabled={p.status === "running" || p.status === "removing"}
+            title={t("row.removeTip")}
+            disabled={p.status === "removing"}
             data-testid="pst-remove"
             onClick={(e) => {
               e.stopPropagation();
@@ -300,7 +315,7 @@ export function ImportScreen() {
           <>
             <div className={s.paneHead}>
               <Body1Strong as="h3">{t("paths.title")}</Body1Strong>
-              <Caption1 className={s.muted}>{t("paths.summary", { n: formatNumber(list.length, lng), enabled: formatNumber(enabledCount, lng) })}</Caption1>
+              <Caption1 className={s.muted}>{t("paths.summary", { n: formatNumber(list.length, lng), active: formatNumber(activeCount, lng) })}</Caption1>
               <span className={s.spacer} />
               <Caption1 className={s.muted}>{t("paths.note")}</Caption1>
             </div>
@@ -322,7 +337,7 @@ export function ImportScreen() {
                       data-testid="pst-row"
                       data-pst-name={item.displayName}
                       aria-selected={item.id === selected}
-                      className={mergeClasses(item.id === selected && s.rowSelected, rowState(item) === "disabled" && s.rowOff)}
+                      className={mergeClasses(item.id === selected && s.rowSelected, rowState(item) === "paused" && s.rowOff)}
                       onClick={() => setSelected(item.id)}
                     >
                       {({ renderCell, columnId }) => <DataGridCell className={colClass(columnId)}>{renderCell(item)}</DataGridCell>}
@@ -338,13 +353,14 @@ export function ImportScreen() {
           <div className={s.scroll}>
             <SidePanel>
               {sync.data ? <ScheduleCard key={JSON.stringify(sync.data.schedule)} status={sync.data} /> : null}
-              <ActivityCard list={list} status={sync.data} onCancel={(id) => void act(() => api.pstSetPaused(id, true))()} />
+              <ActivityCard list={list} status={sync.data} onPause={(id) => void act(() => api.pstSetPaused(id, true))()} />
               {sel && (sel.errorCount > 0 || sel.status === "failed") ? <ErrorLogCard key={sel.id} pst={sel} /> : null}
             </SidePanel>
           </div>
       </aside>
       <Splitter orientation="vertical" reverse {...split.props("side")} style={{ gridColumn: 2, gridRow: 2, top: 0, bottom: 0, left: -3 }} />
       {removing ? <RemoveDialog pst={removing} onClose={() => setRemoving(null)} /> : null}
+      {unregistering ? <UnregisterDialog pst={unregistering} onClose={() => setUnregistering(null)} /> : null}
     </div>
   );
 }
