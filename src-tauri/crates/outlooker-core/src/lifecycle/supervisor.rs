@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-use crate::db::{library_counts, Db, DbConn};
+#[cfg(feature = "test-support")]
+use crate::db::DbConn;
+use crate::db::{library_counts, Db};
 use crate::dto::app::{AppPhase, AppStatus, LibraryCounts};
 use crate::dto::error::AppError;
 use crate::gate::Gate;
