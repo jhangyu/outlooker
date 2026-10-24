@@ -47,3 +47,29 @@ validation, "change path" action.
 
 ## Round budget
 3 rounds. Parking lot: `docs/logs/pst-sync/parking-lot.md`.
+
+## Round 2 (user decisions 2026-10-24, appended by the user's instruction)
+End state: the round-1 end state, plus the 3 review fixes, per-path actions Pause / Unregister / Delete, blocking file
+I/O split off shared locks, case-insensitive path identity, and the HTML sanitizer keeping image width/height.
+Overrides of round 1 (they win):
+7. **Per-path actions = Pause, Unregister (zh-TW 取消), Delete.** Pause stops a running sync (checkpoint kept) and stops
+   all scheduled and manual syncs until Resume; Resume continues from the checkpoint. Pause replaces both "Disable" and
+   the per-run Cancel. Unregister removes the path from the Import list and never syncs it again; its mail stays
+   stored and searchable; registering the same path again later works and adds no duplicate messages. Delete = the
+   existing remove (it deletes mail only this path holds).
+8. **Path identity is case- and form-insensitive** wherever the file system treats paths that way: registering the
+   same file via a different case, separators or `..` segments yields one registration. No cfg branches.
+9. **Blocking file I/O (metadata, probe) runs off the async workers and holds no DB row lock or sync lock**; a slow
+   path (network share) does not delay other paths' syncs or the import worker.
+10. **The sanitizer keeps `<img>` width/height** (validated numeric values only); `golden_inline` is updated and green.
+Round-2 acceptance (on main after merge):
+R1. Review fixes (docs/logs/pst-sync/review-round1.md 1-3): a failed removal is not re-imported by a scheduled sync;
+    poison items from earlier syncs are skipped; a repeatedly failing path does not grow error rows/count per slot.
+    Each has one regression test (data integrity).
+R2. Pause/Resume, Unregister and re-register, Delete each have a test of their data effect; UI shows the three actions;
+    zh-TW/en key parity holds.
+R3. Path-identity test: case/separator/`..` variants of one existing file register once.
+R4. A test or scratch check (output attached) shows a blocked probe on one path does not delay another path's sync.
+R5. `golden_inline` green; whole `cargo test --workspace` green; clippy clean; `npm test` and `npm run build` green.
+R6. Fresh review round 2 finds no blocker. Then the dev data root is reset (no backup, user-approved) and the
+    previously imported PSTs are registered and synced again.
