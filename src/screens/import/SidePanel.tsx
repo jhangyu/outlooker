@@ -12,7 +12,7 @@ import { api } from "../../api/commands";
 import { syncStatusQuery } from "../../api/queries";
 import type { PstSource } from "../../api/bindings/PstSource";
 import type { SyncStatus } from "../../api/bindings/SyncStatus";
-import { EmptyState, formatBytes, formatDateTime, formatNumber, useAppToast } from "../../components/common";
+import { EmptyState, formatBytes, formatDateTime, formatNumber, formatRelative, useAppToast, useNow } from "../../components/common";
 import { toDraft, toSchedule, type ScheduleDraft } from "./syncState";
 
 const useStyles = makeStyles({
@@ -56,6 +56,7 @@ export function ScheduleCard({ status }: { status: SyncStatus }) {
   const s = useStyles();
   const { t, i18n } = useTranslation("import");
   const lng = i18n.language;
+  const now = useNow();
   const qc = useQueryClient();
   const toast = useAppToast();
   const [draft, setDraft] = useState<ScheduleDraft>(() => toDraft(status.schedule));
@@ -141,7 +142,7 @@ export function ScheduleCard({ status }: { status: SyncStatus }) {
       {status.schedule.mode !== "off" && status.nextRunAt ? (
         <div className={s.nextLine} data-testid="next-sync">
           <CalendarRegular />
-          <span>{t("sched.next", { time: formatDateTime(status.nextRunAt, lng) })}</span>
+          <span title={formatDateTime(status.nextRunAt, lng)}>{t("sched.next", { time: formatRelative(status.nextRunAt, lng, now) })}</span>
         </div>
       ) : null}
       <MessageBar intent="info">
@@ -163,6 +164,7 @@ export function ActivityCard({ list, status, onCancel }: { list: PstSource[]; st
   const s = useStyles();
   const { t, i18n } = useTranslation("import");
   const lng = i18n.language;
+  const now = useNow();
   const running = list.filter((p) => p.status === "running" || p.status === "cancelling");
   const queued = list.filter((p) => p.status === "queued");
   const locked = list.filter((p) => p.status === "locked");
@@ -175,7 +177,7 @@ export function ActivityCard({ list, status, onCancel }: { list: PstSource[]; st
           {t("activity.title")}
         </Body1>
         <span className={s.grow} />
-        {status?.lastRunAt ? <Caption1 className={s.muted}>{t("activity.lastRun", { time: formatDateTime(status.lastRunAt, lng) })}</Caption1> : null}
+        {status?.lastRunAt ? <Caption1 className={s.muted} title={formatDateTime(status.lastRunAt, lng)}>{t("activity.lastRun", { time: formatRelative(status.lastRunAt, lng, now) })}</Caption1> : null}
       </div>
       {!busy ? (
         <Caption1 className={s.muted}>{t("activity.idle")}</Caption1>
