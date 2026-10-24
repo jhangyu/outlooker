@@ -73,7 +73,7 @@ impl ImportManager {
     pub async fn register(&self, paths: Vec<String>) -> Result<Vec<EnqueueResult>, AppError> {
         queue::register(&self.inner, paths).await
     }
-    /// One sync step per target path: skip while a job is active, unchanged → only `last_checked_at`, else probe and
+    /// One sync step per target path: skip while a job is active or the path's previous step still runs, unchanged → only `last_checked_at`, else probe and
     /// queue a job, or record the locked / unavailable streak. Paths run concurrently; kicks the worker per queued job.
     pub async fn sync(&self, target: SyncTarget) -> Result<(), AppError> {
         queue::sync(&self.inner, target).await

@@ -1,6 +1,7 @@
 //! Sync scheduler: runs `ImportManager::sync(All)` on the schedule stored in the DB `settings` row, once after
-//! downtime, never while the app is not Ready. It never takes the Work Gate (the worker does, per job) and only one
-//! task runs, so scheduled runs never overlap; manual and scheduled runs are serialized inside `ImportManager::sync`.
+//! downtime, never while the app is not Ready. It never takes the Work Gate (the worker does, per job). Each run is
+//! spawned and not awaited, so a path whose probe hangs (dead network share) holds back neither the next slot nor
+//! `stop`; `ImportManager::sync` runs one step per path at a time, for scheduled and manual runs alike.
 pub mod schedule;
 
 use std::sync::{Arc, Mutex};
@@ -50,7 +51,8 @@ impl Scheduler {
         }
     }
 
-    /// Stops the task and waits for it; a run in progress (probe + job inserts, no import work) finishes first.
+    /// Stops the task and waits for it. A sync run in progress is not waited for: its steps finish on their own and queue
+    /// nothing once the importer shuts down.
     pub async fn stop(&self) {
         self.inner.shutdown.send_replace(true);
         let handle = self.inner.task.lock().unwrap_or_else(|p| p.into_inner()).take();
@@ -120,9 +122,12 @@ async fn step(inner: &Inner, emitted: &mut Option<SyncStatus>) -> Result<Duratio
         // Recorded first: a failing sync waits for the next slot instead of retrying every minute.
         store_last_run(&inner.db, now).await?;
         last = Some(now);
-        if let Err(e) = inner.importer.sync(SyncTarget::All).await {
-            log::warn!("scheduled sync: {e}");
-        }
+        let importer = inner.importer.clone();
+        tokio::spawn(async move {
+            if let Err(e) = importer.sync(SyncTarget::All).await {
+                log::warn!("scheduled sync: {e}");
+            }
+        });
     }
     let status = status_of(schedule.clone(), last, now);
     if emitted.as_ref() != Some(&status) {

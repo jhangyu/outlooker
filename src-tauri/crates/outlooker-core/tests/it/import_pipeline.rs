@@ -18,9 +18,11 @@ use outlooker_core::importer::pst_reader::walk_ids;
 use outlooker_core::importer::types::{FolderIn, RawAttachment, RawContent, RawItem, RawMail, RawRecipient};
 use outlooker_core::importer::writer::{Checkpoint, WriterLimits, truncate_to_micros};
 use outlooker_core::dto::search::{SearchQuery, SearchRequest};
+use outlooker_core::dto::sync::SyncSchedule;
 use outlooker_core::importer::{ImportManager, ImportTuning, RecoveryReport, SyncTarget};
 use outlooker_core::search::SearchService;
 use outlooker_core::sink::NullSink;
+use outlooker_core::sync::Scheduler;
 use outlooker_core::test_support::{png, TestCluster};
 use tokio::sync::{broadcast, mpsc, watch};
 
@@ -1048,8 +1050,8 @@ async fn sync_changed_failure_reason_writes_one_new_row() {
     assert_eq!(counts().await, (2, 2), "same reason: nothing written");
 }
 
-/// Contract override 9: a probe stuck on one path (a stalled network share) does not delay another path's sync or
-/// the import worker.
+/// Contract override 9: a probe stuck on one path (a stalled network share) does not delay another path's sync, the
+/// next scheduled slot, the import worker or `Scheduler::stop`; the stuck path gets no second step meanwhile.
 #[tokio::test(flavor = "multi_thread")]
 async fn sync_blocked_probe_does_not_delay_other_paths() {
     let tc = TestCluster::start().await;
@@ -1063,14 +1065,47 @@ async fn sync_blocked_probe_does_not_delay_other_paths() {
     std::fs::write(&slow, b"!BDN changed slow").unwrap();
     std::fs::write(&fast, b"!BDN changed fast").unwrap();
     let hold = hold_probe(&slow); // the slow path sorts first: a serial sync would wait on it
-    let mgr = fx.mgr.clone();
-    let sync = tokio::spawn(async move { mgr.sync(SyncTarget::All).await });
+    let sched = Scheduler::new(tc.db.clone(), fx.mgr.clone(), Arc::new(NullSink), fx.phase.subscribe());
+    sched.start(); // never ran: due at once
     let fast_end = tokio::time::timeout(Duration::from_secs(3), wait_job(&mut fx.events, b)).await;
     assert_eq!(fast_end.ok(), Some(ImportStatus::Completed), "the fast path synced and imported while the slow probe hangs");
-    assert!(!sync.is_finished());
+    let again = tokio::time::timeout(Duration::from_millis(500), fx.mgr.sync(SyncTarget::One(a))).await;
+    assert_eq!(again.ok(), Some(Ok(())), "\"sync now\" skips the path whose step still runs instead of probing it again");
+
+    std::fs::write(&fast, b"!BDN changed fast again").unwrap();
+    tc.admin().await.batch_execute("UPDATE settings SET sync_last_run_at = now() - interval '1 day'").await.unwrap();
+    sched.set_schedule(SyncSchedule::Interval { minutes: 60 }).await.unwrap(); // wakes the task: the next slot is due
+    let fast_end = tokio::time::timeout(Duration::from_secs(3), wait_job(&mut fx.events, b)).await;
+    assert_eq!(fast_end.ok(), Some(ImportStatus::Completed), "the next slot synced the fast path while the slow probe hangs");
+    assert!(tokio::time::timeout(Duration::from_millis(500), sched.stop()).await.is_ok(), "stop returns while the probe hangs");
+
     drop(hold);
-    sync.await.unwrap().unwrap();
     assert_eq!(wait_job(&mut fx.events, a).await, ImportStatus::Completed);
+    assert_eq!(tc.count(&format!("SELECT count(*) FROM import_jobs WHERE pst_id = {a}")).await, 2, "one sync step for the held path");
+}
+
+/// Review round 2: a Pause or Unregister that lands while the path's probe runs queues no job.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_paused_or_unregistered_during_probe_queues_nothing() {
+    let tc = TestCluster::start().await;
+    let mut fx = manager(&tc, ImportTuning::default());
+    let (pp, up) = (synthetic_path(&tc, "paused.pst"), synthetic_path(&tc, "unreg.pst"));
+    let p = fx.mgr.enqueue_synthetic(&pp, folders(), corpus(2)).await.unwrap();
+    let u = fx.mgr.enqueue_synthetic(&up, folders(), corpus_tagged(2, "u")).await.unwrap();
+    fx.mgr.start_worker();
+    assert_eq!(wait_jobs(&mut fx.events, &[p, u]).await, [ImportStatus::Completed; 2]);
+    std::fs::write(&pp, b"!BDN changed p").unwrap();
+    std::fs::write(&up, b"!BDN changed u").unwrap();
+    let holds = (hold_probe(&pp), hold_probe(&up));
+    let mgr = fx.mgr.clone();
+    let sync = tokio::spawn(async move { mgr.sync(SyncTarget::All).await });
+    // ponytail: fixed wait for the path list read (a few ms); no seam reports "probe entered"
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    fx.mgr.set_paused(p, true).await.unwrap();
+    fx.mgr.unregister(u).await.unwrap();
+    drop(holds);
+    sync.await.unwrap().unwrap();
+    assert_eq!(tc.count("SELECT count(*) FROM import_jobs").await, 2, "no job queued on the paused or unregistered path");
 }
 
 // ------------------------------------------------------------------------------------------------ Outlook fixtures (W2)
