@@ -8,14 +8,13 @@
   "row": { "enable": "Enable sync for {{name}}", "syncNow": "Sync {{name}} now", "syncOnce": "Sync now", "retry": "Retry now", "remove": "Remove {{name}}" },
   "when": { "notScheduled": "Not scheduled", "syncing": "Syncing", "thisRun": "This run", "retrying": "Automatic retry" },
   "status": {
-    "queued": "Waiting", "running": "Syncing", "cancelling": "Cancelling", "cancelled": "Cancelled", "failed": "Failed",
+    "queued": "Waiting", "running": "Syncing", "failed": "Failed",
     "completed": "Up to date", "locked": "Locked", "removing": "Removing", "disabled": "Disabled"
   },
   "cap": {
     "queued": "Starts after the current sync finishes.",
     "locked": "Another program is using this file. The next scheduled run retries automatically.",
     "failed": "The sync failed.",
-    "cancelled": "Cancelled before it finished.",
     "disabled": "Mail stays in the database. The schedule and Sync all skip this path."
   },
   "phase": { "scanning": "Scanning folders", "importing": "Importing mail", "finalizing": "Building search indexes" },

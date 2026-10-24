@@ -54,7 +54,6 @@ pub enum SyncTarget {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RecoveryReport {
     pub requeued: Vec<i64>,
-    pub cancelled: Vec<i64>,
 }
 
 #[derive(Clone)]
@@ -95,7 +94,7 @@ impl ImportManager {
     pub async fn errors(&self, req: ImportErrorsRequest) -> Result<ImportErrorPage, AppError> {
         queue::errors(&self.inner, req).await
     }
-    /// Part 02 §2.2 step 8: running → queued, cancelling → cancelled.
+    /// Part 02 §2.2 step 8: running → queued.
     pub async fn recover_after_crash(&self) -> Result<RecoveryReport, AppError> {
         queue::recover_after_crash(&self.inner).await
     }

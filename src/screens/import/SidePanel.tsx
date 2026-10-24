@@ -165,7 +165,7 @@ export function ActivityCard({ list, status, onCancel }: { list: PstSource[]; st
   const { t, i18n } = useTranslation("import");
   const lng = i18n.language;
   const now = useNow();
-  const running = list.filter((p) => p.status === "running" || p.status === "cancelling");
+  const running = list.filter((p) => p.status === "running");
   const queued = list.filter((p) => p.status === "queued");
   const locked = list.filter((p) => p.status === "locked");
   const busy = running.length + queued.length + locked.length > 0;
@@ -211,7 +211,7 @@ export function ActivityCard({ list, status, onCancel }: { list: PstSource[]; st
                   {pr?.bytesPerSec ? <span>{t("rate", { rate: formatBytes(pr.bytesPerSec, lng) })}</span> : null}
                   {pr?.etaSeconds ? <span>{t("eta", { minutes: Math.max(1, Math.round(pr.etaSeconds / 60)) })}</span> : null}
                   <span className={s.grow} />
-                  <Button size="small" appearance="subtle" disabled={p.status === "cancelling"} onClick={() => onCancel(p.id)} data-testid="activity-cancel">
+                  <Button size="small" appearance="subtle" onClick={() => onCancel(p.id)} data-testid="activity-cancel">
                     {t("cancel")}
                   </Button>
                 </div>

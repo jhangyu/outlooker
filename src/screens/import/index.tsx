@@ -26,10 +26,8 @@ const BADGE: Record<RowState, { color: BadgeProps["color"]; appearance: BadgePro
   completed: { color: "success", appearance: "tint", icon: <CheckmarkCircleRegular /> },
   queued: { color: "informative", appearance: "outline", icon: <HourglassRegular /> },
   running: { color: "brand", appearance: "tint", icon: <ArrowSyncRegular /> },
-  cancelling: { color: "warning", appearance: "tint", icon: <ArrowSyncRegular /> },
   locked: { color: "warning", appearance: "tint", icon: <LockClosedRegular /> },
   failed: { color: "danger", appearance: "tint", icon: <DismissCircleRegular /> },
-  cancelled: { color: "subtle", appearance: "tint", icon: <DismissCircleRegular /> },
   removing: { color: "warning", appearance: "tint", icon: <DeleteRegular /> },
   disabled: { color: "subtle", appearance: "tint", icon: <PauseCircleRegular /> },
 };
@@ -131,7 +129,7 @@ export function ImportScreen() {
   });
   const nextRunAt = sync.data?.nextRunAt ?? null;
   const enabledCount = list.filter((p) => !p.paused).length;
-  const live = (p: PstSource) => p.status === "running" || p.status === "queued" || p.status === "cancelling" || p.status === "removing";
+  const live = (p: PstSource) => p.status === "running" || p.status === "queued" || p.status === "removing";
   const now = useNow();
   const when = (iso: string | null, sub?: string) => (
     <span className={s.when}>
@@ -208,7 +206,6 @@ export function ImportScreen() {
             {st === "queued" ? <Caption1 className={s.cap}>{t("cap.queued")}</Caption1> : null}
             {st === "locked" ? <Caption1 className={s.capWarn}>{t("cap.locked")}</Caption1> : null}
             {st === "failed" ? <Caption1 className={s.capErr}>{p.failureReason ?? t("cap.failed")}</Caption1> : null}
-            {st === "cancelled" ? <Caption1 className={s.cap}>{t("cap.cancelled")}</Caption1> : null}
             {st === "disabled" ? <Caption1 className={s.cap}>{t("cap.disabled")}</Caption1> : null}
           </span>
         );
@@ -246,7 +243,7 @@ export function ImportScreen() {
             className={s.danger}
             icon={<DeleteRegular />}
             aria-label={t("row.remove", { name: p.displayName })}
-            disabled={p.status === "running" || p.status === "cancelling" || p.status === "removing"}
+            disabled={p.status === "running" || p.status === "removing"}
             data-testid="pst-remove"
             onClick={(e) => {
               e.stopPropagation();

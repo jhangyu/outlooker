@@ -158,16 +158,13 @@ db_text!(JobKind, "job kind", { Import => "import", Remove => "remove" });
 pub(crate) enum JobState {
     Queued,
     Running,
-    Cancelling,
-    Cancelled,
     Failed,
     Completed,
     /// Terminal: the PST was held by another program; finished_at = last seen locked.
     Locked,
 }
 db_text!(JobState, "job state", {
-    Queued => "queued", Running => "running", Cancelling => "cancelling",
-    Cancelled => "cancelled", Failed => "failed", Completed => "completed", Locked => "locked",
+    Queued => "queued", Running => "running", Failed => "failed", Completed => "completed", Locked => "locked",
 });
 
 /// Part 04 §2.1 table.
@@ -177,8 +174,6 @@ pub(crate) fn status_of(kind: JobKind, state: JobState) -> ImportStatus {
         (JobKind::Remove, _) => ImportStatus::Removing,
         (JobKind::Import, JobState::Queued) => ImportStatus::Queued,
         (JobKind::Import, JobState::Running) => ImportStatus::Running,
-        (JobKind::Import, JobState::Cancelling) => ImportStatus::Cancelling,
-        (JobKind::Import, JobState::Cancelled) => ImportStatus::Cancelled,
         (JobKind::Import, JobState::Failed) => ImportStatus::Failed,
         (JobKind::Import, JobState::Completed) => ImportStatus::Completed,
         (JobKind::Import, JobState::Locked) => ImportStatus::Locked,
@@ -233,7 +228,7 @@ pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSour
                 })
             });
             let rank = match status {
-                ImportStatus::Running | ImportStatus::Cancelling => 0,
+                ImportStatus::Running => 0,
                 ImportStatus::Queued | ImportStatus::Removing => 1,
                 _ => 2,
             };
@@ -326,7 +321,7 @@ async fn insert_source(inner: &Inner, path: &str, size: i64, state: JobState) ->
                 .await
                 .map_err(db_err)?;
             let active = tx
-                .query_opt("SELECT 1 FROM import_jobs WHERE pst_id = $1 AND state IN ('queued', 'running', 'cancelling')", &[&pst_id])
+                .query_opt("SELECT 1 FROM import_jobs WHERE pst_id = $1 AND state IN ('queued', 'running')", &[&pst_id])
                 .await
                 .map_err(db_err)?;
             if active.is_some() {
@@ -449,7 +444,7 @@ pub(crate) async fn unregister(inner: &Inner, pst_id: i64) -> Result<(), AppErro
 /// What one sync step did to a path.
 #[derive(Debug, PartialEq, Eq)]
 enum SyncStep {
-    /// A job is active (queued, running, cancelling, removing) or the source vanished: nothing touched.
+    /// A job is active (queued, running, removing) or the source vanished: nothing touched.
     Skipped,
     /// Unchanged since the last completed run, or still locked / unavailable: only timestamps moved.
     Checked,
@@ -479,7 +474,7 @@ async fn sync_one(inner: &Inner, pst_id: i64) -> Result<SyncStep, AppError> {
     let (path, seen_job, kind, state): (String, i64, JobKind, JobState) = (row.get(0), row.get(1), JobKind::from_db(row.get(2))?, JobState::from_db(row.get(3))?);
     // A removal owns the path until it succeeds, also after it failed half-way: a re-import would bring back mail the
     // user deleted (review round 1 finding 1).
-    if kind == JobKind::Remove || matches!(state, JobState::Queued | JobState::Running | JobState::Cancelling) {
+    if kind == JobKind::Remove || matches!(state, JobState::Queued | JobState::Running) {
         return Ok(SyncStep::Skipped);
     }
     let identity: Option<(i64, SystemTime)> =
@@ -588,13 +583,13 @@ pub(crate) async fn remove(inner: &Inner, pst_id: i64) -> Result<(), AppError> {
         return Err(AppError::not_found("pst", pst_id));
     };
     match status_of(kind, state) {
-        ImportStatus::Running | ImportStatus::Cancelling => return Err(AppError::Busy { reason: crate::dto::error::BusyReason::ImportRunning }),
+        ImportStatus::Running => return Err(AppError::Busy { reason: crate::dto::error::BusyReason::ImportRunning }),
         ImportStatus::Removing => return Err(AppError::Busy { reason: crate::dto::error::BusyReason::PstRemoving }),
         _ => {}
     }
     if (kind, state) == (JobKind::Import, JobState::Queued) {
-        // required by import_jobs_one_active_per_pst (Part 04 §4.3)
-        tx.execute("UPDATE import_jobs SET state = 'cancelled', finished_at = now() WHERE id = $1", &[&job_id]).await.map_err(db_err)?;
+        // required by import_jobs_one_active_per_pst (Part 04 §4.3); the removal supersedes it and its checkpoint
+        tx.execute("DELETE FROM import_jobs WHERE id = $1", &[&job_id]).await.map_err(db_err)?;
     }
     tx.execute("INSERT INTO import_jobs (pst_id, kind, state) VALUES ($1, 'remove', 'queued')", &[&pst_id]).await.map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
@@ -666,22 +661,13 @@ pub(crate) async fn errors(inner: &Inner, req: ImportErrorsRequest) -> Result<Im
 pub(crate) async fn recover_after_crash(inner: &Inner) -> Result<RecoveryReport, AppError> {
     let c = inner.db.app_client().await?;
     let rows = c
-        .query(
-            "UPDATE import_jobs SET state = CASE state WHEN 'running' THEN 'queued' ELSE 'cancelled' END, \
-                    finished_at = CASE state WHEN 'cancelling' THEN now() END \
-              WHERE state IN ('running', 'cancelling') RETURNING pst_id, state",
-            &[],
-        )
+        .query("UPDATE import_jobs SET state = 'queued' WHERE state = 'running' RETURNING pst_id", &[])
         .await
         .map_err(db_err)?;
-    let mut report = RecoveryReport::default();
-    for r in &rows {
-        let pst_id: i64 = r.get(0);
-        if JobState::from_db(r.get(1))? == JobState::Queued { report.requeued.push(pst_id) } else { report.cancelled.push(pst_id) }
-    }
-    report.requeued.sort_unstable();
-    report.cancelled.sort_unstable();
-    for pst_id in report.requeued.iter().chain(&report.cancelled) {
+    let mut requeued: Vec<i64> = rows.iter().map(|r| r.get(0)).collect();
+    requeued.sort_unstable();
+    let report = RecoveryReport { requeued };
+    for pst_id in &report.requeued {
         emit_status(inner, *pst_id).await;
     }
     Ok(report)
@@ -757,8 +743,6 @@ mod tests {
         let cases = [
             (Import, JobState::Queued, ImportStatus::Queued),
             (Import, JobState::Running, ImportStatus::Running),
-            (Import, JobState::Cancelling, ImportStatus::Cancelling),
-            (Import, JobState::Cancelled, ImportStatus::Cancelled),
             (Import, JobState::Failed, ImportStatus::Failed),
             (Import, JobState::Completed, ImportStatus::Completed),
             (Import, JobState::Locked, ImportStatus::Locked),

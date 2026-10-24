@@ -126,13 +126,13 @@ CREATE TABLE import_jobs (
     id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,     -- queue order
     pst_id       bigint NOT NULL REFERENCES pst_sources(id) ON DELETE CASCADE,
     kind         text   NOT NULL CHECK (kind IN ('import', 'remove')),
-    state        text   NOT NULL CHECK (state IN ('queued', 'running', 'cancelling', 'cancelled', 'failed', 'completed', 'locked')),
+    state        text   NOT NULL CHECK (state IN ('queued', 'running', 'failed', 'completed', 'locked')),
     created_at   timestamptz NOT NULL DEFAULT now(),
     started_at   timestamptz,
     finished_at  timestamptz,
-    CHECK (kind = 'import' OR state NOT IN ('cancelling', 'cancelled', 'locked')), -- removals are not cancellable
-    CHECK ((state IN ('cancelled', 'failed', 'completed', 'locked')) = (finished_at IS NOT NULL)),  -- locked: last seen locked
-    CHECK (state NOT IN ('running', 'cancelling') OR started_at IS NOT NULL)
+    CHECK (kind = 'import' OR state <> 'locked'),
+    CHECK ((state IN ('failed', 'completed', 'locked')) = (finished_at IS NOT NULL)),  -- locked: last seen locked
+    CHECK (state <> 'running' OR started_at IS NOT NULL)
 );
 
 CREATE TABLE import_checkpoints (
@@ -188,8 +188,8 @@ CREATE TABLE settings (                                       -- exactly one row
 INSERT INTO settings DEFAULT VALUES;
 -- Integrity / lookup
 -- (implicit) messages_pkey, messages_dedupe_once, addresses_email_once, image_blobs_source_once, ...
-CREATE UNIQUE INDEX import_jobs_one_active_per_pst ON import_jobs (pst_id) WHERE state IN ('queued', 'running', 'cancelling');
-CREATE UNIQUE INDEX import_jobs_one_running        ON import_jobs ((true)) WHERE state IN ('running', 'cancelling');
+CREATE UNIQUE INDEX import_jobs_one_active_per_pst ON import_jobs (pst_id) WHERE state IN ('queued', 'running');
+CREATE UNIQUE INDEX import_jobs_one_running        ON import_jobs ((true)) WHERE state = 'running';
 CREATE INDEX import_jobs_pst_newest     ON import_jobs (pst_id, id DESC);
 CREATE INDEX import_jobs_queue          ON import_jobs (id) WHERE state = 'queued';
 CREATE INDEX import_errors_page         ON import_errors (pst_id, occurred_at, id);

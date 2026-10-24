@@ -488,7 +488,7 @@ async fn resume_after_kill_equals_uninterrupted() {
     drop(fx);
     // next process start
     let mut fx = manager(&tc, small_batches());
-    assert_eq!(fx.mgr.recover_after_crash().await.unwrap(), RecoveryReport { requeued: vec![pst_id], cancelled: vec![] });
+    assert_eq!(fx.mgr.recover_after_crash().await.unwrap(), RecoveryReport { requeued: vec![pst_id] });
     fx.mgr.start_worker();
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
     assert_eq!(snapshot(&tc).await, expected(&corpus(ITEMS)));
@@ -678,11 +678,7 @@ async fn recover_after_crash_states() {
     let mut fx = manager(&tc, small_batches());
     let path_a = synthetic_path(&tc, "ra.pst");
     let a = fx.mgr.enqueue_synthetic(&path_a, folders(), corpus(20)).await.unwrap();
-    let b = fx.mgr.enqueue_synthetic(&synthetic_path(&tc, "rb.pst"), folders(), corpus_tagged(20, "b")).await.unwrap();
     let adm = tc.admin().await;
-    // states a crash leaves (one at a time: import_jobs_one_running allows one running / cancelling job)
-    adm.execute("UPDATE import_jobs SET state = 'cancelling', started_at = now() WHERE pst_id = $1", &[&b]).await.unwrap();
-    assert_eq!(fx.mgr.recover_after_crash().await.unwrap(), RecoveryReport { requeued: vec![], cancelled: vec![b] });
     // a: running with a checkpoint at seq 10
     adm.execute("UPDATE import_jobs SET state = 'running', started_at = now() WHERE pst_id = $1", &[&a]).await.unwrap();
     let meta = std::fs::metadata(&path_a).unwrap();
@@ -693,7 +689,7 @@ async fn recover_after_crash_states() {
     )
     .await
     .unwrap();
-    assert_eq!(fx.mgr.recover_after_crash().await.unwrap(), RecoveryReport { requeued: vec![a], cancelled: vec![] });
+    assert_eq!(fx.mgr.recover_after_crash().await.unwrap(), RecoveryReport { requeued: vec![a] });
     let states: Vec<(i64, String, bool)> = adm
         .query("SELECT pst_id, state, finished_at IS NOT NULL FROM import_jobs ORDER BY pst_id", &[])
         .await
@@ -701,7 +697,7 @@ async fn recover_after_crash_states() {
         .iter()
         .map(|r| (r.get(0), r.get(1), r.get(2)))
         .collect();
-    assert_eq!(states, [(a, "queued".to_string(), false), (b, "cancelled".to_string(), true)]);
+    assert_eq!(states, [(a, "queued".to_string(), false)]);
     fx.mgr.start_worker();
     assert_eq!(wait_job(&mut fx.events, a).await, ImportStatus::Completed);
     let subjects: Vec<String> = adm.query("SELECT subject FROM messages ORDER BY subject", &[]).await.unwrap().iter().map(|r| r.get(0)).collect();
@@ -717,14 +713,14 @@ async fn pst_list_status_derivation() {
     let tc = TestCluster::start().await;
     let adm = tc.admin().await;
     let fx = manager(&tc, ImportTuning::default());
-    // one case at a time: import_jobs_one_running allows one running / cancelling job in the library
+    // one case at a time: import_jobs_one_running allows one running job in the library
     for (n, (jobs, status)) in TABLE.iter().enumerate() {
         let id = insert_source(&adm, n, jobs).await;
         let list = fx.mgr.list().await.unwrap();
         assert_eq!((list.len(), list[0].status), (1, *status), "case {n}: {jobs:?}");
         adm.execute("DELETE FROM pst_sources WHERE id = $1", &[&id]).await.unwrap();
     }
-    // order: Running / Cancelling first, then Queued / Removing by job id, then the rest newest first
+    // order: Running first, then Queued / Removing by job id, then the rest newest first
     let order = [("import", "completed"), ("import", "queued"), ("remove", "queued"), ("import", "running"), ("import", "failed")];
     let mut ids = Vec::new();
     for (n, job) in order.iter().enumerate() {
@@ -748,7 +744,7 @@ async fn insert_source(adm: &tokio_postgres::Client, n: usize, jobs: &[(&str, &s
         adm.execute(
             "INSERT INTO import_jobs (pst_id, kind, state, started_at, finished_at) VALUES ($1, $2, $3, \
                CASE WHEN $3 = 'queued' THEN NULL ELSE now() END, \
-               CASE WHEN $3 IN ('cancelled', 'failed', 'completed') THEN now() END)",
+               CASE WHEN $3 IN ('failed', 'completed') THEN now() END)",
             &[&id, kind, state],
         )
         .await

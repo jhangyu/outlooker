@@ -56,8 +56,6 @@ pub struct PstSource {
 pub enum ImportStatus {
     Queued,
     Running,
-    Cancelling,
-    Cancelled,
     Failed,
     Completed,
     Removing,

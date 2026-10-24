@@ -45,7 +45,7 @@ fn phase(e: &CoreEvent) -> Option<Phase> {
 fn ends_job(e: &CoreEvent) -> bool {
     matches!(e, CoreEvent::ImportStatusChanged(c)
         if c.removed
-            || matches!(c.status, ImportStatus::Completed | ImportStatus::Failed | ImportStatus::Cancelled | ImportStatus::Queued))
+            || matches!(c.status, ImportStatus::Completed | ImportStatus::Failed | ImportStatus::Queued))
 }
 
 struct Slot {

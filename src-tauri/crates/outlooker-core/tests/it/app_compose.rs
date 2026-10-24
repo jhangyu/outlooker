@@ -156,11 +156,7 @@ async fn start_after_kill_recovers_jobs_then_heals_then_starts_worker() {
     let admin = tc.admin().await;
     // The requeued job points at a missing file, so the worker's first event for it is `failed` (no index drop).
     let gone = tc.dir.path().join("gone");
-    // A real kill leaves at most one active job; the test needs two, so lift the one-active-job index for this setup.
-    admin.batch_execute("DROP INDEX import_jobs_one_running").await.unwrap();
     let (running_pst, _) = new_source(&admin, &gone.join("running.pst").display().to_string()).await;
-    let (cancelling_pst, cancelling_job) = new_source(&admin, &gone.join("cancelling.pst").display().to_string()).await;
-    admin.execute("UPDATE import_jobs SET state = 'cancelling' WHERE id = $1", &[&cancelling_job]).await.unwrap();
     admin.batch_execute("DROP INDEX messages_body_trgm").await.unwrap();
     assert_eq!(missing_or_invalid(&admin).await.unwrap(), vec!["messages_body_trgm"]);
     drop(admin);
@@ -170,7 +166,7 @@ async fn start_after_kill_recovers_jobs_then_heals_then_starts_worker() {
     sink.watch(running_pst, s2.db.clone());
     let report = timeout(LONG, app::start_services(&s2)).await.expect("start timeout").unwrap();
     assert_eq!(report.steps, STEPS);
-    assert_eq!(report.recovery, RecoveryReport { requeued: vec![running_pst], cancelled: vec![cancelling_pst] });
+    assert_eq!(report.recovery, RecoveryReport { requeued: vec![running_pst] });
 
     let ended = timeout(LONG, async {
         loop {
@@ -188,10 +184,6 @@ async fn start_after_kill_recovers_jobs_then_heals_then_starts_worker() {
     assert!(probes.iter().all(|(_, valid)| *valid), "worker touched the job before the indexes were healed: {probes:?}");
 
     let admin = tc.admin().await;
-    // The recovered row itself: the scheduler's first run may already have added a newer job for the missing file.
-    let recovered: String =
-        admin.query_one("SELECT state FROM import_jobs WHERE id = $1", &[&cancelling_job]).await.unwrap().get(0);
-    assert_eq!(recovered, "cancelled");
     assert!(missing_or_invalid(&admin).await.unwrap().is_empty());
     let valid: bool = admin
         .query_one(

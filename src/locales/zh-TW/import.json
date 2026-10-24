@@ -8,14 +8,13 @@
   "row": { "enable": "啟用 {{name}} 的同步", "syncNow": "立即同步 {{name}}", "syncOnce": "立即同步", "retry": "立即重試", "remove": "移除 {{name}}" },
   "when": { "notScheduled": "不排程", "syncing": "同步中", "thisRun": "本輪", "retrying": "自動重試" },
   "status": {
-    "queued": "等待中", "running": "同步中", "cancelling": "取消中", "cancelled": "已取消", "failed": "失敗",
+    "queued": "等待中", "running": "同步中", "failed": "失敗",
     "completed": "已是最新", "locked": "已鎖定", "removing": "移除中", "disabled": "已停用"
   },
   "cap": {
     "queued": "等目前的同步完成後開始。",
     "locked": "其他程式正在使用此檔案。下次排程會自動重試。",
     "failed": "同步失敗。",
-    "cancelled": "在完成前被取消。",
     "disabled": "郵件保留在資料庫；排程與全部同步會略過此路徑。"
   },
   "phase": { "scanning": "掃描資料夾", "importing": "匯入郵件", "finalizing": "建立搜尋索引" },
