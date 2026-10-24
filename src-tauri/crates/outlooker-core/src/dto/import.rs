@@ -48,6 +48,8 @@ pub struct PstSource {
     pub last_synced_at: Option<String>,
     /// Message of the newest job's `job_failed` row; set only when status is `failed`.
     pub failure_reason: Option<String>,
+    /// The newest job is a removal that failed (status is `failed`): Delete is the way forward, a sync would do nothing.
+    pub remove_failed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]

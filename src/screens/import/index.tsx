@@ -216,6 +216,7 @@ export function ImportScreen() {
       renderHeaderCell: () => "",
       renderCell: (p) => (
         <span className={s.acts}>
+          {p.removeFailed ? null : (
           <Button
             appearance="subtle"
             icon={<ArrowSyncRegular />}
@@ -228,6 +229,7 @@ export function ImportScreen() {
               void act(() => api.syncNow(p.id))();
             }}
           />
+          )}
           <Button
             appearance="subtle"
             icon={p.paused ? <PlayCircleRegular /> : <PauseCircleRegular />}
@@ -258,7 +260,7 @@ export function ImportScreen() {
             icon={<DeleteRegular />}
             aria-label={t("row.remove", { name: p.displayName })}
             title={t("row.removeTip")}
-            disabled={p.status === "removing"}
+            disabled={p.status === "running" || p.status === "removing"}
             data-testid="pst-remove"
             onClick={(e) => {
               e.stopPropagation();

@@ -203,7 +203,8 @@ pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSour
         .iter()
         .map(|r| {
             let id: i64 = r.get(0);
-            let status = status_of(JobKind::from_db(r.get(4))?, JobState::from_db(r.get(5))?);
+            let (kind, state) = (JobKind::from_db(r.get(4))?, JobState::from_db(r.get(5))?);
+            let status = status_of(kind, state);
             let job_id: i64 = r.get(6);
             let phase: Option<&str> = r.get(9);
             let phase = phase.map(ImportPhase::from_db).transpose()?;
@@ -248,6 +249,7 @@ pub(crate) async fn list(inner: &Inner, only: Option<i64>) -> Result<Vec<PstSour
                 last_checked_at: r.get(18),
                 last_synced_at: r.get(19),
                 failure_reason: if status == ImportStatus::Failed { r.get(20) } else { None },
+                remove_failed: kind == JobKind::Remove && state == JobState::Failed,
             };
             Ok((rank, job_id, src))
         })
