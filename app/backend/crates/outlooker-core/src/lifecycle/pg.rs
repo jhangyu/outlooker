@@ -15,6 +15,8 @@ use crate::sys::total_ram_bytes;
 
 pub const HBA_CONF: &str = "host all all 127.0.0.1/32 scram-sha-256\n";
 const MB: u64 = 1024 * 1024;
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[cfg(windows)]
 const LOCALE_CANDIDATES: &[&str] = &["en-US", "English_United States.65001"];
@@ -174,6 +176,9 @@ impl PgController {
             .env_remove("PGPORT")
             .env_remove("PGTZ")
             .stdin(std::process::Stdio::null());
+        // Windows is the only OS where a GUI app spawning console programs opens console windows.
+        #[cfg(windows)]
+        c.creation_flags(CREATE_NO_WINDOW);
         c
     }
 
