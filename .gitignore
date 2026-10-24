@@ -10,3 +10,8 @@ app/backend/gen/
 .claude/worktrees/
 .claude/tmp/
 __pycache__/
+
+# docs: only brand and README screenshots are tracked
+docs/*
+!docs/brand/
+!docs/screenshots/
