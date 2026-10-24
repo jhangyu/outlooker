@@ -15,8 +15,8 @@ import { dbStatusQuery, pstListQuery, syncStatusQuery } from "../../api/queries"
 import type { PstSource } from "../../api/bindings/PstSource";
 import { useAppStatus } from "../../app/AppStatusContext";
 import {
-  EmptyState, Splitter, ellipsis, formatBytes, formatDateTime, formatNumber, useAppToast, useColumnWidths, useRegisterPst, useSplit,
-  type SplitDefaults,
+  EmptyState, Splitter, ellipsis, formatBytes, formatDateTime, formatNumber, formatRelative, useAppToast, useNow, useColumnWidths,
+  useRegisterPst, useSplit, type SplitDefaults,
 } from "../../components/common";
 import { RemoveDialog } from "./RemoveDialog";
 import { ActivityCard, ErrorLogCard, ScheduleCard, SidePanel } from "./SidePanel";
@@ -132,9 +132,10 @@ export function ImportScreen() {
   const nextRunAt = sync.data?.nextRunAt ?? null;
   const enabledCount = list.filter((p) => !p.paused).length;
   const live = (p: PstSource) => p.status === "running" || p.status === "queued" || p.status === "cancelling" || p.status === "removing";
+  const now = useNow();
   const when = (iso: string | null, sub?: string) => (
     <span className={s.when}>
-      <span>{iso ? formatDateTime(iso, lng) : "—"}</span>
+      <span title={iso ? formatDateTime(iso, lng) : undefined}>{iso ? formatRelative(iso, lng, now) : "—"}</span>
       {sub ? <Caption1 className={s.muted}>{sub}</Caption1> : null}
     </span>
   );
