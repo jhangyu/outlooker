@@ -26,5 +26,10 @@ The repo uses one merged directory layout for docs, mockups, frontend and backen
 ## Round budget
 Design: 1 round. Migration: 2 rounds (user decision). Budget used up with acceptance not passed → stop and report.
 
+## Result (HEAD 5f78798)
+Acceptance 1-6 and 8 pass (logs `app/scripts/tmp/restructure-gate-r2{a,b,c,d}.log`). Acceptance 7 (`.claude/CLAUDE.md` loaded) needs a fresh session.
+
 ## Parking lot
-(empty)
+- Under heavy machine load, the full `npm test` and `cargo test --test it` exceed the 40 s foreground cap. Round 2 ran them split by directory or module.
+- `tauri info` reports the JS package `@tauri-apps/plugin-fs` as not installed. No repo file references it (checked at d655f42), so this is not caused by the move.
+- The vite build warns about a 1,595 kB index chunk. This predates the move.
