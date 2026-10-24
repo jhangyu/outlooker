@@ -1,7 +1,7 @@
 # Variant 1 — Outlook-native productivity
 
 ## Not implemented (user ruling)
-The prototype draws these controls, but the app does not build them (spec `docs/superpowers/specs/2026-10-21-outlooker-design.md` §0.2 "Prototype-only features"): SQL Format, Pause (true pause / pause all), worker-count setting, deleted/kept preview before removing a PST, re-convert existing images, disk-usage breakdown, search-term highlighting, drag-and-drop import zone.
+The prototype draws these controls, but the app does not build them (spec `docs/specs/2026-10-21-outlooker-design.md` §0.2 "Prototype-only features"): SQL Format, Pause (true pause / pause all), worker-count setting, deleted/kept preview before removing a PST, re-convert existing images, disk-usage breakdown, search-term highlighting, drag-and-drop import zone.
 
 **Rationale.** The app should look like a sibling of new Outlook and Microsoft 365, so users who know Outlook need no learning time. It uses a brand-blue title bar, a left navigation rail with icons and labels, Fluent 2 neutral surfaces, and standard density (32 px controls, 14/20 body text). The mail reading conventions are the ones Outlook users know: an avatar, sender, date and subject in the list; a selected row with a brand left bar; a reading pane with sender, To/Cc and attachment cards. Every screen is a full-height multi-column grid. Panes scroll on their own, and the only header is a 48 px title bar. Light theme only.
 Open `index.html` directly. Deep links for review: `#sql`, `#sql:table`, `#import`, `#settings`, `#onboarding`. You can add `:empty`, `:en`, `:short` or `:zero` (for example `#search:empty:en`). The title bar toggles sample data vs. empty states and zh-TW vs. English.

@@ -1,6 +1,6 @@
 # Import page, direction B ("Sync sources" hub)
 
-Both mockups turn the page from an import queue into a list of registered PST sources that sync on one global schedule. The shell (brand title bar, left nav rail, Fluent 2 webLight tokens) is copied from `docs/design/variant-1/`. Open the HTML directly. The title bar switch "範例資料 / 空狀態" shows the empty state.
+Both mockups turn the page from an import queue into a list of registered PST sources that sync on one global schedule. The shell (brand title bar, left nav rail, Fluent 2 webLight tokens) is copied from `docs/mockups/variant-1/`. Open the HTML directly. The title bar switch "範例資料 / 空狀態" shows the empty state.
 
 ## B1: source cards
 - Layout: a hero header (page title, overall status badges, global "排程 / 加入 PST 路徑… / 全部立即同步"), a schedule summary strip (mode, last run, next run, new mail, the "only while the app is open, catch-up on start" line), a "目前活動" activity card, then one card per PST. The schedule editor is an inline end drawer that the "排程" toggle button opens and closes. It is open by default.

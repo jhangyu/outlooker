@@ -1,6 +1,6 @@
 # Import + PST sync — direction A (evolutionary)
 
-Both keep the current shell (brand title bar, nav rail), the 48 px command bar with stats, 44 px pane heads, 32 px controls and the Fluent 2 webLight tokens from `docs/design/variant-1`. Open the HTML directly. The title bar switch toggles "已登錄路徑" (sample data) vs "空狀態" (empty).
+Both keep the current shell (brand title bar, nav rail), the 48 px command bar with stats, 44 px pane heads, 32 px controls and the Fluent 2 webLight tokens from `docs/mockups/variant-1`. Open the HTML directly. The title bar switch toggles "已登錄路徑" (sample data) vs "空狀態" (empty).
 
 ## A1 — side-panel schedule
 Concept: the current 3-pane page becomes 2 panes. Left: one wide sortable grid of registered paths (one row per path). Right (360 px, docked): a "同步排程" card that is always visible, and a "目前活動" card below it. You see the schedule, the per-path state and the run progress together, with no extra clicks.

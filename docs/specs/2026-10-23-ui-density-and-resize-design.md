@@ -12,8 +12,8 @@ The reading-pane mail header takes one 49 px row (two rows on a narrow pane). Se
 In scope:
 1. Draggable, persisted pane splits on the Search, Advanced SQL, Import and Settings screens.
 2. Draggable, persisted column widths in the search result list.
-3. Reading-pane header redesign (approved mockup: `scripts/tmp/ui-redesign/header-b.html`).
-4. Search hints moved next to the 條件 button (approved mockup: `scripts/tmp/ui-redesign/hint-c.html`).
+3. Reading-pane header redesign (approved mockup: `app/scripts/tmp/ui-redesign/header-b.html`).
+4. Search hints moved next to the 條件 button (approved mockup: `app/scripts/tmp/ui-redesign/hint-c.html`).
 
 Out of scope: onboarding screen, dark-theme tuning, new resize UI chrome (no grips, no icons), and changes to the existing DataGrid column resizing in Settings and Import.
 
@@ -28,7 +28,7 @@ Out of scope: onboarding screen, dark-theme tuning, new resize UI chrome (no gri
 - The size persists in `localStorage` per surface key and is read once on mount.
 
 ### Unit
-One generic module in `src/components/common/` (`splits.ts` + `Splitter.tsx`):
+One generic module in `app/frontend/components/common/` (`splits.ts` + `Splitter.tsx`):
 - `useSplit(surfaceKey, defaults)` returns the current sizes (px) and props for each boundary.
 - `<Splitter>` renders the hit area and handles pointer and keyboard input.
 - One sized pane per boundary is stored in px. Its neighbour takes `1fr`, so the layout fills the window.
@@ -115,5 +115,5 @@ The `Persona`, the per-kind grid lines, the badge list and the attachment-card b
 Per the project test policy:
 - **Committed test, split clamping and persistence:** extend `columnWidths.test.tsx` for the shared storage helper, and add one `useSplit` test. Malformed or out-of-range stored values clamp to min and max, and the sizes round-trip through storage.
 - **Updated tests:** existing tests that select `short-query-hint`, `new-mail-bar` or `new-mail-refresh`, or the reading-pane header DOM, are updated to the new elements. Their behaviour is unchanged, and no new tests are added for it.
-- **Verified by running, not committed:** layout, header token overflow and segment styling. Each is checked once in the running app (`npm run dev` / tauri dev), and the run notes go in `scripts/tmp/`.
+- **Verified by running, not committed:** layout, header token overflow and segment styling. Each is checked once in the running app (`npm run dev` / tauri dev), and the run notes go in `app/scripts/tmp/`.
 - **Gates:** `npm run typecheck` and `npm test` pass.

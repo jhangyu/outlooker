@@ -1,7 +1,7 @@
 # PST scheduled sync — requirements
 
 Status: requirements frozen by the user 2026-10-24. Architecture and Import screen design are produced by the team
-(architect proposals in `docs/logs/pst-sync/`, mockups in `docs/design/import-sync/`) and chosen by the user.
+(architect proposals in `docs/logs/pst-sync/`, mockups in `docs/mockups/import-sync/`) and chosen by the user.
 
 ## End state
 The user registers one or more PST paths. The app syncs each path on a schedule and on demand, adding new mail to
@@ -32,7 +32,7 @@ the database, and shows clearly when a PST is locked by Outlook and will be retr
 - UI: Fluent 2 (`@fluentui/react-components` 9.74.10, `webLightTheme` only), zh-TW and en locale files with identical
   keys.
 - Tests: only for core logic (schedule next-run computation, lock classification, sync state machine, identity
-  handling) per `CLAUDE.md` test policy.
+  handling) per `.claude/CLAUDE.md` test policy.
 
 ## Out of scope
 VSS / shadow copy, mirror sync (deleting mail), per-path schedules, background sync while the app is closed, tray,

@@ -16,7 +16,7 @@ for the Advanced SQL screen.
 ## 0.2 User decisions (2026-10-21)
 | Decision | Value |
 |---|---|
-| UI design | Variant 1 "Outlook-native productivity": `docs/design/variant-1/` (prototype + `NOTES.md` token table and Fluent UI v9 component mapping). The prototype is the visual reference for every screen. |
+| UI design | Variant 1 "Outlook-native productivity": `docs/mockups/variant-1/` (prototype + `NOTES.md` token table and Fluent UI v9 component mapping). The prototype is the visual reference for every screen. |
 | App identifier | `us.jhangy.outlooker` (fixed; sets per-OS data, DB and log directories). |
 | Search match count | Exact up to 10,000; above that the UI shows "10,000+". |
 | Result list | Loads at most 100,000 rows; beyond that the user narrows the query. |
@@ -30,8 +30,8 @@ for the Advanced SQL screen.
 |---|---|---|
 | Chinese pg_trgm needs a UTF-8 libc locale; verified on macOS only. Windows locale (`en-US`, then `English_United States.65001`) unverified. | Startup self-check `SELECT similarity('測試測試','測試') > 0`; failure is fatal. First Windows build must run it. | open: Windows phase |
 | Query plans, DB size (estimate ~3.15 GB per 100k messages with images, ~1.65 GB without), import throughput (target ≥ 150 msg/s) and search latency (target p95 ≤ 500 ms at 1M messages) are estimates. | 1M-message load test (Part 04 §12.3) with pre-registered pass thresholds. | open: 1M load test (not run, needs a user-approved long run) |
-| The libpff fork ships no sample PST. | Test PSTs are generated on Windows with an Outlook automation script (Part 04 §12). Unverified: whether Outlook allows setting Message-ID / sent time on drafts; the script must fail loudly if not. | `tests/fixtures/external/outlook.pst` is used by the import tests and the e2e flow. `scripts/fixtures/make-pst.ps1` is kept for the Windows phase. |
-| Outlook HTML wrapped in RTF has no existing converter crate. | In-house converter (~200 lines, Part 01 §5); pure-RTF mail falls back to the plain-text body. | done: in-house converter `src-tauri/crates/outlooker-core/src/importer/normalize/rtf.rs` (`deencapsulate_html`, `to_text`). |
+| The libpff fork ships no sample PST. | Test PSTs are generated on Windows with an Outlook automation script (Part 04 §12). Unverified: whether Outlook allows setting Message-ID / sent time on drafts; the script must fail loudly if not. | `app/tests/fixtures/external/outlook.pst` is used by the import tests and the e2e flow. `app/scripts/fixtures/make-pst.ps1` is kept for the Windows phase. |
+| Outlook HTML wrapped in RTF has no existing converter crate. | In-house converter (~200 lines, Part 01 §5); pure-RTF mail falls back to the plain-text body. | done: in-house converter `app/backend/crates/outlooker-core/src/importer/normalize/rtf.rs` (`deencapsulate_html`, `to_text`). |
 | Webview scroll-height limit for long lists. | 100k-row cap; test scrolling on WebView2 and WKWebView. | 100k cap implemented. WKWebView covered by e2e group `scroll`. WebView2 open: Windows phase. |
 | Installer size ~45–55 MB is an estimate. | Measure the first release build per platform. | macOS dmg 42,445,233 bytes (`docs/logs/gate-round2-6e46659.md` G2.5). Windows open. |
 
@@ -42,21 +42,21 @@ Attachment body storage/download, attachment content search, dark mode, multi-us
 ## 0.5 Implementation decisions
 Hard-to-reverse choices made during implementation. Each one names the rejected alternative and the cost accepted.
 - **DTO placement.** All ts-rs DTOs live in the leaf module `outlooker-core/src/dto/`. It imports no service module; `From<ServiceError> for AppError` mappings live in the services. Rejected: DTOs inside each service, a separate `outlooker-dto` crate. Reason: the Command Layer and the services share one type set and need no Tauri dependency for it. Cost: a module not named in Part 02 §3.
-- **Type rule.** Rust DTOs are the only type definitions. TS imports them from `src/api/bindings/<TypeName>`; hand-written TS copies are forbidden.
-- **Locale files split by namespace.** `src/locales/<lang>/<namespace>.json`, `<lang>` exactly `zh-TW` and `en` (namespaces `common`, `onboarding`, `import`, `settings`, `search`, `sql`). Rejected: the literal `src/locales/{zh-TW,en}.json`. Reason: i18next namespaces are native, Vite imports JSON statically, and screens do not edit the same file. This supersedes the file names in Part 01 §2 and Part 02 §3. Both languages keep identical key sets. Numbers are passed to i18next pre-formatted as `n`, never as `count` (it triggers plural lookup).
-- **Start/shutdown composition lives in core** (`core::app`: `build`, `start_services`, `shutdown`), not in `src-tauri/src/lib.rs`. Reason: services stay testable without a window, and the exit and recovery order has integration tests.
+- **Type rule.** Rust DTOs are the only type definitions. TS imports them from `app/frontend/api/bindings/<TypeName>`; hand-written TS copies are forbidden.
+- **Locale files split by namespace.** `app/frontend/locales/<lang>/<namespace>.json`, `<lang>` exactly `zh-TW` and `en` (namespaces `common`, `onboarding`, `import`, `settings`, `search`, `sql`). Rejected: the literal `app/frontend/locales/{zh-TW,en}.json`. Reason: i18next namespaces are native, Vite imports JSON statically, and screens do not edit the same file. This supersedes the file names in Part 01 §2 and Part 02 §3. Both languages keep identical key sets. Numbers are passed to i18next pre-formatted as `n`, never as `count` (it triggers plural lookup).
+- **Start/shutdown composition lives in core** (`core::app`: `build`, `start_services`, `shutdown`), not in `app/backend/src/lib.rs`. Reason: services stay testable without a window, and the exit and recovery order has integration tests.
 - **`app_retry`.** The Failed screen retries through the command `app_retry()` served by the Lifecycle Supervisor. The command set is 24 commands including it (Part 03 §3 and §4).
 - **Out-of-scope prototype controls.** The PST removal dialog shows the PST's message count only. See §0.2 "Prototype-only features" for the full list. Also not carried over: the "Sort by relevance" select (order is fixed newest first), "Restart database", "Open folder", "Open log files", "Copy link", "Open in Outlook", and the onboarding list of PST files found in common locations (no command serves them).
 - **`db::Db` is a cloneable handle** (`Arc<RwLock<Option<DbConn>>>`) read by every service at call time. Rejected: passing `Pools` at construction. Reason: PostgreSQL gets a new random port on every restart (Part 02 §2.2 step 5), so a captured pool goes stale, and a service must not import the Supervisor. Cost: a cheap read-lock on every DB call.
 - **Timestamps without a date-time crate.** The read side formats RFC 3339 in SQL with `to_char(... AT TIME ZONE 'UTC', ...)` using the constant `db::RFC3339_UTC_FMT`, bound as a parameter. The write side uses `std::time::SystemTime`; FILETIME is converted in Rust to Unix microseconds. Rejected: `chrono` or `time` (Part 01 lists none). Cost: every query must use the one constant.
 - **Writer connection is unpooled.** One dedicated `outlooker_app` connection per running job. Reason: the writer sets `synchronous_commit = off` and creates session temp tables (Part 04 §6.2), which must not leak into a pooled connection. Cost: one extra connection per job (Part 04 §6.6 `max_connections` row "writer (1)").
 - **Image blob dedupe uses a known-hash set updated only after commit.** Reason: an item with a lower `seq` can commit in an earlier batch than the item that encoded the shared image, so a hash marked known before its blob commits would lose that image. Cost: an image repeated inside one uncommitted window is encoded more than once. The `DISTINCT ON` plus `ON CONFLICT (source_hash)` insert stores it once.
-- **Search query composition in the frontend.** The search box, refine pane and DSL builder compose one `SearchQuery` (`src/screens/search/compose.ts`). Search text alone gives `simple`. Anything else gives `dsl` whose root is `and(<one or(sender,recipient,subject,body) group per term>, <refine conditions>, <builder group>)`. Rejected: using only the builder tree when it is open, a new three-part command. Reason: Part 03 §5.1 has only `simple | dsl`, so no contract change. Cost: the term expansion repeats the core's simple-query rule in one function, `termGroup`.
-- **Fixed-height virtual rows.** Search-screen mail rows and month headers are one 32 px virtual item (`ROW_HEIGHT` in `src/components/mail/MailList.tsx`). The cap row and loader row sit after the virtual block. Reason: Part 03 §5.2 fixes 32 px rows and a 3.2M px height budget. Cost: the Search list shows one line per mail instead of the prototype's three lines. Advanced SQL mail-list mode uses three-line compact rows (`COMPACT_ROW_HEIGHT` 73 px, `src/screens/advanced-sql/index.tsx`).
+- **Search query composition in the frontend.** The search box, refine pane and DSL builder compose one `SearchQuery` (`app/frontend/screens/search/compose.ts`). Search text alone gives `simple`. Anything else gives `dsl` whose root is `and(<one or(sender,recipient,subject,body) group per term>, <refine conditions>, <builder group>)`. Rejected: using only the builder tree when it is open, a new three-part command. Reason: Part 03 §5.1 has only `simple | dsl`, so no contract change. Cost: the term expansion repeats the core's simple-query rule in one function, `termGroup`.
+- **Fixed-height virtual rows.** Search-screen mail rows and month headers are one 32 px virtual item (`ROW_HEIGHT` in `app/frontend/components/mail/MailList.tsx`). The cap row and loader row sit after the virtual block. Reason: Part 03 §5.2 fixes 32 px rows and a 3.2M px height budget. Cost: the Search list shows one line per mail instead of the prototype's three lines. Advanced SQL mail-list mode uses three-line compact rows (`COMPACT_ROW_HEIGHT` 73 px, `app/frontend/screens/advanced-sql/index.tsx`).
 - **E2E seams are compile-time gated.** `OUTLOOKER_APP_DATA_DIR` is read only with cargo feature `e2e`. The native-picker bypass is read only when Vite builds with `VITE_E2E=1`. Reason: WebDriver cannot drive native dialogs and the E2E run must not touch the real data dir. Cost: the E2E binary is a separate debug build.
 - **Dependencies added after the first spec draft.** `getrandom` (random role passwords), `sysinfo` (RAM for `shared_buffers`, bundled-postgres PID check), `fs4` (free disk space), `tempfile` (test data roots, behind feature `test-support`), `base64` (search cursor and `data:` image URIs), `jsonschema =0.59.0` with `default-features = false` (schema test, `outlooker-core` dev-dependency only).
 - **Fixtures.** The libyal `outlook.pst` is committed with a CC-BY-4.0 notice. Outlook-generated fixtures remain a release blocker.
-- **Tests that need an external artifact** (fetched PostgreSQL, `tests/fixtures/external/outlook.pst`) fail with an explicit message when it is missing. They never skip silently.
+- **Tests that need an external artifact** (fetched PostgreSQL, `app/tests/fixtures/external/outlook.pst`) fail with an explicit message when it is missing. They never skip silently.
 - **Windows.** Windows work runs in one phase after the macOS gates. libpff vendoring deadline 2026-11-18. No CI workflow file: local gates only.
 
 ---
@@ -99,7 +99,7 @@ Toolchain: Rust stable 1.99.1 (static.rust-lang.org channel file, 2026-10-13; Ta
 | @codemirror/view | 6.43.15 | npm | Editor view (direct import for the wrapper). |
 | @tanstack/react-virtual | 3.14.21 | npm | Row virtualization for the mail list and the generic result table. Uses `useVirtualizer` (verified in its `index.d.ts`). Its peer range is React 19. |
 | @tanstack/react-query | 5.104.5 | npm | Fetching and caching of Tauri command results: `useQuery` for the preview, `useInfiniteQuery` for paged result lists. Its peer range is React 19. |
-| i18next | 26.5.4 | npm | Locale engine. Locale files `src/locales/<lang>/<namespace>.json` (language directories exactly `zh-TW` and `en`, one i18next namespace per file) exist from day one. |
+| i18next | 26.5.4 | npm | Locale engine. Locale files `app/frontend/locales/<lang>/<namespace>.json` (language directories exactly `zh-TW` and `en`, one i18next namespace per file) exist from day one. |
 | react-i18next | 17.1.0 | npm | React binding (`useTranslation`). Its peer range is `i18next >=26.2.0`. |
 | @tauri-apps/api | 2.12.4 | npm | `invoke`, `listen`. Matches the Rust crate's 2.12 line. |
 | @tauri-apps/plugin-dialog | 2.8.3 | npm | Native "Open PST" and "choose data folder" dialogs. Pairs with crate `tauri-plugin-dialog` 2.8.3. |
@@ -125,9 +125,9 @@ Decisions:
 App identifier: `us.jhangy.outlooker` (Tauri `identifier`). It sets the per-OS app data and log dirs through Tauri's path API. The user can change it before the first release. After that, a change moves the data dir.
 
 Repo layout for native parts:
-- `src-tauri/native/libpff/`: the copied, prepared libpff sdist tree (committed, not a submodule, because it contains generated files). Plus `src-tauri/native/libpff/ORIGIN` with the fork commit hash.
-- `src-tauri/native/postgresql.sha256`: the pinned sha256 per target triple for theseus-rs 18.6.1.
-- `scripts/fetch-postgres.mjs`: a Node script, so one script works on every OS. It downloads the target asset, verifies the hash, prunes the tree, and writes it to `src-tauri/resources/postgresql/`. That folder is gitignored and is listed in Tauri `bundle.resources`.
+- `app/backend/native/libpff/`: the copied, prepared libpff sdist tree (committed, not a submodule, because it contains generated files). Plus `app/backend/native/libpff/ORIGIN` with the fork commit hash.
+- `app/backend/native/postgresql.sha256`: the pinned sha256 per target triple for theseus-rs 18.6.1.
+- `app/scripts/fetch-postgres.mjs`: a Node script, so one script works on every OS. It downloads the target asset, verifies the hash, prunes the tree, and writes it to `app/backend/resources/postgresql/`. That folder is gitignored and is listed in Tauri `bundle.resources`.
 
 How the frontend talks to Rust (verified in the Tauri docs, "Calling Rust"):
 - **Request/response:** `invoke('command', args)` → `#[tauri::command] async fn`. Payloads are serde JSON.
@@ -162,9 +162,9 @@ How the frontend talks to Rust (verified in the Tauri docs, "Calling Rust"):
 **Decision: Rust FFI.** pypff and pffexport are rejected.
 
 ### 4.3 How it is built
-- **Vendored source:** commit the fork's prepared sdist tree (output of `synclibs.sh` + `autogen.sh` + `make sources`; the fork's `build_wheels` "Build sdist" job produces it) under `src-tauri/native/libpff/`. A one-off script regenerates it from a given fork commit. Windows build machines then need no autotools, Python or flex/bison.
+- **Vendored source:** commit the fork's prepared sdist tree (output of `synclibs.sh` + `autogen.sh` + `make sources`; the fork's `build_wheels` "Build sdist" job produces it) under `app/backend/native/libpff/`. A one-off script regenerates it from a given fork commit. Windows build machines then need no autotools, Python or flex/bison.
 - **`build.rs` (crate `cc` 1.9.0):**
-  - On Unix, it copies `src-tauri/native/libpff/` into `OUT_DIR` and runs `sh configure --disable-nls --disable-shared-libs --with-zlib=no` **in that copy** (in-tree, as `_build.py` does), then compiles the copy. Configure must not run out-of-tree: the sdist ships a Linux-generated `common/config.h` (`HAVE_ZLIB 1`), and `common/common.h` includes `"config.h"` from its own directory first, so an out-of-tree `config.h` would be ignored.
+  - On Unix, it copies `app/backend/native/libpff/` into `OUT_DIR` and runs `sh configure --disable-nls --disable-shared-libs --with-zlib=no` **in that copy** (in-tree, as `_build.py` does), then compiles the copy. Configure must not run out-of-tree: the sdist ships a Linux-generated `common/config.h` (`HAVE_ZLIB 1`), and `common/common.h` includes `"config.h"` from its own directory first, so an out-of-tree `config.h` would be ignored.
   - On MSVC, it skips configure, as `_build.py` does.
   - Then it compiles `libpff/*.c` + the 17 `lib*/*.c` local libs with `HAVE_LOCAL_<LIB>` into one static library.
 - **Bindings: hand-written `extern "C"`** for the about 45 functions that we call. The API is plain C with opaque handles and `int` return codes. No bindgen (0.73.2), because bindgen needs libclang on every Windows build machine. A safe wrapper module maps `-1` returns to `Result` and frees `libpff_error_t` and handles in `Drop`.
@@ -402,44 +402,45 @@ If the app is killed instead (task manager, power loss), §2.2 step 4 (orphan or
 ## 3. Components
 
 Repo layout (one Cargo workspace + one Vite app):
-
 ```
-/                              Vite + React app (frontend)
-├─ README.md, CLAUDE.md        Entry-point doc, cargo invocation rule
-├─ package.json, vite.config.ts, tsconfig.json, wdio.conf.ts, mise.toml, index.html
-├─ src/
-│  ├─ main.tsx, app/            App frame: FluentProvider (webLightTheme), i18n, navigation, boot sequence
-│  ├─ api/                      commands.ts (hand-written typed invoke wrappers), events.ts (event names + listeners), dialog.ts, bindings/ (generated by ts-rs in cargo test, TS_RS_EXPORT_DIR; 03 §1.1)
-│  ├─ screens/{onboarding,search,advanced-sql,import,settings}/
-│  ├─ components/common/        Empty state, display helpers
-│  ├─ components/{dsl,mail,sql-editor}/   DSL builder, mail list + preview frame, SQL editor wrapper
-│  ├─ assets/                   outlooker-logo.svg
-│  ├─ locales/<lang>/<namespace>.json   (lang = zh-TW | en)
-│  └─ test/                     Vitest setup
-├─ src-tauri/                   Tauri app crate "outlooker" (thin: plugins, commands, events, URI scheme)
-│  ├─ Cargo.toml (workspace root), tauri.conf.json, build.rs
-│  ├─ capabilities/             Tauri permission set for the main window
-│  ├─ src/main.rs, src/lib.rs   App Shell
-│  ├─ src/commands/{app,search,sql,import,settings}.rs   Command Layer
-│  ├─ src/events.rs             Event Emitter
-│  ├─ src/mailimg.rs            Inline mail image URI scheme
-│  ├─ schemas/                  JSON schemas (03 §5.1)
-│  ├─ native/libpff/            Vendored libpff source tree + ORIGIN (01 §3)
-│  ├─ native/postgresql.sha256  Pinned PG binary hashes (01 §3)
-│  ├─ resources/postgresql/     Fetched + pruned PG 18.6 (gitignored, bundle.resources)
-│  └─ crates/
-│     ├─ pff/                   libpff FFI: build.rs (cc) + extern "C" + safe wrapper
-│     ├─ outlooker-loadgen/     Synthetic-mail seeder for load and e2e tests
-│     └─ outlooker-core/        All services. No Tauri dependency, so integration tests run without a window.
-│        └─ src/{app,db,dto,gate,importer,lifecycle,maintenance,paths,search,settings,sink,sql_console,test_support}/
-├─ scripts/
-│  ├─ fetch-postgres.mjs        (01 §3)
-│  ├─ build.py                  One-command desktop build
-│  ├─ vendor-libpff.py          Refresh the vendored libpff tree (Python 3.12+)
-│  └─ fixtures/make-pst.ps1     Outlook automation PST generator (Windows phase)
-└─ tests/
-   ├─ e2e/                      WebdriverIO specs (01 §9)
-   └─ fixtures/external/        (tests/fixtures/external) Third-party sample PST + NOTICE
+/                              Repo root: README.md only, plus the top-level dirs below
+├─ .claude/CLAUDE.md           Cargo invocation rule, test policy
+├─ .config/mise.toml           Toolchain pins
+├─ docs/                       specs/, mockups/, brand/outlooker-logo.svg, logs/
+└─ app/                        npm + Tauri root (Vite + React frontend, one Cargo workspace in backend/)
+   ├─ package.json, vite.config.ts, tsconfig.json, wdio.conf.ts, index.html
+   ├─ frontend/
+   │  ├─ main.tsx, app/            App frame: FluentProvider (webLightTheme), i18n, navigation, boot sequence
+   │  ├─ api/                      commands.ts (hand-written typed invoke wrappers), events.ts (event names + listeners), dialog.ts, bindings/ (generated by ts-rs in cargo test, TS_RS_EXPORT_DIR; 03 §1.1)
+   │  ├─ screens/{onboarding,search,advanced-sql,import,settings}/
+   │  ├─ components/common/        Empty state, display helpers
+   │  ├─ components/{dsl,mail,sql-editor}/   DSL builder, mail list + preview frame, SQL editor wrapper
+   │  ├─ locales/<lang>/<namespace>.json   (lang = zh-TW | en)
+   │  └─ test/                     Vitest setup
+   ├─ backend/                     Tauri app crate "outlooker" (thin: plugins, commands, events, URI scheme)
+   │  ├─ Cargo.toml (workspace root), tauri.conf.json, build.rs
+   │  ├─ capabilities/             Tauri permission set for the main window
+   │  ├─ src/main.rs, src/lib.rs   App Shell
+   │  ├─ src/commands/{app,search,sql,import,settings}.rs   Command Layer
+   │  ├─ src/events.rs             Event Emitter
+   │  ├─ src/mailimg.rs            Inline mail image URI scheme
+   │  ├─ schemas/                  JSON schemas (03 §5.1)
+   │  ├─ native/libpff/            Vendored libpff source tree + ORIGIN (01 §3)
+   │  ├─ native/postgresql.sha256  Pinned PG binary hashes (01 §3)
+   │  ├─ resources/postgresql/     Fetched + pruned PG 18.6 (gitignored, bundle.resources)
+   │  └─ crates/
+   │     ├─ pff/                   libpff FFI: build.rs (cc) + extern "C" + safe wrapper
+   │     ├─ outlooker-loadgen/     Synthetic-mail seeder for load and e2e tests
+   │     └─ outlooker-core/        All services. No Tauri dependency, so integration tests run without a window.
+   │        └─ src/{app,db,dto,gate,importer,lifecycle,maintenance,paths,search,settings,sink,sql_console,test_support}/
+   ├─ scripts/
+   │  ├─ fetch-postgres.mjs        (01 §3)
+   │  ├─ build.py                  One-command desktop build
+   │  ├─ vendor-libpff.py          Refresh the vendored libpff tree (Python 3.12+)
+   │  └─ fixtures/make-pst.ps1     Outlook automation PST generator (Windows phase)
+   └─ tests/
+      ├─ e2e/                      WebdriverIO specs (01 §9)
+      └─ fixtures/external/        Third-party sample PST + NOTICE
 ```
 
 `outlooker-core` reports progress through one trait, `EventSink` (`fn emit(&self, event: CoreEvent)`). The Event Emitter implements it for Tauri. Tests implement it with a `Vec` recorder.
@@ -448,13 +449,13 @@ Repo layout (one Cargo workspace + one Vite app):
 
 | Unit | Location | Responsibility (one purpose) | Interface | Depends on |
 |---|---|---|---|---|
-| App Frame | `src/app/` | Boot sequence (subscribe to all events, then `app_status`, `pst_list`), navigation, theme, locale switching. | React root | Typed API Client |
-| Screens | `src/screens/*` | One screen each: Onboarding, Search, Advanced SQL, Import, Settings, with their empty states. | React components | Typed API Client, shared components |
-| Mail Preview Frame | `src/components/MailPreview` | Shows sanitized HTML in `<iframe sandbox="" srcdoc>`. Never adds `allow-scripts` or `allow-same-origin`. | `<MailPreview html=… />` | WebView CSP, `mailimg` scheme |
-| Typed API Client | `src/api/` | Typed `invoke` wrappers (`commands.ts`) and `listen` wrappers (`events.ts`) over the ts-rs types in `bindings/`. No Tauri `Channel`: progress uses global events (03 §9). The only place that calls Tauri APIs. | TS functions per command and event (03) | Tauri IPC |
-| App Shell | `src-tauri/src/lib.rs` | Builds Tauri. Registers plugins (single-instance first, dialog, log), commands, the `mailimg` scheme (handler = Search Service), and the exit handler (§2.5). Creates the service instances once and puts them in Tauri managed state. | `run()` | all core services, Event Emitter |
-| Command Layer | `src-tauri/src/commands/` | One thin `#[tauri::command]` function per command. It deserializes input, calls one service method, and maps errors to `AppError`. No business logic. | Commands in 03 §3 | the serving service |
-| Event Emitter | `src-tauri/src/events.rs` | Implements `EventSink`. Throttles per key (`import:progress` 250 ms per PST, `library:changed` 5 s, `data-dir:move-progress` 250 ms) with a trailing flush, then calls `app.emit`. | `EventSink` | Tauri `AppHandle` |
+| App Frame | `app/frontend/app/` | Boot sequence (subscribe to all events, then `app_status`, `pst_list`), navigation, theme, locale switching. | React root | Typed API Client |
+| Screens | `app/frontend/screens/*` | One screen each: Onboarding, Search, Advanced SQL, Import, Settings, with their empty states. | React components | Typed API Client, shared components |
+| Mail Preview Frame | `app/frontend/components/MailPreview` | Shows sanitized HTML in `<iframe sandbox="" srcdoc>`. Never adds `allow-scripts` or `allow-same-origin`. | `<MailPreview html=… />` | WebView CSP, `mailimg` scheme |
+| Typed API Client | `app/frontend/api/` | Typed `invoke` wrappers (`commands.ts`) and `listen` wrappers (`events.ts`) over the ts-rs types in `bindings/`. No Tauri `Channel`: progress uses global events (03 §9). The only place that calls Tauri APIs. | TS functions per command and event (03) | Tauri IPC |
+| App Shell | `app/backend/src/lib.rs` | Builds Tauri. Registers plugins (single-instance first, dialog, log), commands, the `mailimg` scheme (handler = Search Service), and the exit handler (§2.5). Creates the service instances once and puts them in Tauri managed state. | `run()` | all core services, Event Emitter |
+| Command Layer | `app/backend/src/commands/` | One thin `#[tauri::command]` function per command. It deserializes input, calls one service method, and maps errors to `AppError`. No business logic. | Commands in 03 §3 | the serving service |
+| Event Emitter | `app/backend/src/events.rs` | Implements `EventSink`. Throttles per key (`import:progress` 250 ms per PST, `library:changed` 5 s, `data-dir:move-progress` 250 ms) with a trailing flush, then calls `app.emit`. | `EventSink` | Tauri `AppHandle` |
 | Paths | `core::paths` | Resolves `app_local_data_dir`, `app_log_dir`, the resource dir of the PG binaries, and the data-root sub-paths (§8). Pure functions after init. | `Paths { data_root(), pgdata(), bin(name), ... }` | Tauri path API (values passed in by App Shell) |
 | Settings Store | `core::settings` | Reads and writes the bootstrap file (`data_dir`, `language`) and the DB settings row (`webp_quality`, 04). Serves `settings_get` / `settings_update`. Writes the bootstrap file atomically (write temp file, then rename). | `get() -> Settings`, `update(patch)`, `bootstrap()`, `set_data_dir(path)` | Paths, Db |
 | Lifecycle Supervisor | `core::lifecycle` | Owns `AppPhase`, first-run init, start, health monitor, restart budget, exit, data dir move, DB status. Serves `app_status`, `app_initialize`, `app_retry`, `data_dir_move`, `db_status`. Emits `app:status-changed`, `data-dir:move-progress`. | `status()`, `initialize(req)`, `retry()`, `start()`, `shutdown()`, `move_data_dir(target)`, `db_status()` | PG Controller, Db, Settings Store, Work Gate, Import Manager (recovery hook), EventSink |
@@ -660,7 +661,7 @@ table and column names refer to `04-backend-server.md`.
 
 | Topic | Rule |
 |---|---|
-| Single source of types | Rust structs/enums are the only definition. TypeScript types are generated by **ts-rs 12.0.1** into `src/api/bindings/` (see §1.1). Hand-written TS copies of these types are forbidden. |
+| Single source of types | Rust structs/enums are the only definition. TypeScript types are generated by **ts-rs 12.0.1** into `app/frontend/api/bindings/` (see §1.1). Hand-written TS copies of these types are forbidden. |
 | Naming | Rust command fns are `snake_case`; the typed wrapper exposes them as `camelCase` (`api.searchMail`) and invokes the `snake_case` name. Command arguments are passed in camelCase (Tauri 2 maps `pst_id` ↔ `pstId`). All struct fields serialize as `camelCase` (`#[serde(rename_all = "camelCase")]`). |
 | Tagged unions | Rust enums with data are internally tagged with **struct variants only** (`#[serde(tag = "...")]`), a form ts-rs and serde both support exactly. TS sees `{ kind: "simple", ... } \| { kind: "dsl", ... }`. |
 | Ids | Database ids are `i64` in Rust and `number` in TS. Ids are generated by PostgreSQL `bigint` identity columns and stay far below 2^53, so the number mapping is lossless. |
@@ -673,15 +674,15 @@ table and column names refer to `04-backend-server.md`.
 ### 1.1 Type generation
 
 - Tool: `ts-rs` 12.0.1 (crate; version verified in `01-tech-stack.md` §3). Every request, response, payload and error type derives `#[derive(Serialize, Deserialize, ts_rs::TS)] #[ts(export)]`. The default `serde-compat` feature makes ts-rs follow the `serde` attributes (`rename_all`, `rename_all_fields`, `tag`, `untagged`), so one set of attributes drives both the JSON and the TS shape.
-- `cargo test` writes the types (verified in the ts-rs 12.0.1 crate source, `src/lib.rs` configuration table). `src-tauri/.cargo/config.toml`:
+- `cargo test` writes the types (verified in the ts-rs 12.0.1 crate source, `src/lib.rs` configuration table). `app/backend/.cargo/config.toml`:
   ```toml
   [env]
-  TS_RS_EXPORT_DIR = { value = "../src/api/bindings", relative = true }
+  TS_RS_EXPORT_DIR = { value = "../frontend/api/bindings", relative = true }
   TS_RS_LARGE_INT = "number"   # i64 → number (default would be bigint); justified by the id rule above
   ```
-- Generated files are committed. CI runs `cargo test` and fails when `git diff --exit-code src/api/bindings` is non-empty.
-- **Typed wrapper** `src/api/commands.ts` (hand-written, one line per command): `searchMail: (req: SearchRequest) => call<SearchPage>("search_mail", { req })`. `call` wraps `invoke` from `@tauri-apps/api/core` and re-throws `AppError`. Drift guard: a Rust unit test writes the registered command names (the same list passed to `tauri::generate_handler!`, kept as `const COMMANDS: &[&str]`) to `src/api/bindings/commands.json`; a Vitest test asserts that the wrapper's command names equal that list.
-- **Events** `src/api/events.ts`: one constant per event name (§9) and a typed `listen` helper `onEvent(name, handler)` built on `listen` from `@tauri-apps/api/event`. The Rust side emits through one `EventSink` with the same names as `pub const` strings; a Rust test writes them to `src/api/bindings/events.json` and Vitest checks them the same way.
+- Generated files are committed. CI runs `cargo test` and fails when `git diff --exit-code app/frontend/api/bindings` is non-empty.
+- **Typed wrapper** `app/frontend/api/commands.ts` (hand-written, one line per command): `searchMail: (req: SearchRequest) => call<SearchPage>("search_mail", { req })`. `call` wraps `invoke` from `@tauri-apps/api/core` and re-throws `AppError`. Drift guard: a Rust unit test writes the registered command names (the same list passed to `tauri::generate_handler!`, kept as `const COMMANDS: &[&str]`) to `app/frontend/api/bindings/commands.json`; a Vitest test asserts that the wrapper's command names equal that list.
+- **Events** `app/frontend/api/events.ts`: one constant per event name (§9) and a typed `listen` helper `onEvent(name, handler)` built on `listen` from `@tauri-apps/api/event`. The Rust side emits through one `EventSink` with the same names as `pub const` strings; a Rust test writes them to `app/frontend/api/bindings/events.json` and Vitest checks them the same way.
 
 ### 1.2 Error type
 
@@ -867,7 +868,7 @@ Negation is not offered (requirements list only AND/OR). Limits: tree depth ≤ 
 
 #### JSON schema (DSL root)
 
-Checked in as `src-tauri/schemas/condition-group.json`; a core unit test validates the serde output of the worked example against it. Depth ≤ 5 and ≤ 50 leaves are enforced by the core because JSON Schema cannot express them cleanly.
+Checked in as `app/backend/schemas/condition-group.json`; a core unit test validates the serde output of the worked example against it. Depth ≤ 5 and ≤ 50 leaves are enforced by the core because JSON Schema cannot express them cleanly.
 
 ```json
 {
@@ -1268,7 +1269,7 @@ pub struct IndexStatus { pub name: String, pub table: String, pub size_bytes: i6
 
 ## 9. Events (Rust → frontend)
 
-All events are global (`AppHandle::emit` from `tauri::Emitter`). Payload types derive `ts_rs::TS`; names are the constants of §1.1 (`src/api/events.ts`).
+All events are global (`AppHandle::emit` from `tauri::Emitter`). Payload types derive `ts_rs::TS`; names are the constants of §1.1 (`app/frontend/api/events.ts`).
 
 **Events, not `Channel`, for import progress.** A Tauri `Channel` belongs to one `invoke` call, but an import job outlives the `import_enqueue` call that created it, survives app restarts (durable queue) and must update whichever screen is open (Import screen, the status badge in the shell). A global event reaches every listener with no re-subscription protocol. Payloads are small (< 1 KB) and throttled to ≤ 4 per second, far below the volume where the Tauri docs recommend channels. This contract therefore uses no `Channel`.
 
@@ -2461,12 +2462,12 @@ FROM pg_stat_user_tables WHERE relname = 'messages';
   `encryption.1`, `file_header.1`, `index_node.1–3`, `index_value.1`); the pypff tests take an external file via
   `unittest.source`, which `tests/runtests.py` fills from an external `tests/input/<set>/` directory that is not in
   the repo (`runtests.py:48-58`).
-- Therefore Outlooker creates its own fixtures with `scripts/fixtures/make-pst.ps1` (Windows + Outlook desktop,
+- Therefore Outlooker creates its own fixtures with `app/scripts/fixtures/make-pst.ps1` (Windows + Outlook desktop,
   Outlook COM `NameSpace.AddStoreEx(path, olStoreUnicode)` — "If the .pst file does not exist, Microsoft Outlook
   creates it" (Microsoft Learn) — then `Items.Add` / `MailItem.Move` to fill it; Message-ID (`0x1035001F`) and
   submit time (`0x00390040`) are set with `MailItem.PropertyAccessor.SetProperty`, and the script exits non-zero if
   Outlook rejects a property, so a fixture can never silently lack its Message-IDs). Committed under
-  `tests/fixtures/pst/` (each < 5 MB):
+  `app/tests/fixtures/pst/` (each < 5 MB):
 
 | Fixture | Content | Proves |
 |---|---|---|
