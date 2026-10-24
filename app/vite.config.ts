@@ -8,8 +8,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    setupFiles: ["src/test/setup.ts"],
-    include: ["src/**/*.test.{ts,tsx}"],
+    setupFiles: ["frontend/test/setup.ts"],
+    include: ["frontend/**/*.test.{ts,tsx}"],
     // Per-test cap, setup hooks included (CLAUDE.md "Test policy"). Never raise it.
     testTimeout: 1000,
     hookTimeout: 1000,
