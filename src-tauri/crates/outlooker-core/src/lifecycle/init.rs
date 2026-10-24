@@ -71,7 +71,9 @@ impl Supervisor {
         Ok(())
     }
 
-    async fn first_run(&self, paths: Paths) {
+    /// Creates the cluster in `paths.pgdata()` (absent) and starts it. Existing credentials are reused (a database
+    /// reset keeps `auth/`), else new ones are generated and saved.
+    pub(crate) async fn first_run(&self, paths: Paths) {
         let pgdata = paths.pgdata();
         let created = !pgdata.exists();
         let cleanup = |paths: &Paths| {
@@ -83,8 +85,14 @@ impl Supervisor {
             }
         };
         let prepared = async {
-            let creds = Credentials::generate();
-            creds.save(&paths.credentials())?;
+            let creds = match Credentials::load(&paths.credentials()) {
+                Ok(c) => c,
+                Err(_) => {
+                    let c = Credentials::generate();
+                    c.save(&paths.credentials())?;
+                    c
+                }
+            };
             let locale = PgController::new(paths.clone()).init(&pgdata, &creds.admin).await?;
             write_marker(&paths, &locale)
         }

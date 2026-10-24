@@ -27,6 +27,7 @@ export const api = {
   appStatus: () => call<AppStatus>("app_status"),
   appInitialize: (req: InitializeRequest) => call<null>("app_initialize", { req }),
   appRetry: () => call<null>("app_retry"),
+  appResetDatabase: () => call<null>("app_reset_database"),
   searchMail: (req: SearchRequest) => call<SearchPage>("search_mail", { req }),
   searchCount: (query: SearchQuery) => call<SearchCount>("search_count", { query }),
   filterOptions: () => call<FilterOptions>("filter_options"),

@@ -1,6 +1,6 @@
 import {
-  Accordion, AccordionHeader, AccordionItem, AccordionPanel, Badge, Body1, Button, Caption1, MessageBar, MessageBarBody,
-  Spinner, Tab, TabList, Title2, Toaster, ToggleButton, makeStyles, mergeClasses, tabClassNames, tokens, useId,
+  Accordion, AccordionHeader, AccordionItem, AccordionPanel, Badge, Body1, Button, Caption1, Dialog, DialogActions, DialogBody,
+  DialogContent, DialogSurface, DialogTitle, MessageBar, MessageBarBody, Spinner, Tab, TabList, Title2, Toaster, ToggleButton, makeStyles, mergeClasses, tabClassNames, tokens, useId,
 } from "@fluentui/react-components";
 import {
   ArrowDownload24Regular, Database24Regular, ErrorCircleRegular, Search24Regular, Settings24Regular,
@@ -88,16 +88,23 @@ const SCREENS: Record<ScreenId, () => JSX.Element | null> = {
   settings: SettingsScreen,
 };
 
-export function FailedScreen({ error, onRetry }: { error: AppError | null; onRetry: () => Promise<unknown> }) {
+export function FailedScreen({ error, onRetry, onReset }: {
+  error: AppError | null;
+  onRetry: () => Promise<unknown>;
+  /** Absent on the boot-error screen (App.tsx), where the core status is unknown. */
+  onReset?: () => Promise<unknown>;
+}) {
   const s = useStyles();
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [retryError, setRetryError] = useState<AppError | null>(null);
-  const retry = async () => {
+  const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
+    setConfirmReset(false);
     setRetryError(null);
     try {
-      await onRetry();
+      await action();
     } catch (e) {
       setRetryError(toAppError(e));
     } finally {
@@ -125,9 +132,31 @@ export function FailedScreen({ error, onRetry }: { error: AppError | null; onRet
           </AccordionItem>
         </Accordion>
       ) : null}
-      <Button appearance="primary" onClick={retry} disabled={busy} data-testid="failed-retry">
+      <Button appearance="primary" onClick={() => void run(onRetry)} disabled={busy} data-testid="failed-retry">
         {t("failed.retry")}
       </Button>
+      {/* Offered only when the data folder holds a database this build cannot open (contract override 14). */}
+      {onReset && error?.kind === "incompatibleDatabase" ? (
+        <Button onClick={() => setConfirmReset(true)} disabled={busy} data-testid="failed-reset">
+          {t("failed.reset")}
+        </Button>
+      ) : null}
+      {onReset && confirmReset ? (
+        <Dialog open modalType="alert" onOpenChange={(_, d) => !d.open && setConfirmReset(false)}>
+          <DialogSurface>
+            <DialogBody>
+              <DialogTitle>{t("failed.resetTitle")}</DialogTitle>
+              <DialogContent>{t("failed.resetBody")}</DialogContent>
+              <DialogActions>
+                <Button onClick={() => setConfirmReset(false)}>{t("action.cancel")}</Button>
+                <Button appearance="primary" onClick={() => void run(onReset)} data-testid="failed-reset-confirm">
+                  {t("failed.resetConfirm")}
+                </Button>
+              </DialogActions>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
@@ -229,7 +258,7 @@ export function AppFrame() {
   // A screen mounts on its first visit only, so start-up does not pay for screens the user has not opened.
   if (!visited.has(screen)) setVisited(new Set(visited).add(screen));
   let body: JSX.Element;
-  if (status.phase === "failed") body = <FailedScreen error={status.error} onRetry={() => api.appRetry()} />;
+  if (status.phase === "failed") body = <FailedScreen error={status.error} onRetry={() => api.appRetry()} onReset={() => api.appResetDatabase()} />;
   else if (onboarding) body = <OnboardingScreen />;
   else if (status.phase !== "ready" && !moving) body = <BlockingScreen phase={status.phase} />;
   else

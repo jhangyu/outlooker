@@ -2,6 +2,7 @@
   "app_status",
   "app_initialize",
   "app_retry",
+  "app_reset_database",
   "search_mail",
   "search_count",
   "filter_options",

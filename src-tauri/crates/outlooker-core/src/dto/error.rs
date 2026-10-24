@@ -27,6 +27,10 @@ pub enum AppError {
     NotAPst { path: String },
     #[error("already imported as PST {pst_id}")]
     AlreadyImported { pst_id: i64 },
+    /// The data directory holds a database this build cannot open (edited or unknown migration, other PostgreSQL
+    /// major). The failed screen offers `app_reset_database` only for this kind.
+    #[error("incompatible database: {detail}")]
+    IncompatibleDatabase { detail: String },
     #[error("internal error: {detail}")]
     Internal { detail: String },
 }
@@ -47,6 +51,9 @@ impl AppError {
     }
     pub fn internal(detail: impl Into<String>) -> AppError {
         AppError::Internal { detail: detail.into() }
+    }
+    pub fn incompatible(detail: impl Into<String>) -> AppError {
+        AppError::IncompatibleDatabase { detail: detail.into() }
     }
     pub fn file_access(path: &std::path::Path, reason: &str) -> AppError {
         AppError::FileAccess { path: path.display().to_string(), reason: reason.to_owned() }

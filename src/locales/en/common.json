@@ -16,7 +16,11 @@
     "title": "Outlooker could not start its database",
     "body": "Your mail data was not changed. Try again. If it keeps failing, open the details.",
     "details": "Details",
-    "retry": "Retry"
+    "retry": "Retry",
+    "reset": "Reset database",
+    "resetTitle": "Reset the database?",
+    "resetBody": "This data folder holds a database from a different version of Outlooker, so it cannot be opened. Resetting deletes the database and creates an empty one in the same folder. All imported mail, saved queries, and PST sources are removed. Your PST files are not changed, and you can import them again afterwards.",
+    "resetConfirm": "Delete and reset"
   },
   "error": {
     "dbNotReady": "The database is not ready yet.",
@@ -35,6 +39,7 @@
     "insufficientSpace": "Not enough free disk space at {{path}}.",
     "notAPst": "{{path}} is not an Outlook PST file.",
     "alreadyImported": "This PST file is already imported.",
+    "incompatibleDatabase": "The data folder holds a database from a different version of Outlooker.",
     "internal": "Something went wrong. The app log has the details."
   },
   "action": { "cancel": "Cancel", "close": "Close", "goImport": "Go to Import", "resize": "Resize" }

@@ -35,7 +35,7 @@ impl Supervisor {
         let version = std::fs::read_to_string(paths.pgdata().join("PG_VERSION"))
             .map_err(|e| AppError::file_access(&paths.pgdata(), &e.to_string()))?;
         if version.trim() != "18" {
-            return Err(AppError::internal(format!("unsupported PostgreSQL data version {}", version.trim())));
+            return Err(AppError::incompatible(format!("unsupported PostgreSQL data version {}", version.trim())));
         }
         self.set_phase(AppPhase::StartingDb, None).await;
         let ctl = PgController::new(paths.clone());

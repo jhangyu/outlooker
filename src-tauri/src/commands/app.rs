@@ -20,6 +20,11 @@ pub async fn app_retry(s: State<'_, Services>) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+pub async fn app_reset_database(s: State<'_, Services>) -> Result<(), AppError> {
+    s.supervisor.reset_database().await
+}
+
+#[tauri::command]
 pub async fn data_dir_move(s: State<'_, Services>, target: String) -> Result<(), AppError> {
     s.supervisor.move_data_dir(target).await
 }

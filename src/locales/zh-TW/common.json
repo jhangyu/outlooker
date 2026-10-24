@@ -16,7 +16,11 @@
     "title": "Outlooker 無法啟動資料庫",
     "body": "郵件資料沒有被修改。請再試一次；若持續失敗，請展開詳細資料。",
     "details": "詳細資料",
-    "retry": "重試"
+    "retry": "重試",
+    "reset": "重設資料庫",
+    "resetTitle": "要重設資料庫嗎？",
+    "resetBody": "此資料夾內的資料庫來自不同版本的 Outlooker，無法開啟。重設會刪除資料庫，並在同一資料夾建立空的資料庫。所有已匯入的郵件、已存查詢與 PST 來源都會移除；PST 檔案本身不受影響，之後可再次匯入。",
+    "resetConfirm": "刪除並重設"
   },
   "error": {
     "dbNotReady": "資料庫尚未就緒。",
@@ -35,6 +39,7 @@
     "insufficientSpace": "{{path}} 的磁碟可用空間不足。",
     "notAPst": "{{path}} 不是 Outlook PST 檔案。",
     "alreadyImported": "這個 PST 檔案已經匯入。",
+    "incompatibleDatabase": "資料夾內的資料庫來自不同版本的 Outlooker。",
     "internal": "發生錯誤，詳細內容在應用程式紀錄中。"
   },
   "action": { "cancel": "取消", "close": "關閉", "goImport": "前往匯入", "resize": "調整大小" }

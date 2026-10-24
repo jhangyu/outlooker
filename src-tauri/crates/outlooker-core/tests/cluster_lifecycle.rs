@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use outlooker_core::db::{connect, Credentials, Db, ADMIN_ROLE, CJK_SELF_CHECK};
 use outlooker_core::dto::app::{AppPhase, InitializeRequest, Language};
+use outlooker_core::dto::error::AppError;
 use outlooker_core::dto::events::DataDirMovePhase;
 use outlooker_core::gate::Gate;
 use outlooker_core::lifecycle::pg::{auto_conf, PgController, StopMode};
@@ -33,6 +34,7 @@ struct Rig {
     _dir: tempfile::TempDir,
     root: PathBuf,
     sup: Supervisor,
+    db: Db,
     settings: SettingsStore,
     events: mpsc::UnboundedReceiver<CoreEvent>,
 }
@@ -42,9 +44,10 @@ fn rig_at(dir: tempfile::TempDir, app: &str, config: SupervisorConfig) -> Rig {
     let paths = Paths::new(dir.path().join(app), dir.path().join("logs"), dev_pg_dir());
     let settings = SettingsStore::load(paths.bootstrap_file()).unwrap();
     let (tx, events) = mpsc::unbounded_channel();
-    let sup = Supervisor::new(paths, settings.clone(), Gate::new(), Db::new(), Arc::new(ChannelSink(tx)), config);
+    let db = Db::new();
+    let sup = Supervisor::new(paths, settings.clone(), Gate::new(), db.clone(), Arc::new(ChannelSink(tx)), config);
     let root = dir.path().join("data");
-    Rig { _dir: dir, root, sup, settings, events }
+    Rig { _dir: dir, root, sup, db, settings, events }
 }
 
 fn fast_probe() -> SupervisorConfig {
@@ -184,6 +187,49 @@ async fn move_data_dir_succeeds() {
     assert!(target.join("outlooker-data.json").exists());
     assert!(!r.root.exists());
     assert_eq!(r.settings.bootstrap().data_dir.as_deref(), Some(target.display().to_string().as_str()));
+    r.sup.shutdown_db().await.unwrap();
+}
+
+/// X5: a library migrated by another build (edited migration) fails boot as incompatible; the reset deletes only
+/// `pgdata` and the same data root comes back empty and working, with its other files and credentials untouched.
+#[tokio::test]
+async fn reset_recreates_incompatible_database() {
+    let r = seeded_rig(fast_probe());
+    r.sup.boot().await.unwrap();
+    let admin = r.db.connect_admin().await.unwrap();
+    admin.batch_execute("CREATE TABLE reset_probe (); UPDATE refinery_schema_history SET checksum = '1' WHERE version = 1").await.unwrap();
+    drop(admin);
+    r.sup.shutdown_db().await.unwrap();
+    let creds = std::fs::read(r.root.join("auth/credentials")).unwrap();
+    std::fs::write(r.root.join("keep.txt"), b"keep").unwrap();
+
+    std::fs::write(r.root.join("import-inflight"), b"{}").unwrap();
+
+    let err = r.sup.boot().await.unwrap_err();
+    assert!(matches!(err, AppError::IncompatibleDatabase { .. }), "{err:?}");
+    // A pgdata that is not a plain directory (a file here, a symlink takes the same check) is refused, nothing deleted.
+    let moved = r._dir.path().join("pgdata-moved");
+    std::fs::rename(r.root.join("pgdata"), &moved).unwrap();
+    std::fs::write(r.root.join("pgdata"), b"x").unwrap();
+    assert!(r.sup.reset_database().await.is_err());
+    assert_eq!(r.sup.phase(), AppPhase::Failed);
+    assert!(r.root.join("pgdata").is_file() && r.root.join("import-inflight").exists());
+    std::fs::remove_file(r.root.join("pgdata")).unwrap();
+    std::fs::rename(&moved, r.root.join("pgdata")).unwrap();
+
+    r.sup.reset_database().await.unwrap();
+    assert!(!r.root.join("import-inflight").exists(), "the import crash record of the old database is deleted");
+    assert!(r.sup.reset_database().await.is_err(), "a second reset is refused while the first runs");
+    wait_phase(&r.sup, AppPhase::Ready).await;
+
+    let admin = r.db.connect_admin().await.unwrap();
+    let fresh: bool = admin.query_one("SELECT to_regclass('reset_probe') IS NULL", &[]).await.unwrap().get(0);
+    assert!(fresh, "the old database is gone");
+    let counts = r.sup.status().await.counts;
+    assert_eq!((counts.messages, counts.psts), (0, 0));
+    assert_eq!(std::fs::read(r.root.join("keep.txt")).unwrap(), b"keep");
+    assert_eq!(std::fs::read(r.root.join("auth/credentials")).unwrap(), creds);
+    assert!(r.root.join("outlooker-data.json").exists());
     r.sup.shutdown_db().await.unwrap();
 }
 
