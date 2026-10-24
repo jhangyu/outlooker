@@ -450,7 +450,9 @@ async fn pause_resume_continues_from_checkpoint() {
     let mut batches = batch_signal(&mut tuning);
     let mut fx = manager(&tc, tuning);
     let path = synthetic_path(&tc, "c.pst");
-    let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), corpus(ITEMS)).await.unwrap();
+    let mut items = corpus(ITEMS);
+    items[1].content = RawContent::Unreadable { stage: ImportErrorStage::Parse, message: "bad item".into() };
+    let pst_id = fx.mgr.enqueue_synthetic(&path, folders(), items.clone()).await.unwrap();
     fx.mgr.start_worker();
     wait_batch(&mut batches, 1).await;
     assert!(fx.mgr.set_paused(pst_id, true).await.unwrap().paused);
@@ -458,6 +460,8 @@ async fn pause_resume_continues_from_checkpoint() {
     let cursor = tc.count("SELECT cursor_seq FROM import_checkpoints").await;
     assert!((5..ITEMS).contains(&cursor), "paused mid-job: cursor {cursor}");
     let stored = tc.count("SELECT count(*) FROM messages").await;
+    const ERRORS: &str = "SELECT count(*) FROM import_errors";
+    assert_eq!(tc.count(ERRORS).await, 1, "the unreadable item is recorded once");
     // no sync while paused, even for a changed file; a later path is not blocked by the held job
     std::fs::write(&path, b"!BDN changed while paused").unwrap();
     fx.mgr.sync(SyncTarget::All).await.unwrap();
@@ -471,7 +475,8 @@ async fn pause_resume_continues_from_checkpoint() {
     assert!(!fx.mgr.set_paused(pst_id, false).await.unwrap().paused);
     assert_eq!(wait_job(&mut fx.events, pst_id).await, ImportStatus::Completed);
     assert_eq!(tc.count(JOBS).await, 2, "the held job was resumed, not replaced");
-    assert_eq!(snapshot(&tc).await, expected(&[corpus(ITEMS), corpus_tagged(1, "o")].concat()));
+    assert_eq!(snapshot(&tc).await, expected(&[items, corpus_tagged(1, "o")].concat()));
+    assert_eq!(tc.count(ERRORS).await, 1, "the cursor reset re-read the item: still one error row");
 }
 
 #[tokio::test(flavor = "multi_thread")]
