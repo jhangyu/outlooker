@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::db::Credentials;
@@ -76,11 +77,19 @@ impl Supervisor {
     pub(crate) async fn first_run(&self, paths: Paths) {
         let pgdata = paths.pgdata();
         let created = !pgdata.exists();
+        let auth_dir = paths.credentials().parent().map(Path::to_path_buf);
+        let auth_existed = auth_dir.as_ref().is_some_and(|d| d.exists());
+        let credentials_generated = AtomicBool::new(false);
+        // Removes what this run created: pgdata, and the auth dir when this run generated the credentials into it.
         let cleanup = |paths: &Paths| {
             let pgdata = paths.pgdata();
+            let stale_auth = auth_dir.clone().filter(|_| !auth_existed && credentials_generated.load(Ordering::Relaxed));
             async move {
                 if created {
                     let _ = tokio::fs::remove_dir_all(&pgdata).await;
+                }
+                if let Some(auth) = stale_auth {
+                    let _ = tokio::fs::remove_dir_all(&auth).await;
                 }
             }
         };
@@ -89,6 +98,7 @@ impl Supervisor {
                 Ok(c) => c,
                 Err(_) => {
                     let c = Credentials::generate();
+                    credentials_generated.store(true, Ordering::Relaxed);
                     c.save(&paths.credentials())?;
                     c
                 }

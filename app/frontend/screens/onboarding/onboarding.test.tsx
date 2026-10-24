@@ -28,7 +28,7 @@ describe("Onboarding", () => {
     renderWithProviders(<OnboardingScreen />, { status: { phase: "needsSetup", dataDir: "/data" } });
     fireEvent.click(await screen.findByTestId("onboarding-next"));
     fireEvent.click(screen.getByTestId("onboarding-next"));
-    expect(await screen.findByText("The value of dataDir is not valid.")).toBeTruthy();
+    expect(await screen.findByText("This folder is not empty. Choose an empty folder or one that already holds an Outlooker library.")).toBeTruthy();
     expect(screen.getByTestId("onboarding-dir-default")).toBeTruthy();
   });
 });

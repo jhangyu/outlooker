@@ -15,6 +15,7 @@ export function formatAppError(err: AppError, t: TFunction): string {
     case "notAPst":
       return t("common:error.notAPst", { path: err.path });
     case "invalidInput":
+      if (err.field === "dataDir" && err.reason === "notEmpty") return t("common:error.dataDirNotEmpty");
       return t("common:error.invalidInput", { field: err.field });
     default:
       return t(`common:error.${err.kind}`);

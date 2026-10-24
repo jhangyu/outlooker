@@ -26,6 +26,7 @@
     "dbNotReady": "The database is not ready yet.",
     "notFound": "The item no longer exists.",
     "invalidInput": "The value of {{field}} is not valid.",
+    "dataDirNotEmpty": "This folder is not empty. Choose an empty folder or one that already holds an Outlooker library.",
     "queryTimeout": "The query ran longer than {{seconds}} seconds and was stopped.",
     "cancelled": "The operation was cancelled.",
     "readOnlyViolation": "This connection is read-only. Data cannot be changed here.",

@@ -26,6 +26,7 @@
     "dbNotReady": "資料庫尚未就緒。",
     "notFound": "此項目已不存在。",
     "invalidInput": "{{field}} 的值無效。",
+    "dataDirNotEmpty": "此資料夾不是空的。請選擇空資料夾，或已有 Outlooker 資料庫的資料夾。",
     "queryTimeout": "查詢超過 {{seconds}} 秒，已停止。",
     "cancelled": "作業已取消。",
     "readOnlyViolation": "這是唯讀連線，無法修改資料。",
