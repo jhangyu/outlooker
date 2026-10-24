@@ -16,7 +16,7 @@ if (only !== null && !GROUPS.includes(only)) {
 function stopCluster(group) {
   const pgdata = path.join(groupDataRoot(group), "pgdata");
   if (!fs.existsSync(path.join(pgdata, "postmaster.pid"))) return;
-  const pgCtl = path.join(REPO_ROOT, "src-tauri", "resources", "postgresql", "bin", process.platform === "win32" ? "pg_ctl.exe" : "pg_ctl");
+  const pgCtl = path.join(REPO_ROOT, "backend", "resources", "postgresql", "bin", process.platform === "win32" ? "pg_ctl.exe" : "pg_ctl");
   const r = spawnSync(pgCtl, ["-D", pgdata, "stop", "-m", "fast"], { stdio: "inherit" });
   if (r.status !== 0) console.error(`run: pg_ctl stop failed for ${group} (exit ${r.status ?? r.signal})`);
 }

@@ -12,7 +12,7 @@ function run(cmd, args, env = process.env) {
   }
 }
 
-// tauri-build copies src-tauri/resources/postgresql/ and fails when it is missing (idempotent fetch).
+// tauri-build copies backend/resources/postgresql/ and fails when it is missing (idempotent fetch).
 run("node", ["scripts/fetch-postgres.mjs"]);
 run(
   "npx",

@@ -1,4 +1,4 @@
-// E2E app-data dirs and seeded libraries under scripts/tmp/e2e/ (gitignored). The user's real app data dir is
+// E2E app-data dirs and seeded libraries under app/scripts/tmp/e2e/ (gitignored). The user's real app data dir is
 // never used: every run sets OUTLOOKER_APP_DATA_DIR to one of these dirs.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -11,7 +11,7 @@ export const APP_DATA = {
   fresh: path.join(E2E_ROOT, "fresh"),
   seeded: path.join(E2E_ROOT, "seeded"),
 };
-export const TARGET_DIR = path.resolve(REPO_ROOT, "src-tauri", process.env.CARGO_TARGET_DIR ?? "target");
+export const TARGET_DIR = path.resolve(REPO_ROOT, "backend", process.env.CARGO_TARGET_DIR ?? "target");
 export const GROUPS = ["flow", "seeded"];
 export const GROUP_APP_DATA = { flow: APP_DATA.fresh, seeded: APP_DATA.seeded };
 
@@ -35,7 +35,7 @@ function prepareLibrary(appData) {
   const lib = LIBRARIES[appData];
   if (!fs.existsSync(path.join(lib.root, "outlooker-data.json"))) {
     fs.rmSync(lib.root, { recursive: true, force: true });
-    const cwd = path.join(REPO_ROOT, "src-tauri");
+    const cwd = path.join(REPO_ROOT, "backend");
     const shell = process.platform === "win32";
     const build = spawnSync("cargo", ["build", "--release", "--locked", "--workspace", "--bin", "outlooker-loadgen"], { cwd, stdio: "inherit", shell });
     if (build.status !== 0) fail("build outlooker-loadgen", `exit ${build.status ?? build.signal}`);

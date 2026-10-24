@@ -1,6 +1,6 @@
 // `npm test`: vitest with the per-test cap of CLAUDE.md "Test policy". The base cap is vite.config.ts
 // testTimeout/hookTimeout (1000 ms). A test that failed by TIMEOUT runs once more, alone, with a 6 s timeout, and
-// scripts/test-time-judge.mjs decides on that time. Assertion and suite failures are never rerun.
+// app/scripts/test-time-judge.mjs decides on that time. Assertion and suite failures are never rerun.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";

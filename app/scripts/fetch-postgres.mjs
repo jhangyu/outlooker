@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Downloads, verifies and prunes the bundled PostgreSQL 18.6 (spec Part 01 §3, §6).
-// Usage: node scripts/fetch-postgres.mjs [--target <triple>]
+// Usage: node app/scripts/fetch-postgres.mjs [--target <triple>]
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 
 const VERSION = "18.6.1";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const SHA_FILE = join(ROOT, "src-tauri", "native", "postgresql.sha256");
-const DEST = join(ROOT, "src-tauri", "resources", "postgresql");
+const SHA_FILE = join(ROOT, "backend", "native", "postgresql.sha256");
+const DEST = join(ROOT, "backend", "resources", "postgresql");
 const PRUNE_DIRS = ["include", join("lib", "bitcode"), join("lib", "pgxs"), join("lib", "Python")];
 const TRIPLES = {
   "darwin-arm64": "aarch64-apple-darwin",

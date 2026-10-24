@@ -1,7 +1,7 @@
 /** `[data-testid="<id>"]` selector. */
 export const tid = (id: string): string => `[data-testid="${id}"]`;
 
-/** Queues native-picker results for the VITE_E2E=1 bypass of src/api/dialog.ts. */
+/** Queues native-picker results for the VITE_E2E=1 bypass of frontend/api/dialog.ts. */
 export async function setPicks(picks: Array<string[] | string | null>): Promise<void> {
   await browser.execute((p: Array<string[] | string | null>) => {
     (window as unknown as { __outlookerE2ePicks: Array<string[] | string | null> }).__outlookerE2ePicks = p;

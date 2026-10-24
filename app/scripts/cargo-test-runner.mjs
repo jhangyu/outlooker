@@ -1,4 +1,4 @@
-// Cargo target runner (src-tauri/.cargo/config.toml). Debug test binaries get a per-test time cap (1 s, 3 s for
+// Cargo target runner (app/backend/.cargo/config.toml). Debug test binaries get a per-test time cap (1 s, 3 s for
 // cluster_lifecycle; CLAUDE.md "Test policy"). Binaries that use the shared PostgreSQL cluster get it booted once,
 // before they start, by examples/test_pg_server.rs. Other binaries pass through unchanged.
 import { spawn, spawnSync } from "node:child_process";

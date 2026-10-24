@@ -1,4 +1,4 @@
-// Per-test time judgment shared by scripts/cargo-test-runner.mjs and scripts/vitest-capped.mjs (CLAUDE.md "Test
+// Per-test time judgment shared by app/scripts/cargo-test-runner.mjs and app/scripts/vitest-capped.mjs (CLAUDE.md "Test
 // policy"). A test over its base cap was rerun alone; `judge` decides on that solo time.
 import { availableParallelism, loadavg } from "node:os";
 

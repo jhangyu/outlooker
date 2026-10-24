@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the desktop app: python3 scripts/build.py [--debug] [--clean-install]"""
+"""Build the desktop app: python3 app/scripts/build.py [--debug] [--clean-install]"""
 import argparse
 import os
 import shutil
@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PG_DIR = ROOT / "src-tauri" / "resources" / "postgresql"
-LIBPFF_ORIGIN = ROOT / "src-tauri" / "native" / "libpff" / "ORIGIN"
-BUNDLE_DIR = ROOT / "src-tauri" / "target" / "release" / "bundle"
+PG_DIR = ROOT / "backend" / "resources" / "postgresql"
+LIBPFF_ORIGIN = ROOT / "backend" / "native" / "libpff" / "ORIGIN"
+BUNDLE_DIR = ROOT / "backend" / "target" / "release" / "bundle"
 
 
 def die(msg):
@@ -36,7 +36,7 @@ def main():
     if not shutil.which("cargo"):
         die("`cargo` not found on PATH (install Rust via rustup)")
     if not LIBPFF_ORIGIN.exists():
-        die("src-tauri/native/libpff is not vendored: run scripts/vendor-libpff.py")
+        die("app/backend/native/libpff is not vendored: run app/scripts/vendor-libpff.py")
 
     if not PG_DIR.is_dir() or not any(PG_DIR.iterdir()):
         run([mise, "exec", "--", "node", "scripts/fetch-postgres.mjs"])

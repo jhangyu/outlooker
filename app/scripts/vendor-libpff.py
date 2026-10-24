@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vendor the prepared libpff sdist (fork jhangyu/libpff, commit bb5bcc0) into src-tauri/native/libpff.
+"""Vendor the prepared libpff sdist (fork jhangyu/libpff, commit bb5bcc0) into app/backend/native/libpff.
 
 SOURCE is a GitHub Actions run id of the fork's `build_wheels` workflow (artifact `cibw-sdist`,
 downloaded with `gh`) or a path to a local `libpff_python-*.tar.gz`.
@@ -29,7 +29,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=head, epilog=tail,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("source", metavar="SOURCE", help="run id or path to libpff_python-*.tar.gz")
-    ap.add_argument("--dest", type=Path, default=ROOT / "src-tauri/native/libpff", help="vendor directory (default: %(default)s)")
+    ap.add_argument("--dest", type=Path, default=ROOT / "backend/native/libpff", help="vendor directory (default: %(default)s)")
     opts = ap.parse_args()
 
     with tempfile.TemporaryDirectory() as tmp:

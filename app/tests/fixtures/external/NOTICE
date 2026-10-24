@@ -1,4 +1,4 @@
-tests/fixtures/external/outlook.pst
+app/tests/fixtures/external/outlook.pst
 
 Source: https://raw.githubusercontent.com/libyal/testdata/refs/heads/main/pst/outlook.pst
 Repository: https://github.com/libyal/testdata (commit c3631ff)
