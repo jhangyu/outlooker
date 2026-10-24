@@ -40,8 +40,8 @@ pub struct PstSource {
     /// Newest job: created (for `locked`: locked since) and finished (for `locked`: last seen locked).
     pub queued_at: String,
     pub finished_at: Option<String>,
-    /// false: automatic sync and "sync all" skip this path.
-    pub sync_enabled: bool,
+    /// Paused by the user: no sync and no job start until Resume (a running sync stops after the current item).
+    pub paused: bool,
     /// Last time a sync step looked at the path (also "unchanged" and "locked").
     pub last_checked_at: Option<String>,
     /// finished_at of the newest completed import job.

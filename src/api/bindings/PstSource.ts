@@ -8,9 +8,9 @@ export type PstSource = { id: number, path: string, displayName: string, fileSiz
  */
 queuedAt: string, finishedAt: string | null, 
 /**
- * false: automatic sync and "sync all" skip this path.
+ * Paused by the user: no sync and no job start until Resume (a running sync stops after the current item).
  */
-syncEnabled: boolean, 
+paused: boolean, 
 /**
  * Last time a sync step looked at the path (also "unchanged" and "locked").
  */

@@ -83,7 +83,11 @@ pub(super) async fn worker(inner: Arc<Inner>) {
 async fn next_job(inner: &Inner) -> Result<Next, AppError> {
     let c = inner.db.app_client().await?;
     let row = c
-        .query_opt("SELECT id, pst_id, kind FROM import_jobs WHERE state = 'queued' ORDER BY id LIMIT 1", &[])
+        .query_opt(
+            "SELECT j.id, j.pst_id, j.kind FROM import_jobs j JOIN pst_sources s ON s.id = j.pst_id \
+              WHERE j.state = 'queued' AND (j.kind = 'remove' OR NOT (s.paused OR s.unregistered)) ORDER BY j.id LIMIT 1",
+            &[],
+        )
         .await
         .map_err(db_err)?;
     match row {
@@ -95,12 +99,17 @@ async fn next_job(inner: &Inner) -> Result<Next, AppError> {
 /// Takes the job (`queued` → `running`) and runs it. Returns true when the crash seam dropped it.
 async fn run_job(inner: &Arc<Inner>, job_id: i64, pst_id: i64, kind: JobKind) -> bool {
     let cancel = Arc::new(JobCancel::new());
-    // registered before the row turns `running`, so a cancel that sees `running` finds the flag
-    inner.set_running(Some(RunningJob { job_id, pst_id, cancel: cancel.clone() }));
+    // registered before the row turns `running`, so a pause that commits before this UPDATE stops the job (UPDATE
+    // finds the source paused) and one that commits after it finds the flag (queue::hold_running)
+    inner.set_running(Some(RunningJob { pst_id, cancel: cancel.clone() }));
     *inner.throughput.lock().unwrap_or_else(|p| p.into_inner()) = Throughput::new();
     let taken = match inner.db.app_client().await {
         Ok(c) => c
-            .execute("UPDATE import_jobs SET state = 'running', started_at = now() WHERE id = $1 AND state = 'queued'", &[&job_id])
+            .execute(
+                "UPDATE import_jobs j SET state = 'running', started_at = now() WHERE j.id = $1 AND j.state = 'queued' \
+                   AND (j.kind = 'remove' OR NOT EXISTS (SELECT 1 FROM pst_sources s WHERE s.id = j.pst_id AND (s.paused OR s.unregistered)))",
+                &[&job_id],
+            )
             .await
             .map_err(db_err),
         Err(e) => Err(e),
@@ -115,7 +124,7 @@ async fn run_job(inner: &Arc<Inner>, job_id: i64, pst_id: i64, kind: JobKind) ->
                 run_import(inner, job_id, pst_id, &cancel).await
             }
         }
-        Ok(_) => false, // cancelled or removed meanwhile
+        Ok(_) => false, // paused, unregistered or removed meanwhile
         Err(e) => {
             log::warn!("cannot start job {job_id}: {e}");
             false
@@ -198,7 +207,7 @@ async fn pause_wait(inner: &Inner) -> bool {
 enum EndAction {
     /// Crash seam: no state change, the worker stops.
     Crash,
-    /// Shutdown without a failure: state `queued`, resumed at the next start.
+    /// Shutdown or Hold without a failure: state `queued`, resumed at the next start / on Resume.
     Requeue,
     /// Finalize (indexes, VACUUM, marker), then this final state and status.
     Finalize(JobState, ImportStatus),
@@ -213,8 +222,7 @@ fn end_of_attempt(end: &AttemptEnd, reason: Option<CancelReason>) -> EndAction {
         (AttemptEnd::Crashed, _) => EndAction::Crash,
         (AttemptEnd::Locked, _) => EndAction::Locked,
         (AttemptEnd::Failed(_), _) => EndAction::Finalize(JobState::Failed, ImportStatus::Failed),
-        (_, Some(CancelReason::Shutdown)) => EndAction::Requeue,
-        (_, Some(CancelReason::User)) => EndAction::Finalize(JobState::Cancelled, ImportStatus::Cancelled),
+        (_, Some(CancelReason::Shutdown | CancelReason::Hold)) => EndAction::Requeue,
         (_, None | Some(CancelReason::Pause)) => EndAction::Finalize(JobState::Completed, ImportStatus::Completed),
     }
 }
@@ -234,7 +242,7 @@ async fn run_import(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<J
                 if !pause_wait(inner).await || cancel.reason() == Some(CancelReason::Shutdown) {
                     return false;
                 }
-                if cancel.reason() == Some(CancelReason::User) {
+                if cancel.reason() == Some(CancelReason::Hold) {
                     break AttemptEnd::Finished;
                 }
                 cancel.clear_pause();
@@ -252,6 +260,16 @@ async fn run_import(inner: &Arc<Inner>, job_id: i64, pst_id: i64, cancel: &Arc<J
             // Part 02 §2.5 step 1: back to queued; index self-heal at the next start covers dropped indexes
             if let Ok(m) = inner.inflight() {
                 m.clear();
+            }
+            // a held (paused) first import must not leave search without its indexes until the next start
+            if cancel.reason() == Some(CancelReason::Hold) {
+                let rebuilt = async {
+                    let admin = inner.db.connect_admin().await?;
+                    ensure_search_indexes(&admin, &|name: &str, done: usize, total: usize| log::info!("import hold index {name} ({done}/{total})")).await
+                };
+                if let Err(e) = rebuilt.await {
+                    log::warn!("import job {job_id}: indexes after hold: {e}");
+                }
             }
             if set_final(inner, job_id, pst_id, JobState::Queued, None).await.is_ok() {
                 emit_status(inner, pst_id).await;
@@ -313,31 +331,30 @@ mod tests {
 
     #[test]
     fn end_of_attempt_table() {
-        use CancelReason::{Pause, Shutdown, User};
+        use CancelReason::{Hold, Pause, Shutdown};
         use EndAction::{Crash, Finalize, Locked, Requeue};
         let failed = || AttemptEnd::Failed(JobFailure { stage: ImportErrorStage::Store, message: "x".into() });
         let completed = Finalize(JobState::Completed, ImportStatus::Completed);
-        let cancelled = Finalize(JobState::Cancelled, ImportStatus::Cancelled);
         let failure = Finalize(JobState::Failed, ImportStatus::Failed);
         let rows = [
             (AttemptEnd::Finished, None, &completed),
             (AttemptEnd::Finished, Some(Pause), &completed),
-            (AttemptEnd::Finished, Some(User), &cancelled),
+            (AttemptEnd::Finished, Some(Hold), &Requeue),
             (AttemptEnd::Finished, Some(Shutdown), &Requeue),
             (AttemptEnd::Paused, None, &completed),
             (AttemptEnd::Paused, Some(Pause), &completed),
-            (AttemptEnd::Paused, Some(User), &cancelled),
+            (AttemptEnd::Paused, Some(Hold), &Requeue),
             (AttemptEnd::Paused, Some(Shutdown), &Requeue),
             (AttemptEnd::Crashed, None, &Crash),
             (AttemptEnd::Crashed, Some(Pause), &Crash),
-            (AttemptEnd::Crashed, Some(User), &Crash),
+            (AttemptEnd::Crashed, Some(Hold), &Crash),
             (AttemptEnd::Crashed, Some(Shutdown), &Crash),
             (failed(), None, &failure),
             (failed(), Some(Pause), &failure),
-            (failed(), Some(User), &failure),
+            (failed(), Some(Hold), &failure),
             (failed(), Some(Shutdown), &failure),
             (AttemptEnd::Locked, None, &Locked),
-            (AttemptEnd::Locked, Some(User), &Locked),
+            (AttemptEnd::Locked, Some(Hold), &Locked),
             (AttemptEnd::Locked, Some(Shutdown), &Locked),
         ];
         for (i, (end, reason, want)) in rows.iter().enumerate() {

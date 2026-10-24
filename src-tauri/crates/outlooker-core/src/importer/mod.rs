@@ -34,7 +34,7 @@ pub struct ImportTuning {
     /// (no state change, marker left on disk, writer aborted, the queue worker stops). None in production.
     pub crash_after_batches: Option<i64>,
     /// Test seam: in the first job attempt of this ImportManager the reader blocks after sending the item whose
-    /// seq equals this value until the job is cancelled (user cancel, shutdown or DB pause); later attempts
+    /// seq equals this value until the job is cancelled (pause, shutdown or DB pause); later attempts
     /// (re-run after a pause, resumed job, next job) never block. None in production.
     pub hold_reader_after: Option<i64>,
     /// Test seam: called after every commit with batches_committed (writer task; must not block).
@@ -45,9 +45,9 @@ pub struct ImportTuning {
 /// Which registered paths one `ImportManager::sync` call looks at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncTarget {
-    /// Every path with `sync_enabled`.
+    /// Every registered path that is not paused.
     All,
-    /// This path, even when disabled (explicit user action).
+    /// This path (a no-op while it is paused).
     One(i64),
 }
 
@@ -79,12 +79,15 @@ impl ImportManager {
     pub async fn sync(&self, target: SyncTarget) -> Result<(), AppError> {
         queue::sync(&self.inner, target).await
     }
-    /// Disabled paths keep their mail; `SyncTarget::All` skips them. A queued or running job is not cancelled.
-    pub async fn set_enabled(&self, pst_id: i64, enabled: bool) -> Result<PstSource, AppError> {
-        queue::set_enabled(&self.inner, pst_id, enabled).await
+    /// Pause (`true`): a running sync stops after the current item and goes back to `queued` (checkpoint kept); no job
+    /// of the path starts and no sync touches it. Resume (`false`): the queued job continues from the checkpoint.
+    pub async fn set_paused(&self, pst_id: i64, paused: bool) -> Result<PstSource, AppError> {
+        queue::set_paused(&self.inner, pst_id, paused).await
     }
-    pub async fn cancel(&self, pst_id: i64) -> Result<(), AppError> {
-        queue::cancel(&self.inner, pst_id).await
+    /// Hides the path from the list and every sync; its mail stays stored, searchable and readable. Registering the
+    /// same path again continues on the same source row (no duplicate messages).
+    pub async fn unregister(&self, pst_id: i64) -> Result<(), AppError> {
+        queue::unregister(&self.inner, pst_id).await
     }
     pub async fn remove(&self, pst_id: i64) -> Result<(), AppError> {
         queue::remove(&self.inner, pst_id).await
@@ -109,7 +112,7 @@ impl ImportManager {
     pub async fn shutdown(&self, timeout: std::time::Duration) -> Result<(), AppError> {
         queue::shutdown(&self.inner, timeout).await
     }
-    /// Every terminal job outcome as (pst_id, status): Completed, Cancelled, Failed, Locked, Queued (after shutdown),
+    /// Every terminal job outcome as (pst_id, status): Completed, Failed, Locked, Queued (after shutdown or pause),
     /// Removing (the removal deleted the source row), Running (test seam `crash_after_batches` dropped the job).
     pub fn job_events(&self) -> broadcast::Receiver<(i64, ImportStatus)> {
         self.inner.events.subscribe()

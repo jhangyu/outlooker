@@ -4,9 +4,9 @@ import type { SyncSchedule } from "../../api/bindings/SyncSchedule";
 /** What the row shows. `disabled` sits on top of the last status, except while a job is live (arch-2 §6 UI state table). */
 export type RowState = "completed" | "queued" | "running" | "cancelling" | "locked" | "failed" | "cancelled" | "removing" | "disabled";
 
-export function rowState(p: Pick<PstSource, "status" | "syncEnabled">): RowState {
+export function rowState(p: Pick<PstSource, "status" | "paused">): RowState {
   const live = p.status === "running" || p.status === "queued" || p.status === "cancelling" || p.status === "removing";
-  return !p.syncEnabled && !live ? "disabled" : p.status;
+  return p.paused && !live ? "disabled" : p.status;
 }
 
 /** Editable form of a schedule. `n`/`unit` only matter for interval, `time`/`days` only for daily. */

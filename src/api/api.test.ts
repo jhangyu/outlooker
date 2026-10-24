@@ -23,8 +23,8 @@ describe("typed API client", () => {
 
   it("passes camelCase arguments and returns the payload", async () => {
     invoke.mockResolvedValueOnce(null);
-    await api.importCancel(7);
-    expect(invoke).toHaveBeenCalledWith("import_cancel", { pstId: 7 });
+    await api.pstUnregister(7);
+    expect(invoke).toHaveBeenCalledWith("pst_unregister", { pstId: 7 });
   });
 
   it("re-throws AppError rejections unchanged and wraps others", async () => {

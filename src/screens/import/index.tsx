@@ -126,7 +126,7 @@ export function ImportScreen() {
     await register();
   });
   const nextRunAt = sync.data?.nextRunAt ?? null;
-  const enabledCount = list.filter((p) => p.syncEnabled).length;
+  const enabledCount = list.filter((p) => !p.paused).length;
   const live = (p: PstSource) => p.status === "running" || p.status === "queued" || p.status === "cancelling" || p.status === "removing";
   const when = (iso: string | null, sub?: string) => (
     <span className={s.when}>
@@ -213,10 +213,10 @@ export function ImportScreen() {
       renderHeaderCell: () => t("col.enabled"),
       renderCell: (p) => (
         <Switch
-          checked={p.syncEnabled}
+          checked={!p.paused}
           aria-label={t("row.enable", { name: p.displayName })}
           data-testid="pst-enabled"
-          onChange={(_, d) => void act(() => api.pstSetEnabled(p.id, d.checked))()}
+          onChange={(_, d) => void act(() => api.pstSetPaused(p.id, !d.checked))()}
         />
       ),
     }),
@@ -336,7 +336,7 @@ export function ImportScreen() {
           <div className={s.scroll}>
             <SidePanel>
               {sync.data ? <ScheduleCard key={JSON.stringify(sync.data.schedule)} status={sync.data} /> : null}
-              <ActivityCard list={list} status={sync.data} onCancel={(id) => void act(() => api.importCancel(id))()} />
+              <ActivityCard list={list} status={sync.data} onCancel={(id) => void act(() => api.pstSetPaused(id, true))()} />
               {sel && (sel.errorCount > 0 || sel.status === "failed") ? <ErrorLogCard key={sel.id} pst={sel} /> : null}
             </SidePanel>
           </div>
