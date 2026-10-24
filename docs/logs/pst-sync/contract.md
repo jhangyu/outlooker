@@ -84,3 +84,30 @@ Kept as-is (user): time-zone change while running needs a restart. Native time i
 as the third side card, no live next-sync preview.
 R7. 11: a test shows a changed reason writes one new row and the same reason writes none. 12/13: `npm test` and
     `npm run build` green; relative-time formatting logic has one unit test (data transform).
+
+## Round 3 (last round of the budget; user decisions 2026-10-24, appended by the user's instruction)
+End state: the round-2 end state, plus the 2 should-fix findings and 4 nits of `docs/logs/pst-sync/review-round2.md`
+fixed, a "Reset database" action on the database-format-error screen, and the dev data root reseeded.
+In scope: review-round2 findings (lines 48-125); the reset action; `outlooker-loadgen/src/load.rs`; `scripts/tmp/demo-root`.
+Out of scope: Windows verification, VSS, mirror sync, per-path schedules, tray/autostart, parking-lot items.
+Overrides of round 2 (they win):
+14. **Reset database**: when the database cannot be opened because its format is wrong (migration failure), the
+    warning screen offers "Reset database". After a confirmation dialog it deletes only the app's database data
+    directory, creates a fresh database, and returns to the first-run flow. It never deletes anything outside that directory.
+15. **Dev data root** `scripts/tmp/demo-root` is deleted without backup (user-approved, random demo mail only) and
+    reseeded by the loadgen with 10,000 messages; loadgen fake sources are written as paused.
+Round-3 acceptance (on main after merge):
+R8. Same-job error rows: a regression test pauses mid-job, changes the file, resumes, and asserts the error row count
+    does not grow (seen red, then green), ≤ 1 s.
+R9. Stalled probe: a test shows that while one path's probe is blocked, the next tick syncs the other paths and
+    `Scheduler::stop` returns at once; one sync per path at a time.
+R10. Nits: Pause/Unregister during the probe queues no job; Delete is disabled while a sync runs; a failed removal
+    offers Delete instead of Retry; the `\\?\` strip counts UTF-16 units. Each verified (run output); tests only for core logic.
+R11. Reset: on a migration failure the warning screen shows the reset button; after confirmation the DB is empty and
+    usable and the app is at first run; one test (data integrity/safety: only the data directory is deleted).
+    One fresh red-team review of the reset finds no blocker.
+R12. `scripts/tmp/demo-root` reseeded with 10,000 messages; Import screen shows the fake sources as Paused, not failed.
+R13. Whole tree on main: clippy clean; `cargo test --workspace` (lib, it, cluster_lifecycle) green; `cargo build --release`
+    0 `^warning:` lines; `npm test` and `npm run build` green; each gate log holds `RC=$?` and the commit hash.
+R14. Real-app check by the user: register `tests/fixtures/external/outlook.pst`, Sync now → completed; schedule change
+    updates next sync; splitter resize; Pause/Resume/Unregister/Delete; reading-pane images fit; reset flow.
