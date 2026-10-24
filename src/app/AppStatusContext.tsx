@@ -34,7 +34,8 @@ export function AppStatusProvider(props: {
     props.apiRef,
     () => ({
       setStatus: (next) => {
-        if (next.phase === "needsSetup") setOnboarding(true);
+        // A database reset re-creates the cluster: the wizard reopens at its create-database step.
+        if (next.phase === "needsSetup" || next.phase === "initializingCluster") setOnboarding(true);
         // The core sends zero counts outside Ready (Part 03 §4); keep the last known counts.
         setStatus((prev) => (next.phase === "ready" ? next : { ...next, counts: prev.counts }));
       },

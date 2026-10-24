@@ -71,6 +71,7 @@ pub fn run() {
             commands::app::app_status,
             commands::app::app_initialize,
             commands::app::app_retry,
+            commands::app::app_reset_database,
             commands::search::search_mail,
             commands::search::search_count,
             commands::search::filter_options,

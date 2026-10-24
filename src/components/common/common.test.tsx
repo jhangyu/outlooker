@@ -20,6 +20,7 @@ const ERRORS: AppError[] = [
   { kind: "fileAccess", path: "/x", reason: "insufficientSpace" },
   { kind: "notAPst", path: "/x.pst" },
   { kind: "alreadyImported", pstId: 3 },
+  { kind: "incompatibleDatabase", detail: "migration failed" },
   { kind: "internal", detail: "boom" },
 ];
 

@@ -91,7 +91,13 @@ pub async fn migrate(admin: &mut tokio_postgres::Client, creds: &Credentials) ->
     embedded::migrations::runner()
         .run_async(admin)
         .await
-        .map_err(|e| AppError::internal(format!("migration failed: {e}")))?;
+        .map_err(|e| match e.kind() {
+            // The database was migrated by a build whose migrations differ from this one.
+            refinery::error::Kind::DivergentVersion(..) | refinery::error::Kind::MissingVersion(..) => {
+                AppError::incompatible(format!("migration failed: {e}"))
+            }
+            _ => AppError::internal(format!("migration failed: {e}")),
+        })?;
     admin
         .batch_execute(&format!(
             "ALTER ROLE outlooker_app PASSWORD '{}'; ALTER ROLE outlooker_ro PASSWORD '{}';",
