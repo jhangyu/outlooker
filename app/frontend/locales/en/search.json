@@ -18,7 +18,7 @@
     "fromDay": "From",
     "toDay": "To (inclusive)",
     "pickFolder": "Choose a folder",
-    "pickPst": "Choose PST files",
+    "pickPst": "Choose PST/OST files",
     "includeSubfolders": "Include subfolders",
     "yes": "Yes",
     "no": "No",

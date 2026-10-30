@@ -18,7 +18,7 @@
     "fromDay": "起",
     "toDay": "迄（含當日）",
     "pickFolder": "選擇資料夾",
-    "pickPst": "選擇 PST 檔",
+    "pickPst": "選擇 PST/OST 檔",
     "includeSubfolders": "包含子資料夾",
     "yes": "是",
     "no": "否",

@@ -1,6 +1,6 @@
 {
   "title": "Import and sync",
-  "add": "Add PST path…",
+  "add": "Add PST/OST path…",
   "syncAll": "Sync all now",
   "stats": { "messages": "Messages", "psts": "PST paths", "size": "Database size", "unknown": "—" },
   "paths": { "title": "Registered PST paths", "summary": "{{n}} paths · {{active}} active", "note": "Sync only adds mail. Mail deleted or moved in Outlook is kept." },
@@ -50,7 +50,7 @@
   },
   "log": { "title": "Error log", "none": "No errors or warnings for this PST path.", "more": "Load more", "item": "Item {{id}}" },
   "stage": { "open": "Open", "scan": "Scan", "parse": "Parse", "html": "Content", "image": "Image", "store": "Store" },
-  "empty": { "title": "No PST path registered", "body": "Add the path of an Outlook PST file. Outlooker imports it fully once, then only brings in new mail on the schedule." },
+  "empty": { "title": "No PST path registered", "body": "Add the path of an Outlook PST or OST file. Outlooker imports it fully once, then only brings in new mail on the schedule." },
   "remove": {
     "title": "Delete “{{name}}”?",
     "body": "This PST file brought {{n}} messages. Messages that exist only in this PST file are deleted. Messages also found in other PST files are kept. The PST file itself is not changed.",

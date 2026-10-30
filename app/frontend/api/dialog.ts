@@ -12,13 +12,13 @@ function nextE2ePick(): string[] | string | null {
   return window.__outlookerE2ePicks?.shift() ?? null;
 }
 
-/** Native "Open PST" picker (spec Part 03 §2). The core re-validates every path. */
+/** Native "Open PST/OST" picker (spec Part 03 §2). The core re-validates every path. */
 export async function pickPstFiles(): Promise<string[]> {
   if (E2E) {
     const pick = nextE2ePick();
     return Array.isArray(pick) ? pick : pick ? [pick] : [];
   }
-  const chosen = await open({ multiple: true, directory: false, filters: [{ name: "Outlook PST", extensions: ["pst"] }] });
+  const chosen = await open({ multiple: true, directory: false, filters: [{ name: "Outlook PST/OST", extensions: ["pst", "ost"] }] });
   return chosen === null ? [] : Array.isArray(chosen) ? chosen : [chosen];
 }
 

@@ -12,7 +12,7 @@
     "otherHint": "For example an external or larger drive"
   },
   "database": { "heading": "Preparing the local database", "body": "This happens once and takes about 20 seconds.", "create": "Create database cluster", "start": "Start database service", "ready": "The database is ready." },
-  "import": { "heading": "Import your first PST", "body": "Import runs in the background. You can search what is already imported while it runs.", "pick": "Choose PST files…", "later": "Import later" },
+  "import": { "heading": "Import your first PST", "body": "Import runs in the background. You can search what is already imported while it runs.", "pick": "Choose PST/OST files…", "later": "Import later" },
   "nav": { "back": "Back", "next": "Next" },
   "feature": {
     "title": "What Outlooker does",

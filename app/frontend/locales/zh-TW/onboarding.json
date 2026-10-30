@@ -12,7 +12,7 @@
     "otherHint": "例如外接或容量較大的磁碟"
   },
   "database": { "heading": "正在準備本機資料庫", "body": "只需要進行一次，大約 20 秒。", "create": "建立資料庫叢集", "start": "啟動資料庫服務", "ready": "資料庫已就緒。" },
-  "import": { "heading": "匯入你的第一個 PST", "body": "匯入在背景進行，進行中也可以搜尋已匯入的郵件。", "pick": "選擇 PST 檔案…", "later": "稍後再匯入" },
+  "import": { "heading": "匯入你的第一個 PST", "body": "匯入在背景進行，進行中也可以搜尋已匯入的郵件。", "pick": "選擇 PST/OST 檔案…", "later": "稍後再匯入" },
   "nav": { "back": "上一步", "next": "下一步" },
   "feature": {
     "title": "Outlooker 能做什麼",

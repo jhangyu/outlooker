@@ -1,6 +1,6 @@
 {
   "title": "匯入與同步",
-  "add": "加入 PST 路徑…",
+  "add": "加入 PST/OST 路徑…",
   "syncAll": "全部立即同步",
   "stats": { "messages": "郵件", "psts": "PST 路徑", "size": "資料庫大小", "unknown": "—" },
   "paths": { "title": "已登錄的 PST 路徑", "summary": "{{n}} 個 · {{active}} 個運作中", "note": "同步只新增郵件；在 Outlook 刪除或移動的郵件會保留。" },
@@ -50,7 +50,7 @@
   },
   "log": { "title": "錯誤紀錄", "none": "這個 PST 路徑沒有錯誤或警告。", "more": "載入更多", "item": "項目 {{id}}" },
   "stage": { "open": "開啟", "scan": "掃描", "parse": "解析", "html": "內容", "image": "圖片", "store": "儲存" },
-  "empty": { "title": "尚未登錄任何 PST 路徑", "body": "加入 Outlook PST 檔案的路徑。Outlooker 會先完整匯入一次，之後依排程只帶入新郵件。" },
+  "empty": { "title": "尚未登錄任何 PST 路徑", "body": "加入 Outlook PST 或 OST 檔案的路徑。Outlooker 會先完整匯入一次，之後依排程只帶入新郵件。" },
   "remove": {
     "title": "刪除「{{name}}」？",
     "body": "這個 PST 檔案帶入了 {{n}} 封郵件。只存在於這個 PST 的郵件會被刪除；也存在於其他 PST 的郵件會保留。PST 檔案本身不會被修改。",
