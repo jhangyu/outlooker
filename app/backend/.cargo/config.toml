@@ -4,6 +4,9 @@ TS_RS_LARGE_INT = "number"
 CARGO_TEST_RUNNER_JS = { value = "../scripts/cargo-test-runner.mjs", relative = true }
 # 4 libtest threads: faster than the 28-thread default on the shared PostgreSQL cluster and within SysV shm limits.
 RUST_TEST_THREADS = "4"
+# tauri CLI exports bundle.macOS.minimumSystemVersion (default 10.13); cc build scripts track it, so plain cargo
+# without it rebuilt ~40 crates after every tauri build and back. Not forced: tauri's value wins if the config sets one.
+MACOSX_DEPLOYMENT_TARGET = "10.13"
 
 # Per-test time cap and the shared test PostgreSQL boot (CLAUDE.md "Test policy"); other binaries pass through unchanged.
 [target.'cfg(all())']

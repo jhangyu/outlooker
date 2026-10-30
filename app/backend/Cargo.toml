@@ -37,6 +37,17 @@ outlooker-core = { path = "crates/outlooker-core" }
 [features]
 e2e = ["dep:tauri-plugin-wdio-webdriver"]
 
+# macOS default "unpacked" keeps every codegen-unit .o in target/debug/deps for the debugger, and incremental rebuilds
+# of workspace crates leave the previous generation behind. "packed" writes one .dSYM per binary instead. Set on
+# [profile.dev] so dependencies and build-override inherit it.
+[profile.dev]
+split-debuginfo = "packed"
+
 # Dependencies optimized in dev/test builds: loadgen and unit tests 30.7 s -> 3.7 s, keeps gates under the foreground timeout.
 [profile.dev.package."*"]
 opt-level = 3
+
+# Build scripts, proc macros and their deps: without an explicit value cargo strips their debuginfo unless the same
+# crate is also a normal dep in that command, so build, clippy, test and examples each compiled their own copy.
+[profile.dev.build-override]
+debug = true
