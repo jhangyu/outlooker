@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 pff = { path = "../pff" }
 serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = { workspace = true, features = ["float_roundtrip"] }  # jsonschema (dev-dep) enables it; match so build and test share one artifact set
+serde_json = { workspace = true }
 thiserror = "=2.0.21"
 log = { workspace = true }
 ts-rs = "=12.0.1"
@@ -30,7 +30,6 @@ time = { version = "=0.3.55", features = ["local-offset"] }
 tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
-jsonschema = { version = "=0.59.0", default-features = false }
 tempfile = { workspace = true }
 
 [features]
